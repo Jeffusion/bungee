@@ -9,11 +9,12 @@
  * - 响应：Gemini → OpenAI chat.completion
  */
 
-import type { Plugin, PluginContext, StreamChunkContext } from '../../plugin.types';
+import type { AIConverter } from './base';
+import type { PluginContext, StreamChunkContext } from '../../../plugin.types';
 
-export class OpenAIToGeminiPlugin implements Plugin {
-  name = 'openai-to-gemini';
-  version = '1.0.0';
+export class OpenAIToGeminiConverter implements AIConverter {
+  readonly from = 'openai';
+  readonly to = 'gemini';
 
   /**
    * Model-specific max output tokens mapping (based on official Gemini API documentation)
@@ -434,4 +435,3 @@ export class OpenAIToGeminiPlugin implements Plugin {
   }
 }
 
-export default OpenAIToGeminiPlugin;

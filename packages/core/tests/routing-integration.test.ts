@@ -16,7 +16,7 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
 import type { AppConfig } from '@jeffusion/bungee-types';
 import type { PluginContext } from '../src/plugin.types';
-import { OpenAIToAnthropicPlugin } from '../src/plugins/transformers/openai-to-anthropic.plugin';
+import { AITransformerPlugin } from '../src/plugins/ai-transformer';
 import { handleRequest, initializeRuntimeState, initializePluginRegistryForTests, cleanupPluginRegistry } from '../src/worker';
 
 // Mock config for routing tests
@@ -25,19 +25,43 @@ const mockConfig: AppConfig = {
     {
       path: '/v1/anthropic-proxy',
       pathRewrite: { '^/v1/anthropic-proxy': '/v1' },
-      plugins: ['anthropic-to-openai'],
+      plugins: [
+        {
+          name: 'ai-transformer',
+          options: {
+            from: 'anthropic',
+            to: 'openai'
+          }
+        }
+      ],
       upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
     },
     {
       path: '/v1/openai-proxy',
       pathRewrite: { '^/v1/openai-proxy': '/v1' },
-      plugins: ['openai-to-anthropic'],
+      plugins: [
+        {
+          name: 'ai-transformer',
+          options: {
+            from: 'openai',
+            to: 'anthropic'
+          }
+        }
+      ],
       upstreams: [{ target: 'http://mock-anthropic.com', weight: 100, priority: 1 }],
     },
     {
       path: '/v1/gemini-proxy',
       pathRewrite: { '^/v1/gemini-proxy': '/v1' },
-      plugins: ['anthropic-to-gemini'],
+      plugins: [
+        {
+          name: 'ai-transformer',
+          options: {
+            from: 'anthropic',
+            to: 'gemini'
+          }
+        }
+      ],
       upstreams: [{ target: 'http://mock-gemini.com', weight: 100, priority: 1 }],
     },
     {
@@ -155,7 +179,15 @@ describe('Path Rewrite Functionality', () => {
         {
           path: '/api',
           pathRewrite: { '^/api': '' }, // Strips /api prefix
-          plugins: ['anthropic-to-openai'], // Expects to match on the rewritten path
+          plugins: [
+            {
+              name: 'ai-transformer',
+              options: {
+                from: 'anthropic',
+                to: 'openai'
+              }
+            }
+          ], // Expects to match on the rewritten path
           upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
         },
       ],
@@ -519,7 +551,10 @@ describe('Streaming Response - Detailed SSE Event Testing', () => {
 });
 
 describe('Environment Variable Validation', () => {
-  const plugin = new OpenAIToAnthropicPlugin();
+  const plugin = new AITransformerPlugin({
+    from: 'openai',
+    to: 'anthropic'
+  });
 
   const buildContext = (body: any): PluginContext => ({
     method: 'POST',

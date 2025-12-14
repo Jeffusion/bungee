@@ -1,9 +1,11 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { PluginRegistry } from '../src/plugin-registry';
+import { initializePluginContextManager } from '../src/plugin-context-manager';
 import type { PluginContext } from '../src/plugin.types';
 import type { PluginConfig } from '@jeffusion/bungee-types';
 import * as fs from 'fs';
 import * as path from 'path';
+import { Database } from 'bun:sqlite';
 
 // 创建测试用的临时 plugin 文件
 const TEST_PLUGINS_DIR = path.join(import.meta.dir, 'temp-plugins');
@@ -60,8 +62,31 @@ export default ErrorPlugin;
 
 describe('PluginRegistry', () => {
   let registry: PluginRegistry;
+  let testDb: Database;
 
   beforeEach(() => {
+    // 创建临时测试数据库
+    const testDbPath = path.join(import.meta.dir, 'temp-plugins', 'test.db');
+    if (!fs.existsSync(path.dirname(testDbPath))) {
+      fs.mkdirSync(path.dirname(testDbPath), { recursive: true });
+    }
+    testDb = new Database(testDbPath);
+
+    // 创建 plugin_storage 表
+    testDb.run(`
+      CREATE TABLE IF NOT EXISTS plugin_storage (
+        plugin_name TEXT NOT NULL,
+        key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        ttl INTEGER,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (plugin_name, key)
+      )
+    `);
+
+    // 初始化 PluginContextManager
+    initializePluginContextManager(testDb);
+
     // 创建临时测试目录
     if (!fs.existsSync(TEST_PLUGINS_DIR)) {
       fs.mkdirSync(TEST_PLUGINS_DIR, { recursive: true });
@@ -88,6 +113,11 @@ describe('PluginRegistry', () => {
     // 清理
     await registry.unloadAll();
 
+    // 关闭数据库
+    if (testDb) {
+      testDb.close();
+    }
+
     // 删除临时文件
     if (fs.existsSync(TEST_PLUGINS_DIR)) {
       fs.rmSync(TEST_PLUGINS_DIR, { recursive: true, force: true });
@@ -97,6 +127,7 @@ describe('PluginRegistry', () => {
   describe('loadPlugin', () => {
     test('should load a plugin from file path', async () => {
       const config: PluginConfig = {
+        name: 'simple',
         path: 'simple.plugin.ts',
         enabled: true
       };
@@ -112,6 +143,7 @@ describe('PluginRegistry', () => {
     test('should load plugin with absolute path', async () => {
       const absolutePath = path.join(TEST_PLUGINS_DIR, 'simple.plugin.ts');
       const config: PluginConfig = {
+        name: 'simple-absolute',
         path: absolutePath,
         enabled: true
       };
@@ -124,6 +156,7 @@ describe('PluginRegistry', () => {
 
     test('should pass options to plugin constructor', async () => {
       const config: PluginConfig = {
+        name: 'simple-with-options',
         path: 'simple.plugin.ts',
         options: {
           testOption: 'test-value'
@@ -138,6 +171,7 @@ describe('PluginRegistry', () => {
 
     test('should respect enabled flag', async () => {
       const config: PluginConfig = {
+        name: 'simple-disabled',
         path: 'simple.plugin.ts',
         enabled: false
       };
@@ -152,8 +186,8 @@ describe('PluginRegistry', () => {
   describe('loadPlugins', () => {
     test('should load multiple plugins', async () => {
       const configs: PluginConfig[] = [
-        { path: 'simple.plugin.ts' },
-        { path: 'interceptor.plugin.ts' }
+        { name: 'simple', path: 'simple.plugin.ts' },
+        { name: 'interceptor', path: 'interceptor.plugin.ts' }
       ];
 
       await registry.loadPlugins(configs);
@@ -164,9 +198,9 @@ describe('PluginRegistry', () => {
 
     test('should continue loading on error', async () => {
       const configs: PluginConfig[] = [
-        { path: 'simple.plugin.ts' },
-        { path: 'non-existent.plugin.ts' }, // 这个会失败
-        { path: 'interceptor.plugin.ts' }
+        { name: 'simple', path: 'simple.plugin.ts' },
+        { name: 'non-existent', path: 'non-existent.plugin.ts' }, // 这个会失败
+        { name: 'interceptor', path: 'interceptor.plugin.ts' }
       ];
 
       await registry.loadPlugins(configs);
@@ -180,8 +214,8 @@ describe('PluginRegistry', () => {
   describe('getEnabledPlugins', () => {
     test('should return only enabled plugins', async () => {
       await registry.loadPlugins([
-        { path: 'simple.plugin.ts', enabled: true },
-        { path: 'interceptor.plugin.ts', enabled: false }
+        { name: 'simple', path: 'simple.plugin.ts', enabled: true },
+        { name: 'interceptor', path: 'interceptor.plugin.ts', enabled: false }
       ]);
 
       const plugins = registry.getEnabledPlugins();
@@ -191,8 +225,8 @@ describe('PluginRegistry', () => {
 
     test('should return all plugins when all are enabled', async () => {
       await registry.loadPlugins([
-        { path: 'simple.plugin.ts' },
-        { path: 'interceptor.plugin.ts' }
+        { name: 'simple', path: 'simple.plugin.ts' },
+        { name: 'interceptor', path: 'interceptor.plugin.ts' }
       ]);
 
       const plugins = registry.getEnabledPlugins();
@@ -203,6 +237,7 @@ describe('PluginRegistry', () => {
   describe('enablePlugin / disablePlugin', () => {
     test('should enable a disabled plugin', async () => {
       await registry.loadPlugin({
+        name: 'simple',
         path: 'simple.plugin.ts',
         enabled: false
       });
@@ -216,6 +251,7 @@ describe('PluginRegistry', () => {
 
     test('should disable an enabled plugin', async () => {
       await registry.loadPlugin({
+        name: 'simple',
         path: 'simple.plugin.ts',
         enabled: true
       });
@@ -235,7 +271,7 @@ describe('PluginRegistry', () => {
 
   describe('executeOnRequestInit', () => {
     test('should execute onRequestInit hook', async () => {
-      await registry.loadPlugin({ path: 'simple.plugin.ts' });
+      await registry.loadPlugin({ name: 'simple', path: 'simple.plugin.ts' });
 
       const context: PluginContext = {
         method: 'GET',
@@ -251,7 +287,7 @@ describe('PluginRegistry', () => {
     });
 
     test('should handle errors in onRequestInit gracefully', async () => {
-      await registry.loadPlugin({ path: 'error.plugin.ts' });
+      await registry.loadPlugin({ name: 'error', path: 'error.plugin.ts' });
 
       const context: PluginContext = {
         method: 'GET',
@@ -268,7 +304,7 @@ describe('PluginRegistry', () => {
 
   describe('executeOnInterceptRequest', () => {
     test('should return null if no plugin intercepts', async () => {
-      await registry.loadPlugin({ path: 'interceptor.plugin.ts' });
+      await registry.loadPlugin({ name: 'interceptor', path: 'interceptor.plugin.ts' });
 
       const context: PluginContext = {
         method: 'GET',
@@ -283,7 +319,7 @@ describe('PluginRegistry', () => {
     });
 
     test('should return response if plugin intercepts', async () => {
-      await registry.loadPlugin({ path: 'interceptor.plugin.ts' });
+      await registry.loadPlugin({ name: 'interceptor', path: 'interceptor.plugin.ts' });
 
       const context: PluginContext = {
         method: 'GET',
@@ -317,8 +353,8 @@ describe('PluginRegistry', () => {
       );
 
       await registry.loadPlugins([
-        { path: 'interceptor.plugin.ts' },
-        { path: 'second-interceptor.plugin.ts' }
+        { name: 'interceptor', path: 'interceptor.plugin.ts' },
+        { name: 'second-interceptor', path: 'second-interceptor.plugin.ts' }
       ]);
 
       const context: PluginContext = {
@@ -339,7 +375,7 @@ describe('PluginRegistry', () => {
 
   describe('executePluginOnRequestInit', () => {
     test('should execute specific plugin onRequestInit hook', async () => {
-      await registry.loadPlugin({ path: 'simple.plugin.ts' });
+      await registry.loadPlugin({ name: 'simple', path: 'simple.plugin.ts' });
 
       const context: PluginContext = {
         method: 'GET',
@@ -369,7 +405,7 @@ describe('PluginRegistry', () => {
     });
 
     test('should handle errors in hook gracefully', async () => {
-      await registry.loadPlugin({ path: 'error.plugin.ts' });
+      await registry.loadPlugin({ name: 'error', path: 'error.plugin.ts' });
 
       const context: PluginContext = {
         method: 'GET',
@@ -387,7 +423,7 @@ describe('PluginRegistry', () => {
 
   describe('executePluginOnInterceptRequest', () => {
     test('should execute specific plugin onInterceptRequest hook', async () => {
-      await registry.loadPlugin({ path: 'interceptor.plugin.ts' });
+      await registry.loadPlugin({ name: 'interceptor', path: 'interceptor.plugin.ts' });
 
       const context: PluginContext = {
         method: 'GET',
@@ -406,7 +442,7 @@ describe('PluginRegistry', () => {
     });
 
     test('should return null if plugin does not intercept', async () => {
-      await registry.loadPlugin({ path: 'interceptor.plugin.ts' });
+      await registry.loadPlugin({ name: 'interceptor', path: 'interceptor.plugin.ts' });
 
       const context: PluginContext = {
         method: 'GET',
@@ -450,7 +486,7 @@ describe('PluginRegistry', () => {
         beforeRequestPluginCode
       );
 
-      await registry.loadPlugin({ path: 'before-request.plugin.ts' });
+      await registry.loadPlugin({ name: 'before-request', path: 'before-request.plugin.ts' });
 
       const context: PluginContext = {
         method: 'GET',
@@ -503,7 +539,7 @@ describe('PluginRegistry', () => {
         responsePluginCode
       );
 
-      await registry.loadPlugin({ path: 'response.plugin.ts' });
+      await registry.loadPlugin({ name: 'response', path: 'response.plugin.ts' });
 
       const originalResponse = new Response('original body', { status: 200 });
       const context: PluginContext & { response: Response } = {
@@ -539,7 +575,7 @@ describe('PluginRegistry', () => {
         passthroughPluginCode
       );
 
-      await registry.loadPlugin({ path: 'passthrough.plugin.ts' });
+      await registry.loadPlugin({ name: 'passthrough', path: 'passthrough.plugin.ts' });
 
       const originalResponse = new Response('original', { status: 200 });
       const context: PluginContext & { response: Response } = {
@@ -587,7 +623,7 @@ describe('PluginRegistry', () => {
         errorHandlerPluginCode
       );
 
-      await registry.loadPlugin({ path: 'error-handler.plugin.ts' });
+      await registry.loadPlugin({ name: 'error-handler', path: 'error-handler.plugin.ts' });
 
       const testError = new Error('Test error');
       const context: PluginContext & { error: Error } = {
@@ -638,7 +674,7 @@ describe('PluginRegistry', () => {
         destroyTrackerCode
       );
 
-      await registry.loadPlugin({ path: 'destroy-tracker.plugin.ts' });
+      await registry.loadPlugin({ name: 'destroy-tracker', path: 'destroy-tracker.plugin.ts' });
 
       (global as any).pluginDestroyed = false;
       await registry.unloadAll();
@@ -649,8 +685,8 @@ describe('PluginRegistry', () => {
 
     test('should clear all plugins', async () => {
       await registry.loadPlugins([
-        { path: 'simple.plugin.ts' },
-        { path: 'interceptor.plugin.ts' }
+        { name: 'simple', path: 'simple.plugin.ts' },
+        { name: 'interceptor', path: 'interceptor.plugin.ts' }
       ]);
 
       expect(registry.getEnabledPlugins().length).toBe(2);
@@ -667,16 +703,16 @@ describe('PluginRegistry', () => {
       const srcPath = path.join(import.meta.dir, '..', 'src');
       const prodRegistry = new PluginRegistry(srcPath);
 
-      const pluginName = await prodRegistry.loadTransformerPlugin('anthropic-to-gemini');
+      const pluginName = await prodRegistry.loadTransformerPlugin('anthropic-filter-error-tool-results');
 
       expect(pluginName).toBeDefined();
-      expect(pluginName).toBe('anthropic-to-gemini');
+      expect(pluginName).toBe('anthropic-filter-error-tool-results');
 
       // Verify the plugin is loaded by acquiring an instance
       const result = await prodRegistry.acquirePluginInstances([pluginName]);
       expect(result.plugins.length).toBe(1);
-      expect(result.plugins[0].name).toBe('anthropic-to-gemini');
-      expect(result.plugins[0].processStreamChunk).toBeDefined();
+      expect(result.plugins[0].name).toBe('anthropic-filter-error-tool-results');
+      expect(result.plugins[0].onBeforeRequest).toBeDefined();
 
       await result.release();
       await prodRegistry.unloadAll();
@@ -686,12 +722,12 @@ describe('PluginRegistry', () => {
       const srcPath = path.join(import.meta.dir, '..', 'src');
       const prodRegistry = new PluginRegistry(srcPath);
 
-      const pluginName1 = await prodRegistry.loadTransformerPlugin('anthropic-to-gemini');
-      const pluginName2 = await prodRegistry.loadTransformerPlugin('anthropic-to-gemini');
+      const pluginName1 = await prodRegistry.loadTransformerPlugin('anthropic-filter-error-tool-results');
+      const pluginName2 = await prodRegistry.loadTransformerPlugin('anthropic-filter-error-tool-results');
 
       // Both calls should return the same plugin name
       expect(pluginName1).toBe(pluginName2);
-      expect(pluginName1).toBe('anthropic-to-gemini');
+      expect(pluginName1).toBe('anthropic-filter-error-tool-results');
 
       // But acquiring instances should return different instances (per-request pattern)
       const result1 = await prodRegistry.acquirePluginInstances([pluginName1]);

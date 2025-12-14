@@ -110,26 +110,32 @@ interface Logger {
   debug(msg: string): void;
   fatal(obj: LoggerContext, msg?: string): void;
   fatal(msg: string): void;
+  child(bindings: LoggerContext): Logger;
 }
 
 // 创建兼容 pino API 的包装器
-function createLogMethod(level: string) {
+function createLogMethod(level: string, defaultMeta: LoggerContext = {}) {
   return function(objOrMsg: LoggerContext | string, msg?: string) {
     if (typeof objOrMsg === 'string') {
       // logger.info('message') 形式
-      winstonLogger.log(level, objOrMsg);
+      winstonLogger.log(level, objOrMsg, defaultMeta);
     } else {
       // logger.info({ key: value }, 'message') 形式
       const message = msg || '';
-      winstonLogger.log(level, message, objOrMsg);
+      winstonLogger.log(level, message, { ...defaultMeta, ...objOrMsg });
     }
   };
 }
 
-export const logger: Logger = {
-  info: createLogMethod('info'),
-  warn: createLogMethod('warn'),
-  error: createLogMethod('error'),
-  debug: createLogMethod('debug'),
-  fatal: createLogMethod('error'), // winston doesn't have fatal, map to error
-};
+function createLogger(defaultMeta: LoggerContext = {}): Logger {
+  return {
+    info: createLogMethod('info', defaultMeta),
+    warn: createLogMethod('warn', defaultMeta),
+    error: createLogMethod('error', defaultMeta),
+    debug: createLogMethod('debug', defaultMeta),
+    fatal: createLogMethod('error', defaultMeta), // winston doesn't have fatal, map to error
+    child: (bindings: LoggerContext) => createLogger({ ...defaultMeta, ...bindings }),
+  };
+}
+
+export const logger: Logger = createLogger();

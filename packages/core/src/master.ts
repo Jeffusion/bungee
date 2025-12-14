@@ -6,6 +6,9 @@ import { logCleanupService } from "./logger/log-cleanup";
 import { MigrationManager } from "./migrations";
 import { loadConfig } from "./config";
 import dotenv from "dotenv";
+import { PluginStorageCleanupService } from "./plugin-storage-cleanup";
+import { Database } from "bun:sqlite";
+import { initializePermissionManager } from "./plugin-permissions";
 
 // Load environment variables from .env file
 dotenv.config();
@@ -29,6 +32,7 @@ class Master {
   private config: any;
   private isReloading = false;
   private reloadTimeout: NodeJS.Timeout | null = null;
+  private pluginStorageCleanupService: PluginStorageCleanupService | null = null;
 
   constructor() {
     this.loadAndStart();
@@ -69,6 +73,20 @@ class Master {
       } else {
         logger.info("Database migrations completed successfully");
       }
+
+      // === 启动插件存储清理服务 ===
+      const db = new Database(dbPath);
+      this.pluginStorageCleanupService = new PluginStorageCleanupService(db, {
+        enabled: true,
+        interval: 3600000, // 1小时
+        batchSize: 1000,
+        vacuumAfterCleanup: false,
+      });
+      this.pluginStorageCleanupService.start();
+
+      // === 初始化插件权限管理器 ===
+      initializePermissionManager();
+      logger.info("Plugin permission manager initialized");
 
       await this.startWorkers();
     } catch (error) {
@@ -370,6 +388,11 @@ class Master {
 
     // 停止日志清理服务
     logCleanupService.stop();
+
+    // 停止插件存储清理服务
+    if (this.pluginStorageCleanupService) {
+      this.pluginStorageCleanupService.stop();
+    }
   }
 }
 

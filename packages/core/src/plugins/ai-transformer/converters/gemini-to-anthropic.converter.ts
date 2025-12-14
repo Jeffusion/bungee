@@ -12,7 +12,8 @@
  * - 响应：Anthropic 增量 SSE → Gemini 累积 SSE
  */
 
-import type { Plugin, PluginContext, StreamChunkContext } from '../../plugin.types';
+import type { AIConverter } from './base';
+import type { PluginContext, StreamChunkContext } from '../../../plugin.types';
 
 interface GeminiPart {
   text?: string;
@@ -55,9 +56,9 @@ interface AnthropicMessage {
   }>;
 }
 
-export class GeminiToAnthropicPlugin implements Plugin {
-  name = 'gemini-to-anthropic';
-  version = '1.0.0';
+export class GeminiToAnthropicConverter implements AIConverter {
+  readonly from = 'gemini';
+  readonly to = 'anthropic';
 
   /**
    * 修改请求 URL 和 body，转换为 Anthropic 格式
@@ -519,4 +520,3 @@ export class GeminiToAnthropicPlugin implements Plugin {
   }
 }
 
-export default GeminiToAnthropicPlugin;

@@ -1,9 +1,9 @@
 /**
- * Anthropic to OpenAI Plugin
+ * Anthropic to OpenAI Converter
  *
  * 将 Anthropic Messages API 格式转换为 OpenAI Chat Completions API 格式
  *
- * 按文档 3.1.1 → OpenAI 规范实现：
+ * 转换规则：
  * - 请求：/v1/messages → /v1/chat/completions
  * - 请求：system → messages[0] (role=system)
  * - 请求：tool_result → tool role, tool_use → tool_calls
@@ -12,11 +12,17 @@
  * - 响应：OpenAI SSE → Anthropic SSE 事件序列
  */
 
-import type { Plugin, PluginContext, StreamChunkContext } from '../../plugin.types';
+import type { AIConverter } from './base';
+import type { PluginContext, StreamChunkContext } from '../../../plugin.types';
+import {
+  generateAnthropicMessageId,
+  parseThinkingTags,
+  mapOpenAIFinishReasonToAnthropic
+} from './utils';
 
-export class AnthropicToOpenAIPlugin implements Plugin {
-  name = 'anthropic-to-openai';
-  version = '1.0.0';
+export class AnthropicToOpenAIConverter implements AIConverter {
+  readonly from = 'anthropic';
+  readonly to = 'openai';
 
   /**
    * 修改请求：转换为 OpenAI Chat Completions 格式
@@ -40,7 +46,7 @@ export class AnthropicToOpenAIPlugin implements Plugin {
   }
 
   /**
-   * 构建 OpenAI 请求 - 按文档 3.1.1 实现
+   * 构建 OpenAI 请求
    */
   private buildOpenAIRequest(anthropicBody: any): any {
     const openaiBody: any = {};
@@ -51,7 +57,7 @@ export class AnthropicToOpenAIPlugin implements Plugin {
     // Messages
     const messages: any[] = [];
 
-    // 1. System message - 按文档 Line 97
+    // 1. System message
     if (anthropicBody.system) {
       messages.push({
         role: 'system',
@@ -59,7 +65,7 @@ export class AnthropicToOpenAIPlugin implements Plugin {
       });
     }
 
-    // 2. Convert Anthropic messages - 按文档 Line 98-101
+    // 2. Convert Anthropic messages
     if (anthropicBody.messages) {
       for (const msg of anthropicBody.messages) {
         if (msg.role === 'user') {
@@ -72,8 +78,7 @@ export class AnthropicToOpenAIPlugin implements Plugin {
 
     openaiBody.messages = messages;
 
-    // 3. Parameters mapping - 按文档 Line 102
-    // 支持旧格式 max_tokens_to_sample
+    // 3. Parameters mapping
     const maxTokens = anthropicBody.max_tokens || anthropicBody.max_tokens_to_sample;
     if (maxTokens !== undefined) {
       openaiBody.max_tokens = maxTokens;
@@ -87,7 +92,7 @@ export class AnthropicToOpenAIPlugin implements Plugin {
       openaiBody.top_p = anthropicBody.top_p;
     }
 
-    // stop_sequences → stop (数组)
+    // stop_sequences → stop
     if (anthropicBody.stop_sequences) {
       openaiBody.stop = anthropicBody.stop_sequences;
     }
@@ -96,7 +101,7 @@ export class AnthropicToOpenAIPlugin implements Plugin {
       openaiBody.stream = anthropicBody.stream;
     }
 
-    // 4. Tools conversion - 按文档 Line 102
+    // 4. Tools conversion
     if (anthropicBody.tools) {
       openaiBody.tools = anthropicBody.tools.map((tool: any) => ({
         type: 'function',
@@ -108,16 +113,14 @@ export class AnthropicToOpenAIPlugin implements Plugin {
       }));
     }
 
-    // 5. Thinking mode - 按文档 Line 103-105
+    // 5. Thinking mode
     if (anthropicBody.thinking && anthropicBody.thinking.type === 'enabled') {
       const budgetTokens = anthropicBody.thinking.budget_tokens;
 
       if (budgetTokens !== undefined) {
-        // 读取阈值环境变量
         const lowThreshold = parseInt(process.env.ANTHROPIC_TO_OPENAI_LOW_REASONING_THRESHOLD || '0');
         const highThreshold = parseInt(process.env.ANTHROPIC_TO_OPENAI_HIGH_REASONING_THRESHOLD || '0');
 
-        // 推断 reasoning_effort
         let effort = 'medium';
         if (budgetTokens < lowThreshold) {
           effort = 'low';
@@ -128,7 +131,6 @@ export class AnthropicToOpenAIPlugin implements Plugin {
         openaiBody.reasoning_effort = effort;
       }
 
-      // max_completion_tokens - 按文档 Line 105
       const maxCompletionTokens = anthropicBody.max_tokens || process.env.OPENAI_REASONING_MAX_TOKENS;
       if (!maxCompletionTokens) {
         throw new Error('max_tokens or OPENAI_REASONING_MAX_TOKENS required for reasoning mode');
@@ -142,7 +144,7 @@ export class AnthropicToOpenAIPlugin implements Plugin {
   }
 
   /**
-   * 转换 User 消息 - 按文档 Line 99
+   * 转换 User 消息
    */
   private convertUserMessage(msg: any, messages: any[]): void {
     const content = msg.content;
@@ -158,7 +160,7 @@ export class AnthropicToOpenAIPlugin implements Plugin {
 
     // 数组内容
     if (Array.isArray(content)) {
-      // 检查是否包含 tool_result - 按文档 Line 99
+      // 检查是否包含 tool_result
       const hasToolResult = content.some((block: any) => block.type === 'tool_result');
 
       if (hasToolResult) {
@@ -183,7 +185,6 @@ export class AnthropicToOpenAIPlugin implements Plugin {
               text: block.text || ''
             });
           } else if (block.type === 'image' && block.source) {
-            // base64 图片 → data URL
             const dataUrl = `data:${block.source.media_type};base64,${block.source.data}`;
             openaiContent.push({
               type: 'image_url',
@@ -203,7 +204,7 @@ export class AnthropicToOpenAIPlugin implements Plugin {
   }
 
   /**
-   * 转换 Assistant 消息 - 按文档 Line 100
+   * 转换 Assistant 消息
    */
   private convertAssistantMessage(msg: any, messages: any[]): void {
     const content = msg.content;
@@ -219,7 +220,7 @@ export class AnthropicToOpenAIPlugin implements Plugin {
 
     // 数组内容
     if (Array.isArray(content)) {
-      // 检查是否首个块是 tool_use - 按文档 Line 100
+      // 检查是否首个块是 tool_use
       const firstBlock = content[0];
       if (firstBlock && firstBlock.type === 'tool_use') {
         // 转写为 tool_calls
@@ -240,14 +241,13 @@ export class AnthropicToOpenAIPlugin implements Plugin {
           tool_calls: toolCalls
         });
       } else {
-        // 文本/多模态内容
+        // 文本/多模态内容，包含 thinking 块
         let textContent = '';
 
         for (const block of content) {
           if (block.type === 'text') {
             textContent += block.text || '';
           } else if (block.type === 'thinking') {
-            // thinking 块转换为 <thinking> 标签
             textContent += `<thinking>\n${block.thinking || ''}\n</thinking>\n\n`;
           }
         }
@@ -261,7 +261,7 @@ export class AnthropicToOpenAIPlugin implements Plugin {
   }
 
   /**
-   * 处理非流式响应 - 按文档 3.2.1 (OpenAI → Anthropic)
+   * 处理非流式响应：OpenAI → Anthropic
    */
   async onResponse(ctx: PluginContext & { response: Response }): Promise<Response | void> {
     const contentType = ctx.response.headers.get('content-type') || '';
@@ -282,13 +282,13 @@ export class AnthropicToOpenAIPlugin implements Plugin {
   }
 
   /**
-   * 转换 OpenAI 响应为 Anthropic 格式 - 按文档 Line 118-122
+   * 转换 OpenAI 响应为 Anthropic 格式
    */
   private convertOpenAIResponseToAnthropic(openaiBody: any): any {
     const choice = openaiBody.choices?.[0];
     if (!choice) {
       return {
-        id: `msg_${crypto.randomUUID().replace(/-/g, '').substring(0, 24)}`,
+        id: generateAnthropicMessageId(),
         type: 'message',
         role: 'assistant',
         content: [],
@@ -304,7 +304,7 @@ export class AnthropicToOpenAIPlugin implements Plugin {
     const message = choice.message;
     const content: any[] = [];
 
-    // tool_calls → tool_use - 按文档 Line 119
+    // tool_calls → tool_use
     if (message.tool_calls) {
       for (const tc of message.tool_calls) {
         content.push({
@@ -315,50 +315,16 @@ export class AnthropicToOpenAIPlugin implements Plugin {
         });
       }
     } else if (message.content) {
-      // 文本与 <thinking> 标签拆分 - 按文档 Line 120
-      const textContent = message.content;
-      const thinkingRegex = /<thinking>\s*([\s\S]*?)\s*<\/thinking>/g;
-      let lastIdx = 0;
-      let match;
-
-      while ((match = thinkingRegex.exec(textContent)) !== null) {
-        // 前面的文本
-        const beforeText = textContent.substring(lastIdx, match.index).trim();
-        if (beforeText) {
-          content.push({ type: 'text', text: beforeText });
-        }
-
-        // thinking 块
-        const thinkingText = match[1].trim();
-        if (thinkingText) {
-          content.push({ type: 'thinking', thinking: thinkingText });
-        }
-
-        lastIdx = match.index + match[0].length;
-      }
-
-      // 后面的文本
-      const afterText = textContent.substring(lastIdx).trim();
-      if (afterText) {
-        content.push({ type: 'text', text: afterText });
-      }
-
-      // 如果没有匹配到任何 thinking，直接添加文本
-      if (content.length === 0 && textContent.trim()) {
-        content.push({ type: 'text', text: textContent });
-      }
+      // 文本与 <thinking> 标签拆分
+      const parsedContent = parseThinkingTags(message.content);
+      content.push(...parsedContent);
     }
 
-    // finish_reason 映射 - 按文档 Line 121
-    const finishReason = choice.finish_reason;
-    let stopReason = 'end_turn';
-    if (finishReason === 'stop') stopReason = 'end_turn';
-    else if (finishReason === 'length') stopReason = 'max_tokens';
-    else if (finishReason === 'content_filter') stopReason = 'stop_sequence';
-    else if (finishReason === 'tool_calls') stopReason = 'tool_use';
+    // finish_reason 映射
+    const stopReason = mapOpenAIFinishReasonToAnthropic(choice.finish_reason || 'stop');
 
     return {
-      id: openaiBody.id || `msg_${crypto.randomUUID().replace(/-/g, '').substring(0, 24)}`,
+      id: openaiBody.id || generateAnthropicMessageId(),
       type: 'message',
       role: 'assistant',
       content,
@@ -372,7 +338,7 @@ export class AnthropicToOpenAIPlugin implements Plugin {
   }
 
   /**
-   * 处理流式响应 - 按文档 3.3.1 (OpenAI chunk → Anthropic SSE)
+   * 处理流式响应：OpenAI chunk → Anthropic SSE
    */
   async processStreamChunk(chunk: any, ctx: StreamChunkContext): Promise<any[] | null> {
     const events: any[] = [];
@@ -383,13 +349,13 @@ export class AnthropicToOpenAIPlugin implements Plugin {
     const delta = choice.delta;
     const finishReason = choice.finish_reason;
 
-    // 首次接收非空 delta - 发送 message_start - 按文档 Line 131
+    // 首次接收非空 delta - 发送 message_start
     if (!ctx.streamState.has('message_started')) {
       if (delta && (delta.content || delta.tool_calls || delta.role)) {
         events.push({
           type: 'message_start',
           message: {
-            id: chunk.id || `msg_${crypto.randomUUID().replace(/-/g, '').substring(0, 24)}`,
+            id: chunk.id || generateAnthropicMessageId(),
             type: 'message',
             role: 'assistant',
             content: [],
@@ -401,9 +367,8 @@ export class AnthropicToOpenAIPlugin implements Plugin {
       }
     }
 
-    // 文本增量 - 按文档 Line 132
+    // 文本增量
     if (delta.content) {
-      // 检查是否已发送 content_block_start
       if (!ctx.streamState.has('text_block_started')) {
         events.push({
           type: 'content_block_start',
@@ -426,13 +391,12 @@ export class AnthropicToOpenAIPlugin implements Plugin {
       });
     }
 
-    // 工具调用增量 - 按文档 Line 133
+    // 工具调用增量
     if (delta.tool_calls) {
       for (const tc of delta.tool_calls) {
         const index = tc.index || 0;
         const toolKey = `tool_${index}`;
 
-        // 初始化工具调用缓存
         if (!ctx.streamState.has(toolKey)) {
           ctx.streamState.set(toolKey, {
             id: tc.id || '',
@@ -440,7 +404,6 @@ export class AnthropicToOpenAIPlugin implements Plugin {
             arguments: ''
           });
 
-          // 发送 content_block_start
           events.push({
             type: 'content_block_start',
             index,
@@ -455,7 +418,6 @@ export class AnthropicToOpenAIPlugin implements Plugin {
 
         const toolState = ctx.streamState.get(toolKey) as any;
 
-        // 累积参数
         if (tc.function?.arguments) {
           toolState.arguments += tc.function.arguments;
           ctx.streamState.set(toolKey, toolState);
@@ -472,9 +434,8 @@ export class AnthropicToOpenAIPlugin implements Plugin {
       }
     }
 
-    // 完成时 - 按文档 Line 134
+    // 完成时
     if (finishReason) {
-      // 发送 content_block_stop
       if (ctx.streamState.has('text_block_started')) {
         events.push({
           type: 'content_block_stop',
@@ -482,7 +443,6 @@ export class AnthropicToOpenAIPlugin implements Plugin {
         });
       }
 
-      // 工具调用的 content_block_stop
       const toolKeys = Array.from(ctx.streamState.keys()).filter(k => k.startsWith('tool_'));
       for (let i = 0; i < toolKeys.length; i++) {
         events.push({
@@ -491,14 +451,8 @@ export class AnthropicToOpenAIPlugin implements Plugin {
         });
       }
 
-      // 转换 finish_reason
-      let stopReason = 'end_turn';
-      if (finishReason === 'stop') stopReason = 'end_turn';
-      else if (finishReason === 'length') stopReason = 'max_tokens';
-      else if (finishReason === 'content_filter') stopReason = 'stop_sequence';
-      else if (finishReason === 'tool_calls') stopReason = 'tool_use';
+      const stopReason = mapOpenAIFinishReasonToAnthropic(finishReason);
 
-      // 发送 message_delta
       const usage = chunk.usage ? {
         output_tokens: chunk.usage.completion_tokens || 0
       } : undefined;
@@ -517,12 +471,10 @@ export class AnthropicToOpenAIPlugin implements Plugin {
         })
       });
 
-      // 发送 message_stop
       events.push({
         type: 'message_stop'
       });
 
-      // 重置状态
       ctx.streamState.clear();
     }
 
@@ -530,10 +482,9 @@ export class AnthropicToOpenAIPlugin implements Plugin {
   }
 
   /**
-   * flushStream - 确保流结束
+   * 刷新流 - 确保流结束
    */
   async flushStream(ctx: StreamChunkContext): Promise<any[]> {
-    // 如果还没有发送 message_stop，发送它
     if (ctx.streamState.has('message_started') && !ctx.streamState.has('flushed')) {
       ctx.streamState.set('flushed', true);
       return [{
@@ -543,5 +494,3 @@ export class AnthropicToOpenAIPlugin implements Plugin {
     return [];
   }
 }
-
-export default AnthropicToOpenAIPlugin;

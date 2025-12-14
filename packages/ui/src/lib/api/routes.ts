@@ -1,6 +1,13 @@
 import { api } from './client';
 import type { AppConfig } from '../types';
 
+export interface PluginConfig {
+  name: string;
+  path?: string;
+  options?: Record<string, any>;
+  enabled?: boolean;
+}
+
 export interface Route {
   path: string;
   pathRewrite?: { [pattern: string]: string };
@@ -8,7 +15,7 @@ export interface Route {
   headers?: ModificationRules;
   body?: ModificationRules;
   query?: ModificationRules;
-  plugins?: string[];  // Changed from transformer
+  plugins?: Array<PluginConfig | string>;  // Support both object and string format
   auth?: { enabled: boolean; tokens: string[] };
   failover?: FailoverConfig;
   healthCheck?: HealthCheckConfig;
@@ -19,7 +26,7 @@ export interface Upstream {
   target: string;
   weight?: number;
   priority?: number;
-  plugins?: string[];  // Changed from transformer
+  plugins?: Array<PluginConfig | string>;  // Support both object and string format
   headers?: ModificationRules;
   body?: ModificationRules;
   query?: ModificationRules;

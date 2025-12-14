@@ -7,6 +7,8 @@ import { logger } from './logger';
 import { bodyStorageManager } from './logger/body-storage';
 import { logCleanupService } from './logger/log-cleanup';
 import { PluginRegistry } from './plugin-registry';
+import { initializePluginContextManager } from './plugin-context-manager';
+import { accessLogWriter } from './logger/access-log-writer';
 import type { AppConfig } from '@jeffusion/bungee-types';
 import type { Server } from 'bun';
 import { loadConfig } from './config';
@@ -44,15 +46,19 @@ export async function startServer(config: AppConfig): Promise<Server<unknown>> {
 
   initializeRuntimeState(config);
 
-  // 初始化 Plugin Registry
-  const pluginRegistry = new PluginRegistry(process.cwd());
+  // 初始化 Plugin Context Manager（必须在加载插件之前）
+  const db = accessLogWriter.getDatabase();
+  initializePluginContextManager(db);
+  logger.info('Plugin context manager initialized');
+
+  // 初始化 Plugin Registry（✅ 传递数据库实例）
+  const pluginRegistry = new PluginRegistry(process.cwd(), db);
   setPluginRegistry(pluginRegistry);
 
-  // 加载全局 plugins
-  if (config.plugins && config.plugins.length > 0) {
-    logger.info(`🔌 Loading ${config.plugins.length} global plugin(s)...`);
-    await pluginRegistry.loadPlugins(config.plugins);
-  }
+  // 扫描所有插件目录（插件状态由数据库管理）
+  logger.info('🔍 Scanning plugin directories...');
+  await pluginRegistry.scanAndLoadAllPlugins();
+  logger.info('✅ Plugin directory scan completed');
 
   logger.info(`🚀 Reverse proxy server starting on port ${PORT}`);
   logger.info(`📋 Health check: http://localhost:${PORT}/health`);

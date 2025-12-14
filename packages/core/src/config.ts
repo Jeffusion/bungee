@@ -126,6 +126,12 @@ function validateAuthConfig(authConfig: AuthConfig, context: string): void {
 }
 
 // --- Configuration Loading ---
+async function updateConfig(newConfig: AppConfig): Promise<void> {
+  const configFilePath = process.env.CONFIG_PATH || 'config.json';
+  await Bun.write(configFilePath, JSON.stringify(newConfig, null, 2));
+  logger.info('Config updated successfully');
+}
+
 async function loadConfig(configPath?: string): Promise<AppConfig> {
   try {
     const configFilePath = configPath || process.env.CONFIG_PATH || 'config.json';
@@ -206,4 +212,4 @@ async function loadConfig(configPath?: string): Promise<AppConfig> {
   }
 }
 
-export { loadConfig, preloadGlobalConfig };
+export { loadConfig, preloadGlobalConfig, updateConfig };

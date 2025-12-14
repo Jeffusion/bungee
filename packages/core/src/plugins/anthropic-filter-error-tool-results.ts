@@ -15,11 +15,47 @@
  */
 
 import { isArray, filter, map, includes, isEmpty } from 'lodash-es';
-import type { Plugin, PluginContext } from '../../plugin.types';
+import type { Plugin, PluginContext, PluginTranslations } from '../plugin.types';
+import { definePlugin } from '../plugin.types';
 
-export class AnthropicFilterErrorToolResultsPlugin implements Plugin {
-  name = 'anthropic-filter-error-tool-results';
-  version = '1.0.0';
+export const AnthropicFilterErrorToolResultsPlugin = definePlugin(
+  class implements Plugin {
+    /**
+     * 插件唯一标识符（静态）
+     */
+    static readonly name = 'anthropic-filter-error-tool-results';
+
+    /**
+     * 插件版本（静态）
+     */
+    static readonly version = '1.0.0';
+
+    /**
+     * 插件元数据（静态）
+     */
+    static readonly metadata = {
+      name: 'metadata.name',
+      description: 'plugin.description',
+      icon: 'filter_alt'
+    };
+
+    /**
+     * 插件翻译内容（静态）
+     */
+    static readonly translations: PluginTranslations = {
+      en: {
+        'plugin.description': 'Filters out invalid tool results that do not match any tool_use in the previous assistant message',
+        'metadata.name': 'Anthropic Tool Results Filter'
+      },
+      'zh-CN': {
+        'plugin.description': '过滤无效的工具结果，确保每个 tool_result 都对应前一条 assistant 消息中的 tool_use',
+        'metadata.name': 'Anthropic 工具结果过滤器'
+      }
+    };
+
+    constructor(options?: any) {
+      // 插件不需要任何配置选项
+    }
 
   /**
    * 在发送到 upstream 之前过滤无效的 tool_result
@@ -75,5 +111,6 @@ export class AnthropicFilterErrorToolResultsPlugin implements Plugin {
     ctx.body.messages = newMessages;
   }
 }
+);
 
 export default AnthropicFilterErrorToolResultsPlugin;

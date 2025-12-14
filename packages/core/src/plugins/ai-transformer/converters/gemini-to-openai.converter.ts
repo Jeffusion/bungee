@@ -9,11 +9,12 @@
  * - 响应：OpenAI chat.completion → Gemini candidates 格式
  */
 
-import type { Plugin, PluginContext, StreamChunkContext } from '../../plugin.types';
+import type { AIConverter } from './base';
+import type { PluginContext, StreamChunkContext } from '../../../plugin.types';
 
-export class GeminiToOpenAIPlugin implements Plugin {
-  name = 'gemini-to-openai';
-  version = '1.0.0';
+export class GeminiToOpenAIConverter implements AIConverter {
+  readonly from = 'gemini';
+  readonly to = 'openai';
 
   async onBeforeRequest(ctx: PluginContext): Promise<void> {
     const body = ctx.body as any;
@@ -316,4 +317,3 @@ export class GeminiToOpenAIPlugin implements Plugin {
   }
 }
 
-export default GeminiToOpenAIPlugin;

@@ -8,6 +8,7 @@ import { forEach, isEmpty } from 'lodash-es';
 import type { AppConfig, RouteConfig } from '@jeffusion/bungee-types';
 import type { RequestLogger } from '../../logger/request-logger';
 import type { Plugin } from '../../plugin.types';
+import { getPluginName } from '../../plugin.types';
 import { processDynamicValue } from '../../expression-engine';
 import type { RuntimeUpstream, RequestSnapshot } from '../types';
 import { getPluginRegistry } from '../state/plugin-manager';
@@ -118,7 +119,7 @@ export async function proxyRequest(
         logger.debug(
           {
             pluginCount: upstreamPluginInstances.length,
-            plugins: upstreamPluginInstances.map(p => p.name),
+            plugins: upstreamPluginInstances.map(p => getPluginName(p)),
             request: requestLog
           },
           'Upstream plugins acquired for request'
@@ -132,7 +133,7 @@ export async function proxyRequest(
   // 合并路由和 upstream plugins，去重（优先保留路由级配置）
   const allPlugins = [...routePlugins];
   for (const upPlugin of upstreamPluginInstances) {
-    if (!allPlugins.some(p => p.name === upPlugin.name)) {
+    if (!allPlugins.some(p => getPluginName(p) === getPluginName(upPlugin))) {
       allPlugins.push(upPlugin);
     }
   }
@@ -200,7 +201,7 @@ export async function proxyRequest(
   if (reqLogger && allPlugins.length > 0) {
     reqLogger.addStep('plugin_request_init', {
       count: allPlugins.length,
-      plugins: allPlugins.map(p => p.name)
+      plugins: allPlugins.map(p => getPluginName(p))
     });
   }
 
@@ -328,7 +329,7 @@ export async function proxyRequest(
   if (reqLogger && allPlugins.length > 0) {
     reqLogger.addStep('plugin_before_request', {
       count: allPlugins.length,
-      plugins: allPlugins.map(p => p.name)
+      plugins: allPlugins.map(p => getPluginName(p))
     });
   }
 
@@ -389,7 +390,7 @@ export async function proxyRequest(
   }
 
   // ===== 9. Execute the request =====
-  logger.info({ request: requestLog, target: targetUrl.href }, `\n=== Proxying to target ===`);
+  logger.debug({ request: requestLog, target: targetUrl.href }, `\n=== Proxying to target ===`);
 
   // 9.1. 添加上游 base path（在发送请求前）
   targetUrl.pathname = (targetBasePath === '/' ? '' : targetBasePath.replace(/\/$/, '')) + targetUrl.pathname;
@@ -428,7 +429,6 @@ export async function proxyRequest(
 
     let proxyRes: Response;
     try {
-      console.log('????', targetUrl.href, fetchOptions)
       proxyRes = await fetch(targetUrl.href, fetchOptions);
       clearTimeout(timeoutId);
     } catch (error) {
@@ -449,7 +449,7 @@ export async function proxyRequest(
       throw error;
     }
 
-    logger.info(
+    logger.debug(
       { request: requestLog, status: proxyRes.status, target: targetUrl.href },
       `\n=== Received Response from target ===`
     );
@@ -467,7 +467,7 @@ export async function proxyRequest(
       if (reqLogger && allPlugins.length > 0) {
         reqLogger.addStep('plugin_response', {
           count: allPlugins.length,
-          plugins: allPlugins.map(p => p.name).reverse() // 反向顺序
+          plugins: allPlugins.map(p => getPluginName(p)).reverse() // 反向顺序
         });
       }
     }
@@ -507,7 +507,7 @@ export async function proxyRequest(
     if (reqLogger && allPlugins.length > 0) {
       reqLogger.addStep('plugin_error', {
         count: allPlugins.length,
-        plugins: allPlugins.map(p => p.name).reverse(), // 反向顺序
+        plugins: allPlugins.map(p => getPluginName(p)).reverse(), // 反向顺序
         error: (error as Error).message
       });
     }

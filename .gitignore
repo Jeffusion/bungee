@@ -32,6 +32,13 @@ lerna-debug.log*
 config.json
 config.json.backup.*
 
+# Backup files
+*.bak
+*.bak2
+*.bak3
+*.backup
+*~
+
 # IDE
 .claude/
 

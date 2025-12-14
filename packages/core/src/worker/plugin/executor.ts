@@ -1,3 +1,4 @@
+import { getPluginName } from "../../plugin.types";
 /**
  * Plugin executor module
  * Implements the onion model for plugin execution
@@ -54,7 +55,7 @@ export class PluginExecutor {
         try {
           await plugin.onRequestInit(context);
         } catch (error) {
-          logger.error({ error, pluginName: plugin.name }, 'Error in onRequestInit hook');
+          logger.error({ error, pluginName: getPluginName(plugin) }, 'Error in onRequestInit hook');
         }
       }
     }
@@ -119,7 +120,7 @@ export class PluginExecutor {
           this.applyHeadersToHeaders(context.headers, headers);
           currentBody = context.body;
         } catch (error) {
-          logger.error({ error, pluginName: plugin.name }, 'Error in onBeforeRequest hook');
+          logger.error({ error, pluginName: getPluginName(plugin) }, 'Error in onBeforeRequest hook');
         }
       }
     }
@@ -176,11 +177,11 @@ export class PluginExecutor {
         try {
           const interceptedResponse = await plugin.onInterceptRequest(context);
           if (interceptedResponse) {
-            logger.info({ pluginName: plugin.name }, 'Request intercepted by plugin');
+            logger.info({ pluginName: getPluginName(plugin) }, 'Request intercepted by plugin');
             return interceptedResponse;
           }
         } catch (error) {
-          logger.error({ error, pluginName: plugin.name }, 'Error in onInterceptRequest hook');
+          logger.error({ error, pluginName: getPluginName(plugin) }, 'Error in onInterceptRequest hook');
         }
       }
     }
@@ -246,12 +247,12 @@ export class PluginExecutor {
           if (result && result instanceof Response) {
             currentResponse = result;
             logger.info(
-              { pluginName: plugin.name },
+              { pluginName: getPluginName(plugin) },
               'Plugin returned modified response'
             );
           }
         } catch (error) {
-          logger.error({ error, pluginName: plugin.name }, 'Error in onResponse hook');
+          logger.error({ error, pluginName: getPluginName(plugin) }, 'Error in onResponse hook');
         }
       }
     }
@@ -324,7 +325,7 @@ export class PluginExecutor {
           await plugin.onError(pluginContext);
         } catch (hookError) {
           logger.error(
-            { error: hookError, pluginName: plugin.name },
+            { error: hookError, pluginName: getPluginName(plugin) },
             'Error in onError hook'
           );
         }

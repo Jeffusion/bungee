@@ -112,12 +112,30 @@ export interface LoggingConfig {
 
 /**
  * Plugin 配置
+ *
+ * 支持两种引用方式：
+ * 1. 通过 name 引用（推荐）：自动从插件目录解析路径
+ * 2. 通过 path 引用（高级）：手动指定插件文件路径
  */
 export interface PluginConfig {
   /**
-   * Plugin 文件路径（绝对路径或相对于配置文件的路径）
+   * Plugin 名称（唯一标识符）
+   * 这是插件的唯一标识，用于引用和管理插件
+   *
+   * 示例: "ai-transformer", "token-cache"
    */
-  path: string;
+  name: string;
+
+  /**
+   * Plugin 文件路径（可选，仅用于高级场景）
+   * 如果指定了 path，将直接加载该路径的插件文件
+   * 如果未指定，将通过 name 在插件目录中查找
+   *
+   * 支持：
+   * - 绝对路径: "/absolute/path/to/plugin.ts"
+   * - 相对路径（相对于配置文件）: "./plugins/custom-plugin.ts"
+   */
+  path?: string;
 
   /**
    * 传递给 Plugin 的初始化选项

@@ -8,13 +8,21 @@ import type { AppConfig } from '@jeffusion/bungee-types';
 import { handleRequest, initializeRuntimeState, initializePluginRegistryForTests, cleanupPluginRegistry } from '../../src/worker';
 import { setMockEnv, cleanupEnv } from './test-helpers';
 
-// Mock config with gemini-to-openai transformer
+// Mock config with ai-transformer plugin (gemini to openai)
 const mockConfig: AppConfig = {
   routes: [
     {
       path: '/v1/gemini-to-openai',
       pathRewrite: { '^/v1/gemini-to-openai': '/v1' },
-      plugins: ['gemini-to-openai'],
+      plugins: [
+        {
+          name: 'ai-transformer',
+          options: {
+            from: 'gemini',
+            to: 'openai'
+          }
+        }
+      ],
       upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }]
     }
   ]

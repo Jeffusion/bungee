@@ -9,6 +9,7 @@ import { find, map } from 'lodash-es';
 import type { AppConfig } from '@jeffusion/bungee-types';
 import type { ExpressionContext } from '../../expression-engine';
 import type { RuntimeUpstream } from '../types';
+import { getPluginName } from '../../plugin.types';
 import { selectUpstream } from '../upstream/selector';
 import { FailoverCoordinator } from '../upstream/failover-coordinator';
 import { runtimeState } from '../state/runtime-state';
@@ -67,7 +68,8 @@ export async function handleRequest(
   upstreamSelector: (upstreams: RuntimeUpstream[], route?: import('@jeffusion/bungee-types').RouteConfig) => RuntimeUpstream | undefined = selectUpstream
 ): Promise<Response> {
   // 优先处理 UI 请求（不计入统计）
-  const uiResponse = await handleUIRequest(req);
+  const pluginRegistry = getPluginRegistry();
+  const uiResponse = await handleUIRequest(req, pluginRegistry || undefined);
   if (uiResponse) {
     return uiResponse;
   }
@@ -101,7 +103,7 @@ export async function handleRequest(
   let releasePlugins: (() => Promise<void>) | undefined;
 
   try {
-    logger.info({ request: requestLog }, `\n=== Incoming Request ===`);
+    logger.debug({ request: requestLog }, `\n=== Incoming Request ===`);
 
     const route = find(config.routes, (r) => url.pathname.startsWith(r.path));
 
@@ -162,7 +164,7 @@ export async function handleRequest(
           logger.debug(
             {
               pluginCount: routePlugins.length,
-              plugins: routePlugins.map(p => p.name)
+              plugins: routePlugins.map(p => getPluginName(p))
             },
             'Route plugins acquired for request'
           );

@@ -1,8 +1,8 @@
-import { describe, test, expect, mock, beforeEach } from 'bun:test';
-import type { AppConfig } from '../src/config';
+import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
+import type { AppConfig } from '@jeffusion/bungee-types';
 
 // NOW import the server logic after mocks are in place.
-import { handleRequest, initializeRuntimeState } from '../src/worker';
+import { handleRequest, initializeRuntimeState, initializePluginRegistryForTests, cleanupPluginRegistry } from '../src/worker';
 
 const mockConfig: AppConfig = {
   routes: [
@@ -54,8 +54,11 @@ const mockConfig: AppConfig = {
         { target: 'http://fails.com', weight: 50, priority: 1 },
         { target: 'http://works.com', weight: 50, priority: 1 },
       ],
-      failover: { enabled: true, retryableStatusCodes: [500] },
-      healthCheck: { enabled: false, intervalSeconds: 10 },
+      failover: {
+        enabled: true,
+        retryableStatusCodes: [500],
+        healthCheck: { enabled: false, intervalMs: 10000 }
+      },
     },
     {
       path: '/priority-test',
@@ -80,7 +83,7 @@ const mockConfig: AppConfig = {
 
 
 // Mock the global fetch
-const mockedFetch = mock(async (request: Request | string, options?: RequestInit) => {
+const mockedFetch = mock(async (request: Request | string, _options?: RequestInit) => {
     const url = typeof request === 'string' ? request : request.url;
     if (url.startsWith('http://fails.com')) {
         return new Response('server error', { status: 500 });
@@ -95,10 +98,15 @@ global.fetch = mockedFetch as any;
 
 describe('Server Request Handler', () => {
 
-  beforeEach(() => {
+  beforeEach(async () => {
     mockedFetch.mockClear();
     // Initialize the state before each test based on the mocked config
     initializeRuntimeState(mockConfig);
+    await initializePluginRegistryForTests(mockConfig);
+  });
+
+  afterEach(async () => {
+    await cleanupPluginRegistry();
   });
 
   test('should return 200 for health check', async () => {

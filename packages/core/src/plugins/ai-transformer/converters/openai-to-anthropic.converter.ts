@@ -1,45 +1,42 @@
 /**
- * OpenAI to Anthropic Plugin
+ * OpenAI to Anthropic Converter
  *
  * 将 OpenAI Chat Completions API 格式转换为 Anthropic Messages API 格式
  *
- * 主要转换：
+ * 转换规则：
  * - 请求：/v1/chat/completions → /v1/messages
  * - 请求：messages、tools、reasoning_effort
  * - 响应：Anthropic message → OpenAI chat.completion
  * - 响应：Anthropic SSE → OpenAI SSE
  */
 
-import type { Plugin, PluginContext, StreamChunkContext } from '../../plugin.types';
+import type { AIConverter } from './base';
+import type { PluginContext, StreamChunkContext } from '../../../plugin.types';
+import { generateOpenAIChatCompletionId, parseThinkingTags } from './utils';
 
-export class OpenAIToAnthropicPlugin implements Plugin {
-  name = 'openai-to-anthropic';
-  version = '1.0.0';
+export class OpenAIToAnthropicConverter implements AIConverter {
+  readonly from = 'openai';
+  readonly to = 'anthropic';
 
-  /**
-   * 修改请求 URL 和 body，转换为 Anthropic 格式
-   */
   async onBeforeRequest(ctx: PluginContext): Promise<void> {
     const body = ctx.body as any;
     if (!body) return;
 
-    // 1. 路径转换
+    // 路径转换
     if (ctx.url.pathname === '/v1/chat/completions') {
       ctx.url.pathname = '/v1/messages';
     }
 
-    // 2. 转换 body
+    // 转换 body
     const anthropicBody: any = {};
 
     // Model
     anthropicBody.model = body.model;
 
-    // Extract system messages (check both body.system and messages array for backward compatibility)
+    // Extract system messages
     if (body.system) {
-      // System already extracted by transformer rules
       anthropicBody.system = body.system;
     } else if (body.messages) {
-      // Extract from messages array
       const systemMessages = body.messages
         .filter((m: any) => m.role === 'system')
         .map((m: any) => m.content);
@@ -52,20 +49,15 @@ export class OpenAIToAnthropicPlugin implements Plugin {
     // Convert non-system messages
     if (body.messages) {
       anthropicBody.messages = this.convertMessages(body.messages);
-
-      // Validate tool calls - 按文档 3.1.1 Line 101
-      // 移除没有收到 Tool 回复的 tool_call，避免 OpenAI API 拒绝
       this.validateAndCleanToolCalls(anthropicBody.messages);
     }
 
-    // Max tokens - 按文档 2.1 Line 39: 若皆缺失则报错
-    // Note: Skip this check if using reasoning mode (max_completion_tokens)
+    // Max tokens
     if (body.max_tokens) {
       anthropicBody.max_tokens = body.max_tokens;
     } else if (process.env.ANTHROPIC_MAX_TOKENS) {
       anthropicBody.max_tokens = parseInt(process.env.ANTHROPIC_MAX_TOKENS);
     } else if (!body.max_completion_tokens) {
-      // Only throw if not in reasoning mode
       throw new Error('max_tokens is required. Provide it in request or set ANTHROPIC_MAX_TOKENS environment variable');
     }
 
@@ -123,12 +115,7 @@ export class OpenAIToAnthropicPlugin implements Plugin {
     ctx.body = anthropicBody;
   }
 
-  /**
-   * 验证并清理 tool calls - 按文档 3.1.1 Line 101
-   * 移除没有收到 Tool 回复的 tool_call
-   */
   private validateAndCleanToolCalls(messages: any[]): void {
-    // 收集所有 tool_result 的 tool_use_id
     const toolResultIds = new Set<string>();
 
     for (const msg of messages) {
@@ -141,12 +128,10 @@ export class OpenAIToAnthropicPlugin implements Plugin {
       }
     }
 
-    // 清理 assistant 消息中没有匹配的 tool_use
     for (const msg of messages) {
       if (msg.role === 'assistant' && Array.isArray(msg.content)) {
         msg.content = msg.content.filter((block: any) => {
           if (block.type === 'tool_use') {
-            // 只保留有对应 tool_result 的 tool_use
             return toolResultIds.has(block.id);
           }
           return true;
@@ -155,10 +140,6 @@ export class OpenAIToAnthropicPlugin implements Plugin {
     }
   }
 
-  /**
-   * 转换 OpenAI messages 为 Anthropic messages
-   * 支持合并连续的 tool 消息为单个 user 消息
-   */
   private convertMessages(messages: any[]): any[] {
     const anthropicMessages: any[] = [];
     const filtered = messages.filter((m: any) => m.role !== 'system');
@@ -168,11 +149,10 @@ export class OpenAIToAnthropicPlugin implements Plugin {
       const msg = filtered[i];
       const role = msg.role;
 
-      // 检查是否是连续的 tool 消息，需要合并
+      // Merge consecutive tool messages
       if (role === 'tool') {
         const toolResults: any[] = [];
 
-        // 收集所有连续的 tool 消息
         while (i < filtered.length && filtered[i].role === 'tool') {
           const toolMsg = filtered[i];
           toolResults.push({
@@ -183,17 +163,15 @@ export class OpenAIToAnthropicPlugin implements Plugin {
           i++;
         }
 
-        // 合并为单个 user 消息
         if (toolResults.length > 0) {
           anthropicMessages.push({
             role: 'user',
             content: toolResults
           });
         }
-        continue; // i 已经在内部循环中递增了
+        continue;
       }
 
-      // 处理其他角色的消息
       i++;
 
       if (role === 'user') {
@@ -203,32 +181,8 @@ export class OpenAIToAnthropicPlugin implements Plugin {
           const textContent = content.trim();
           if (!textContent) continue;
 
-          // Extract <thinking> tags
-          const thinkingMatch = /<thinking>\s*([\s\S]*?)\s*<\/thinking>/g;
-          let match;
-          let lastIdx = 0;
-          const blocks: any[] = [];
+          const blocks = parseThinkingTags(content);
 
-          while ((match = thinkingMatch.exec(content)) !== null) {
-            const beforeText = content.substring(lastIdx, match.index).trim();
-            if (beforeText) {
-              blocks.push({ type: 'text', text: beforeText });
-            }
-
-            const thinkingText = match[1].trim();
-            if (thinkingText) {
-              blocks.push({ type: 'thinking', thinking: thinkingText });
-            }
-
-            lastIdx = match.index + match[0].length;
-          }
-
-          const afterText = content.substring(lastIdx).trim();
-          if (afterText) {
-            blocks.push({ type: 'text', text: afterText });
-          }
-
-          // Construct message
           if (blocks.length === 0) {
             anthropicMessages.push({ role: 'user', content: textContent });
           } else if (blocks.length === 1 && blocks[0].type === 'text') {
@@ -237,8 +191,6 @@ export class OpenAIToAnthropicPlugin implements Plugin {
             anthropicMessages.push({ role: 'user', content: blocks });
           }
         } else if (Array.isArray(content)) {
-          // Multimodal content
-          // 按文档 2.1 Line 35: 多模态内容需保证图片在文本之前
           const images: any[] = [];
           const texts: any[] = [];
           const others: any[] = [];
@@ -255,7 +207,6 @@ export class OpenAIToAnthropicPlugin implements Plugin {
 
           const anthropicContent: any[] = [];
 
-          // 1. Process images first (图片在前)
           for (const img of images) {
             const url = img.image_url?.url || '';
             if (url.startsWith('data:')) {
@@ -274,7 +225,6 @@ export class OpenAIToAnthropicPlugin implements Plugin {
             }
           }
 
-          // 2. Then process texts (文本在后)
           for (const txt of texts) {
             const textContent = txt.text || '';
             if (textContent.trim()) {
@@ -282,7 +232,6 @@ export class OpenAIToAnthropicPlugin implements Plugin {
             }
           }
 
-          // 3. Other content types at the end
           anthropicContent.push(...others);
 
           if (anthropicContent.length > 0) {
@@ -295,7 +244,6 @@ export class OpenAIToAnthropicPlugin implements Plugin {
         }
       } else if (role === 'assistant') {
         if (msg.tool_calls) {
-          // Convert tool calls
           const content: any[] = [];
 
           for (const tc of msg.tool_calls) {
@@ -328,15 +276,11 @@ export class OpenAIToAnthropicPlugin implements Plugin {
           }
         }
       }
-      // Note: tool role 消息已在循环开始时统一处理（支持合并）
     }
 
     return anthropicMessages;
   }
 
-  /**
-   * 处理非流式响应
-   */
   async onResponse(ctx: PluginContext & { response: Response }): Promise<Response | void> {
     const contentType = ctx.response.headers.get('content-type') || '';
     if (!contentType.includes('application/json') || !ctx.response.ok) {
@@ -355,9 +299,6 @@ export class OpenAIToAnthropicPlugin implements Plugin {
     });
   }
 
-  /**
-   * 转换 Anthropic 响应为 OpenAI 格式
-   */
   private convertAnthropicResponseToOpenAI(anthropicBody: any): any {
     const content = anthropicBody.content || [];
     let textContent = '';
@@ -381,12 +322,10 @@ export class OpenAIToAnthropicPlugin implements Plugin {
       }
     }
 
-    // Wrap thinking content
     if (thinkingContent.trim()) {
       textContent = `<thinking>\n${thinkingContent.trim()}\n</thinking>\n\n${textContent}`;
     }
 
-    // Build message
     const message: any = { role: 'assistant' };
     if (toolCalls.length > 0) {
       message.content = textContent || null;
@@ -395,7 +334,6 @@ export class OpenAIToAnthropicPlugin implements Plugin {
       message.content = textContent;
     }
 
-    // Convert stop_reason
     const stopReason = anthropicBody.stop_reason;
     let finishReason = 'stop';
     if (stopReason === 'tool_use') finishReason = 'tool_calls';
@@ -421,20 +359,14 @@ export class OpenAIToAnthropicPlugin implements Plugin {
     };
   }
 
-  /**
-   * 处理流式响应
-   * Anthropic SSE → OpenAI SSE
-   */
   async processStreamChunk(chunk: any, ctx: StreamChunkContext): Promise<any[] | null> {
     const eventType = chunk.type;
 
-    // 初始化 streamId
     if (!ctx.streamState.has('streamId')) {
       ctx.streamState.set('streamId', crypto.randomUUID());
     }
     const streamId = ctx.streamState.get('streamId') as string;
 
-    // message_start: 发送第一个 chunk
     if (eventType === 'message_start') {
       return [{
         id: `chatcmpl-${streamId}`,
@@ -449,7 +381,6 @@ export class OpenAIToAnthropicPlugin implements Plugin {
       }];
     }
 
-    // content_block_start: 处理 tool_use 开始
     if (eventType === 'content_block_start') {
       const contentBlock = chunk.content_block || {};
 
@@ -477,7 +408,6 @@ export class OpenAIToAnthropicPlugin implements Plugin {
       return [];
     }
 
-    // content_block_delta: 处理增量内容
     if (eventType === 'content_block_delta') {
       const delta = chunk.delta || {};
       const openaiDelta: any = {};
@@ -512,7 +442,6 @@ export class OpenAIToAnthropicPlugin implements Plugin {
       }];
     }
 
-    // message_delta: 发送结束事件
     if (eventType === 'message_delta') {
       const stopReason = chunk.delta?.stop_reason;
       let finishReason = 'stop';
@@ -540,16 +469,10 @@ export class OpenAIToAnthropicPlugin implements Plugin {
       }];
     }
 
-    // Skip other events
     return [];
   }
 
-  /**
-   * flushStream - 此 transformer 不需要缓冲，返回空数组
-   */
   async flushStream(ctx: StreamChunkContext): Promise<any[]> {
     return [];
   }
 }
-
-export default OpenAIToAnthropicPlugin;

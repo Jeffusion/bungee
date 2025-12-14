@@ -25,7 +25,8 @@
     "home": "首页",
     "routes": "路由管理",
     "logs": "请求日志",
-    "configuration": "配置中心"
+    "configuration": "配置中心",
+    "plugins": "插件管理"
   },
   "breadcrumb": {
     "home": "首页",
@@ -180,6 +181,8 @@
     "addUpstream": "添加上游",
     "transformer": "路由转换器",
     "transformerHelp": "应用于整个路由的转换器（可选）",
+    "routePlugins": "路由插件",
+    "routePluginsHelp": "应用于整个路由的插件（可选）",
     "noPluginsAvailable": "当前无可用路由转换器插件",
     "optional": "可选",
     "basicInfo": "基本信息",
@@ -304,8 +307,12 @@
     "targetHelp": "上游服务器的完整 URL",
     "weight": "权重",
     "weightHelp": "负载均衡权重（1-100）",
+    "priority": "优先级",
+    "priorityHelp": "故障转移顺序",
     "transformer": "上游转换器",
     "transformerHelp": "仅应用于此上游的转换器（可选）",
+    "upstreamPlugins": "上游插件",
+    "upstreamPluginsHelp": "仅应用于此上游的插件（可选）",
     "disabled": "禁用",
     "disabledHelp": "勾选后该上游将不参与负载均衡",
     "enableTooltip": "点击启用",
@@ -326,8 +333,20 @@
     "input": "输入（原始格式）",
     "output": "输出（转换后格式）",
     "inputPlaceholder": "输入测试数据...",
+    "outputPlaceholder": "转换结果将显示在这里...",
     "testSuccess": "转换成功",
-    "testFailed": "转换失败: {error}"
+    "testFailed": "转换失败: {error}",
+    "addPlugin": "添加插件",
+    "editPlugin": "编辑插件",
+    "removePlugin": "移除",
+    "noPluginsConfigured": "暂未配置插件",
+    "noEnabledPlugins": "当前没有已启用的插件，请先在",
+    "selectPluginPrompt": "-- 选择插件 --",
+    "pluginConfiguration": "配置",
+    "noConfigurationRequired": "该插件无需配置",
+    "fieldRequired": "{field} 为必填项",
+    "update": "更新",
+    "cancel": "取消"
   },
   "headers": {
     "title": "请求头",
@@ -658,5 +677,20 @@
     "unauthorized": "访问令牌无效",
     "logout": "退出登录",
     "logoutConfirm": "确定要退出登录吗？"
+  },
+  "plugins": {
+    "title": "插件管理",
+    "subtitle": "管理已安装的插件",
+    "noPlugins": "未加载插件",
+    "noPluginsDesc": "请在配置文件中添加插件以开始使用。",
+    "enabled": "已启用",
+    "disabled": "已禁用",
+    "enable": "启用",
+    "disable": "禁用",
+    "settings": "设置",
+    "notFound": "插件未找到",
+    "backToPlugins": "返回插件列表",
+    "moreInfo": "更多信息",
+    "noDescription": "暂无描述。"
   }
 }

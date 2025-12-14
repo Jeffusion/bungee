@@ -1,3 +1,4 @@
+import { getPluginName } from "../../plugin.types";
 /**
  * Response processor module
  * Handles response modification and streaming
@@ -111,9 +112,9 @@ export async function prepareResponse(
     // Note: dedupedRoutePlugins already contains all plugins (route + upstream merged)
     if (dedupedRoutePlugins) {
       for (const plugin of [...dedupedRoutePlugins].reverse()) {
-        if (plugin.processStreamChunk && !pluginNames.has(plugin.name)) {
+        if (plugin.processStreamChunk && !pluginNames.has(getPluginName(plugin))) {
           streamPlugins.push(plugin);
-          pluginNames.add(plugin.name);
+          pluginNames.add(getPluginName(plugin));
         }
       }
     }
@@ -124,7 +125,7 @@ export async function prepareResponse(
         {
           request: requestLog,
           pluginCount: streamPlugins.length,
-          plugins: streamPlugins.map(p => p.name)
+          plugins: streamPlugins.map(p => getPluginName(p))
         },
         'Using plugin chain for stream transformation'
       );

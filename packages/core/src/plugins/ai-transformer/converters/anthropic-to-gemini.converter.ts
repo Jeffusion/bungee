@@ -1,5 +1,5 @@
 /**
- * Anthropic to Gemini Plugin
+ * Anthropic to Gemini Converter
  *
  * 将 Anthropic Messages API 格式转换为 Google Gemini API 格式
  *
@@ -11,7 +11,8 @@
  * - 响应：Gemini 累积文本 → Anthropic 增量文本（SSE）
  */
 
-import type { Plugin, PluginContext, StreamChunkContext } from '../../plugin.types';
+import type { AIConverter } from './base';
+import type { PluginContext, StreamChunkContext } from '../../../plugin.types';
 
 interface AnthropicMessage {
   role: 'user' | 'assistant';
@@ -65,9 +66,9 @@ interface GeminiCandidate {
   finishReason?: string;
 }
 
-export class AnthropicToGeminiPlugin implements Plugin {
-  name = 'anthropic-to-gemini';
-  version = '1.0.0';
+export class AnthropicToGeminiConverter implements AIConverter {
+  readonly from = 'anthropic';
+  readonly to = 'gemini';
 
   // 工具调用 ID 与函数名的映射 - 按文档 Line 113
   private toolIdToNameMap = new Map<string, string>();
@@ -684,4 +685,3 @@ export class AnthropicToGeminiPlugin implements Plugin {
   }
 }
 
-export default AnthropicToGeminiPlugin;

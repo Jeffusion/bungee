@@ -5,6 +5,7 @@ import { TransformersHandler } from './handlers/transformers';
 import { LogsHandler } from './handlers/logs';
 import { RoutesHandler } from './handlers/routes';
 import { AuthHandler } from './handlers/auth';
+import { handleGetPlugins, handleTogglePlugin, handleGetPluginSandbox, handleGetPluginSchemas, handleGetPluginTranslations } from './handlers/plugins';
 import { loadConfig } from '../config';
 import { authenticateRequest } from '../auth';
 
@@ -133,6 +134,34 @@ export async function handleAPIRequest(req: Request, path: string): Promise<Resp
     if (path.startsWith('/api/transformers/') && method === 'GET') {
       const transformerId = path.replace('/api/transformers/', '');
       return TransformersHandler.getById(transformerId);
+    }
+
+    // 插件管理
+    if (path === '/api/plugins' && method === 'GET') {
+      return await handleGetPlugins(req);
+    }
+
+    if (path === '/api/plugins/schemas' && method === 'GET') {
+      return await handleGetPluginSchemas(req);
+    }
+
+    if (path === '/api/plugin-translations' && method === 'GET') {
+      return await handleGetPluginTranslations(req);
+    }
+
+    if (path.startsWith('/api/plugins/') && path.endsWith('/sandbox') && method === 'GET') {
+      const pluginName = path.replace('/api/plugins/', '').replace('/sandbox', '');
+      return await handleGetPluginSandbox(req, pluginName);
+    }
+
+    if (path.startsWith('/api/plugins/') && path.endsWith('/enable') && method === 'POST') {
+      const pluginName = path.replace('/api/plugins/', '').replace('/enable', '');
+      return await handleTogglePlugin(req, pluginName, true);
+    }
+
+    if (path.startsWith('/api/plugins/') && path.endsWith('/disable') && method === 'POST') {
+      const pluginName = path.replace('/api/plugins/', '').replace('/disable', '');
+      return await handleTogglePlugin(req, pluginName, false);
     }
 
     // 日志查询

@@ -3,8 +3,10 @@
   import { location } from 'svelte-spa-router';
   import { isLoading } from 'svelte-i18n';
   import { _, locale, SUPPORTED_LOCALES, switchLocale } from './lib/i18n';
+  import { loadPluginTranslations } from './lib/i18n/plugin-translations';
   import { isAuthenticated, authRequired, getToken, logout } from './lib/stores/auth';
   import { getConfig } from './lib/api/config';
+  import { pluginList, refreshPlugins } from './lib/stores/plugins';
   import Dashboard from './routes/Dashboard.svelte';
   import Configuration from './routes/Configuration.svelte';
   import RoutesIndex from './routes/RoutesIndex.svelte';
@@ -13,20 +15,26 @@
   import Login from './routes/Login.svelte';
   import NotFound from './routes/NotFound.svelte';
   import ToastContainer from './lib/components/ToastContainer.svelte';
+  import PluginHost from './lib/components/PluginHost.svelte';
+  import PluginsPage from './routes/Plugins.svelte';
+  import PluginDetailLayout from './routes/PluginDetailLayout.svelte';
 
   // i18n 已在模块级别初始化，无需在组件中初始化
 
   // 语言切换下拉菜单
-  let dropdownOpen = false;
-
   function handleLocaleChange(newLocale: string) {
     switchLocale(newLocale);
-    dropdownOpen = false;
   }
 
   // 认证检查
   onMount(async () => {
     try {
+      // 加载插件翻译（在应用启动时）
+      await loadPluginTranslations();
+
+      // 加载插件列表 (Global Store)
+      refreshPlugins();
+
       // 1. 检查是否需要认证
       const config = await getConfig();
       const needAuth = config.auth?.enabled || false;
@@ -134,6 +142,63 @@
             <span>{$_('nav.configuration')}</span>
           </a>
         </li>
+
+        <li>
+          <a
+            href="/__ui/#/plugins"
+            class:active={$location.startsWith('/plugins')}
+            class="flex items-center gap-2"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+            </svg>
+            <span>{$_('nav.plugins')}</span>
+          </a>
+        </li>
+
+        {#each $pluginList as plugin}
+          {#if plugin.enabled}
+            {#if plugin.metadata?.contributes?.navigation}
+              {#each plugin.metadata.contributes.navigation as nav}
+                {#if nav.target === 'header'}
+                  <li>
+                    <a
+                      href={`/__ui/#/extensions/${plugin.name}${nav.path}`}
+                      class:active={$location.startsWith(`/extensions/${plugin.name}${nav.path}`)}
+                      class="flex items-center gap-2"
+                    >
+                      {#if nav.icon && nav.icon.startsWith('<svg')}
+                        {@html nav.icon}
+                      {:else if nav.icon}
+                        <i class={nav.icon}></i>
+                      {:else}
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                        </svg>
+                      {/if}
+                      <span>{nav.label}</span>
+                    </a>
+                  </li>
+                {/if}
+              {/each}
+            {:else if plugin.metadata?.menus}
+              <!-- Deprecated: Support legacy menus structure -->
+              {#each plugin.metadata.menus as menu}
+                {#if menu.location === 'header'}
+                  <li>
+                    <a
+                      href={`/__ui/#/extensions/${plugin.name}${menu.path}`}
+                      class:active={$location.startsWith(`/extensions/${plugin.name}${menu.path}`)}
+                      class="flex items-center gap-2"
+                    >
+                      <span>{menu.title}</span>
+                    </a>
+                  </li>
+                {/if}
+              {/each}
+            {/if}
+          {/if}
+        {/each}
       </ul>
 
       <!-- 语言切换器 -->
@@ -189,6 +254,19 @@
     <Logs />
   {:else if $location === '/config'}
     <Configuration />
+  {:else if $location === '/plugins'}
+    <PluginsPage />
+  {:else if $location.startsWith('/plugins/')}
+    {@const pathParts = $location.replace('/plugins/', '').split('/')}
+    {@const pluginName = pathParts[0]}
+    <!-- Render management detail layout (Settings, etc.) -->
+    <PluginDetailLayout params={{ name: pluginName }} />
+  {:else if $location.startsWith('/extensions/')}
+    {@const pathParts = $location.replace('/extensions/', '').split('/')}
+    {@const pluginName = pathParts[0]}
+    {@const pluginPath = '/' + pathParts.slice(1).join('/')}
+    <!-- Render feature page (Standalone) -->
+    <PluginHost pluginName={pluginName} path={pluginPath} />
   {:else}
     <NotFound />
   {/if}

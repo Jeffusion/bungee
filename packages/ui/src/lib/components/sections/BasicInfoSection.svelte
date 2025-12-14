@@ -28,9 +28,10 @@
     route.pathRewrite = Object.keys(rewrite).length > 0 ? rewrite : undefined;
   }
 
-  // Plugin handling - convert between single value UI and array storage
-  let routePlugin = route.plugins?.[0] || null;
-  $: route.plugins = routePlugin ? [routePlugin] : undefined;
+  // Initialize plugins array if undefined
+  $: if (!route.plugins) {
+    route.plugins = [];
+  }
 
   function addPathRewrite() {
     pathRewriteEntries = [...pathRewriteEntries, { pattern: '', replacement: '' }];
@@ -146,11 +147,11 @@
 
   <!-- Route-level Plugin/Transformer -->
   <div>
-    <h3 class="text-lg font-semibold mb-2">{$_('routeEditor.transformer')}</h3>
+    <h3 class="text-lg font-semibold mb-2">{$_('routeEditor.routePlugins')}</h3>
     <p class="text-sm text-gray-500 mb-4">
-      {$_('routeEditor.transformerHelp')}
+      {$_('routeEditor.routePluginsHelp')}
     </p>
-    <PluginEditor bind:plugin={routePlugin} label={$_('routeEditor.transformer')} />
+    <PluginEditor bind:plugins={route.plugins} label="" />
   </div>
 </div>
 

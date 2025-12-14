@@ -1,3 +1,4 @@
+import { getPluginName } from "./plugin.types";
 import type { Plugin, StreamChunkContext } from './plugin.types';
 import { logger } from './logger';
 
@@ -126,7 +127,7 @@ export class StreamExecutor {
 
     // 为每个 plugin 初始化 state map
     for (const plugin of this.plugins) {
-      this.streamStates.set(plugin.name, new Map());
+      this.streamStates.set(getPluginName(plugin), new Map());
     }
   }
 
@@ -143,7 +144,7 @@ export class StreamExecutor {
         continue;
       }
 
-      const streamState = this.streamStates.get(plugin.name)!;
+      const streamState = this.streamStates.get(getPluginName(plugin))!;
       const newChunks: any[] = [];
 
       // 对每个输入 chunk 应用转换
@@ -170,14 +171,14 @@ export class StreamExecutor {
             newChunks.push(...result);
           } else {
             logger.warn(
-              { pluginName: plugin.name, result },
+              { pluginName: getPluginName(plugin), result },
               'processStreamChunk must return an array or null, got unexpected type'
             );
             newChunks.push(inputChunk);
           }
         } catch (error) {
           logger.error(
-            { error, pluginName: plugin.name, chunk: inputChunk },
+            { error, pluginName: getPluginName(plugin), chunk: inputChunk },
             'Error in processStreamChunk'
           );
           // 出错时原样输出
@@ -214,7 +215,7 @@ export class StreamExecutor {
         continue;
       }
 
-      const streamState = this.streamStates.get(plugin.name)!;
+      const streamState = this.streamStates.get(getPluginName(plugin))!;
       const context: StreamChunkContext = {
         chunkIndex: this.chunkIndex,
         isFirstChunk: false,
@@ -229,13 +230,13 @@ export class StreamExecutor {
         if (result && Array.isArray(result)) {
           // 将 flush 返回的 chunks 继续传递给后续 plugins 处理
           for (const chunk of result) {
-            const processed = await this.processPluginsAfter(plugin.name, chunk, context);
+            const processed = await this.processPluginsAfter(getPluginName(plugin), chunk, context);
             chunks.push(...processed);
           }
         }
       } catch (error) {
         logger.error(
-          { error, pluginName: plugin.name },
+          { error, pluginName: getPluginName(plugin) },
           'Error in flushStream'
         );
       }
@@ -257,7 +258,7 @@ export class StreamExecutor {
     let foundPlugin = false;
 
     for (const plugin of this.plugins) {
-      if (plugin.name === afterPluginName) {
+      if (getPluginName(plugin) === afterPluginName) {
         foundPlugin = true;
         continue;
       }
@@ -266,7 +267,7 @@ export class StreamExecutor {
         continue;
       }
 
-      const streamState = this.streamStates.get(plugin.name)!;
+      const streamState = this.streamStates.get(getPluginName(plugin))!;
       const newChunks: any[] = [];
 
       for (const inputChunk of chunks) {
@@ -287,7 +288,7 @@ export class StreamExecutor {
           }
         } catch (error) {
           logger.error(
-            { error, pluginName: plugin.name },
+            { error, pluginName: getPluginName(plugin) },
             'Error processing chunk after flush'
           );
           newChunks.push(inputChunk);

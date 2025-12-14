@@ -1,249 +1,304 @@
 <script lang="ts">
   import { createEventDispatcher, onMount } from 'svelte';
-  import { PluginsAPI } from '../api/plugins';
+  import { PluginsAPI, type PluginSchema } from '../api/plugins';
+  import DynamicPluginForm from './DynamicPluginForm.svelte';
+  import PluginConfigDisplay from './PluginConfigDisplay.svelte';
   import { _ } from '../i18n';
+  import type { PluginConfig } from '../api/routes';
+  import { isVirtualField } from '../utils/field-transform';
 
-  export let plugin: string | null = null;
-  export let label = 'Plugin';
+  export let plugins: Array<PluginConfig | string> = [];
+  export let label = 'Plugins';
 
   const dispatch = createEventDispatcher();
 
-  let showPreview = false;
-  let testRequest = `{
-  "model": "claude-3-5-sonnet-20241022",
-  "messages": [
-    {
-      "role": "user",
-      "content": "Hello"
-    }
-  ]
-}`;
-  let testResponse = '';
-  let previewError: string | null = null;
+  let availablePlugins: PluginSchema[] = [];
+  let showAddDialog = false;
+  let selectedPluginName: string | null = null;
+  let editingPluginIndex: number | null = null;
+  let pluginConfig: Record<string, any> = {};
+  let configErrors: Record<string, string> = {};
 
-  // 可用的 plugins (动态从API获取)
-  let availablePlugins: Array<{
-    id: string;
-    name: string;
-    description: string;
-  }> = [];
-
-  // 格式化plugin名称
-  function formatPluginName(id: string): string {
-    return id.split('-').map(word =>
-      word.charAt(0).toUpperCase() + word.slice(1)
-    ).join(' → ');
-  }
-
-  // 获取plugin描述
-  function getPluginDescription(id: string): string {
-    const parts = id.split('-to-');
-    if (parts.length === 2) {
-      const [from, to] = parts;
-      return `Convert ${from.charAt(0).toUpperCase() + from.slice(1)} API format to ${to.charAt(0).toUpperCase() + to.slice(1)} format`;
-    }
-    return `${formatPluginName(id)} plugin`;
-  }
-
-  // 从API获取plugins列表
+  // 加载可用插件及其 schema（✅ 只显示已启用的插件）
   onMount(async () => {
     try {
-      const pluginIds = await PluginsAPI.getAll();
-      availablePlugins = pluginIds.map(id => ({
-        id,
-        name: formatPluginName(id),
-        description: getPluginDescription(id)
-      }));
+      const schemas = await PluginsAPI.getEnabledSchemas();
+      availablePlugins = Object.values(schemas);
+
+      // 如果没有已启用的插件，显示提示信息
+      if (availablePlugins.length === 0) {
+        console.warn('No enabled plugins available. Please enable plugins in Plugin Management first.');
+      }
     } catch (error) {
-      console.warn('Failed to load plugins from API, using fallback:', error);
-      // 如果API失败，使用备用列表
-      availablePlugins = [
-        {
-          id: 'openai-to-anthropic',
-          name: 'OpenAI → Anthropic',
-          description: 'Convert OpenAI API format to Anthropic format',
-        },
-        {
-          id: 'anthropic-to-openai',
-          name: 'Anthropic → OpenAI',
-          description: 'Convert Anthropic API format to OpenAI format',
-        },
-        {
-          id: 'anthropic-to-gemini',
-          name: 'Anthropic → Gemini',
-          description: 'Convert Anthropic API format to Google Gemini format',
-        }
-      ];
+      console.error('Failed to load plugin schemas:', error);
     }
   });
 
-  function handleChange() {
-    dispatch('change', plugin);
-    testResponse = '';
-    previewError = null;
+  function handleAddPlugin() {
+    showAddDialog = true;
+    selectedPluginName = null;
+    pluginConfig = {};
+    configErrors = {};
+    editingPluginIndex = null;
   }
 
-  function previewTransform() {
-    if (!plugin || !testRequest) {
-      previewError = $_('plugin.testFailed', { values: { error: 'Invalid input' } });
+  function handleEditPlugin(index: number) {
+    showAddDialog = true;
+    editingPluginIndex = index;
+    const plugin = plugins[index];
+
+    // 处理字符串和对象两种格式
+    if (typeof plugin === 'string') {
+      selectedPluginName = plugin;
+      pluginConfig = {};
+    } else {
+      selectedPluginName = plugin.name;
+      pluginConfig = { ...(plugin.options || {}) };
+    }
+
+    configErrors = {};
+  }
+
+  function handleRemovePlugin(index: number) {
+    plugins = plugins.filter((_, i) => i !== index);
+    dispatch('change', plugins);
+  }
+
+  function handlePluginSelect(event: Event) {
+    const target = event.target as HTMLSelectElement;
+    selectedPluginName = target.value;
+    pluginConfig = {};
+    configErrors = {};
+  }
+
+  function handleConfigChange(event: CustomEvent) {
+    pluginConfig = event.detail;
+  }
+
+  function handleConfigValidate(event: CustomEvent) {
+    configErrors = event.detail;
+  }
+
+  function handleSavePlugin() {
+    // 验证是否选择了插件
+    if (!selectedPluginName) return;
+
+    // 验证配置
+    const plugin = availablePlugins.find(p => p.name === selectedPluginName);
+    if (plugin && plugin.configSchema.length > 0) {
+      // 检查必填字段
+      const requiredFields = plugin.configSchema.filter((f: any) => f.required);
+      for (const field of requiredFields) {
+        // 🔑 虚拟字段：验证其对应的实际字段
+        if (isVirtualField(field)) {
+          if (field.fieldTransform?.fields) {
+            const missingFields = field.fieldTransform.fields.filter(
+              realField => !pluginConfig[realField]
+            );
+            if (missingFields.length > 0) {
+              configErrors = {
+                ...configErrors,
+                [field.name]: `${field.label} is required`
+              };
+              return;
+            }
+          }
+        }
+        // 普通字段：直接验证
+        else if (!pluginConfig[field.name]) {
+          configErrors = {
+            ...configErrors,
+            [field.name]: `${field.label} is required`
+          };
+          return;
+        }
+      }
+    }
+
+    // 如果有错误，不保存
+    if (Object.keys(configErrors).length > 0) {
       return;
     }
 
-    try {
-      const input = JSON.parse(testRequest);
-
-      // 模拟转换（实际应该调用后端 API）
-      let output;
-
-      if (plugin === 'anthropic-to-gemini') {
-        output = {
-          contents: input.messages?.map((msg: any) => ({
-            role: msg.role === 'user' ? 'user' : 'model',
-            parts: [{ text: msg.content }]
-          })),
-          generationConfig: {
-            temperature: input.temperature || 1.0,
-            maxOutputTokens: input.max_tokens || 8192
-          }
-        };
-      } else if (plugin === 'anthropic-to-openai') {
-        output = {
-          model: input.model?.replace('claude', 'gpt-4'),
-          messages: input.messages,
-          temperature: input.temperature,
-          max_tokens: input.max_tokens
-        };
-      } else {
-        output = { ...input, _transformed: true };
-      }
-
-      testResponse = JSON.stringify(output, null, 2);
-      previewError = null;
-    } catch (err: any) {
-      previewError = err.message;
-      testResponse = '';
+    // 构建插件配置对象
+    const newPlugin: any = { name: selectedPluginName };
+    if (Object.keys(pluginConfig).length > 0) {
+      newPlugin.options = pluginConfig;
     }
+
+    if (editingPluginIndex !== null) {
+      // 编辑模式
+      plugins = plugins.map((p, i) => i === editingPluginIndex ? newPlugin : p);
+    } else {
+      // 新增模式
+      plugins = [...plugins, newPlugin];
+    }
+
+    dispatch('change', plugins);
+    showAddDialog = false;
   }
 
-  function clearPreview() {
-    testResponse = '';
-    previewError = null;
+  function handleCancelDialog() {
+    showAddDialog = false;
+    selectedPluginName = null;
+    pluginConfig = {};
+    configErrors = {};
+    editingPluginIndex = null;
   }
+
+  $: selectedPluginSchema = selectedPluginName
+    ? availablePlugins.find(p => p.name === selectedPluginName)?.configSchema || []
+    : [];
 </script>
 
 <div class="space-y-3">
-  <div class="form-control">
-    <label class="label" for="plugin-select">
-      <span class="label-text font-semibold">{label}</span>
-    </label>
-    {#if availablePlugins.length === 0}
-      <!-- Empty State -->
-      <div class="alert alert-info">
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-        </svg>
-        <span>{$_('routeEditor.noPluginsAvailable')}</span>
-      </div>
+  <div class="flex items-center justify-between">
+    {#if label}
+      <label class="label">
+        <span class="label-text font-semibold">{label}</span>
+      </label>
     {:else}
-      <!-- Plugin Selector -->
-      <select
-        id="plugin-select"
-        class="select select-bordered"
-        bind:value={plugin}
-        on:change={handleChange}
-      >
-        <option value={null}>{$_('plugin.none')}</option>
-        {#each availablePlugins as p}
-          <option value={p.id}>{p.name}</option>
-        {/each}
-      </select>
-      {#if plugin}
-        <div class="label">
-          <span class="label-text-alt text-gray-500">
-            {availablePlugins.find(p => p.id === plugin)?.description}
-          </span>
-        </div>
-      {/if}
+      <div></div>
     {/if}
+    <button
+      type="button"
+      class="btn btn-sm btn-outline"
+      on:click={handleAddPlugin}
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+      </svg>
+      {$_('plugin.addPlugin')}
+    </button>
   </div>
 
-  {#if plugin}
-    <div class="flex items-center gap-2">
-      <button
-        type="button"
-        class="btn btn-xs btn-outline"
-        on:click={() => showPreview = !showPreview}
-      >
-        {showPreview ? 'Hide' : 'Show'} Preview
-      </button>
-    </div>
-
-    {#if showPreview}
-      <div class="card bg-base-200">
-        <div class="card-body p-4 space-y-3">
-          <h4 class="font-semibold text-sm">{$_('plugin.testPlugin')}</h4>
-
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="label py-1" for="plugin-input">
-                <span class="label-text text-xs">{$_('plugin.input')}</span>
-              </label>
-              <textarea
-                id="plugin-input"
-                class="textarea textarea-bordered textarea-sm font-mono text-xs w-full"
-                bind:value={testRequest}
-                placeholder={$_('plugin.inputPlaceholder')}
-                rows="10"
-              ></textarea>
-            </div>
-
-            <div>
-              <label class="label py-1" for="plugin-output">
-                <span class="label-text text-xs">{$_('plugin.output')}</span>
-              </label>
-              <textarea
-                id="plugin-output"
-                class="textarea textarea-bordered textarea-sm font-mono text-xs w-full bg-base-100"
-                value={testResponse}
-                readonly
-                rows="10"
-                placeholder={$_('plugin.outputPlaceholder')}
-              ></textarea>
+  <!-- 已添加的插件列表 -->
+  {#if plugins.length > 0}
+    <div class="space-y-2">
+      {#each plugins as plugin, index}
+        {@const pluginName = typeof plugin === 'string' ? plugin : plugin.name}
+        {@const pluginOptions = typeof plugin === 'string' ? null : plugin.options}
+        {@const pluginMeta = availablePlugins.find(p => p.name === pluginName)}
+        <div class="card bg-base-200 shadow-sm">
+          <div class="card-body p-3">
+            <div class="flex items-start justify-between gap-3">
+              <div class="flex-1 min-w-0">
+                <h4 class="font-semibold text-sm mb-1">{pluginMeta?.metadata?.name ? $_(pluginMeta.metadata.name) : pluginName}</h4>
+                {#if pluginOptions && Object.keys(pluginOptions).length > 0 && pluginMeta}
+                  <PluginConfigDisplay
+                    schema={pluginMeta.configSchema || []}
+                    config={pluginOptions}
+                  />
+                {/if}
+              </div>
+              <div class="flex gap-1 flex-shrink-0">
+                <button
+                  type="button"
+                  class="btn btn-xs btn-ghost"
+                  on:click={() => handleEditPlugin(index)}
+                >
+                  {$_('common.edit')}
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-xs btn-ghost text-error"
+                  on:click={() => handleRemovePlugin(index)}
+                >
+                  {$_('plugin.removePlugin')}
+                </button>
+              </div>
             </div>
           </div>
-
-          <div class="flex gap-2">
-            <button
-              type="button"
-              class="btn btn-xs btn-primary"
-              on:click={previewTransform}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
-              </svg>
-              {$_('plugin.testPlugin')}
-            </button>
-            {#if testResponse || previewError}
-              <button
-                type="button"
-                class="btn btn-xs btn-ghost"
-                on:click={clearPreview}
-              >
-                {$_('common.reset')}
-              </button>
-            {/if}
-          </div>
-
-          {#if previewError}
-            <div class="alert alert-error py-2">
-              <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-4 w-4" fill="none" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span class="text-xs">{$_('common.error')}: {previewError}</span>
-            </div>
-          {/if}
         </div>
-      </div>
-    {/if}
+      {/each}
+    </div>
+  {:else}
+    <div class="alert alert-info py-2">
+      <span class="text-sm">{$_('plugin.noPluginsConfigured')}</span>
+    </div>
   {/if}
 </div>
+
+<!-- 添加/编辑插件对话框 -->
+{#if showAddDialog}
+  <div class="modal modal-open">
+    <div class="modal-box max-w-2xl">
+      <h3 class="font-bold text-lg mb-4">
+        {editingPluginIndex !== null ? $_('plugin.editPlugin') : $_('plugin.addPlugin')}
+      </h3>
+
+      <!-- 插件选择 -->
+      <div class="form-control mb-4">
+        <label class="label" for="plugin-select">
+          <span class="label-text font-semibold">{$_('plugin.selectPlugin')}</span>
+        </label>
+        <select
+          id="plugin-select"
+          class="select select-bordered"
+          value={selectedPluginName || ''}
+          on:change={handlePluginSelect}
+          disabled={editingPluginIndex !== null || availablePlugins.length === 0}
+        >
+          <option value="">
+            {availablePlugins.length === 0 ? $_('plugin.noEnabledPlugins') + '...' : $_('plugin.selectPluginPrompt')}
+          </option>
+          {#each availablePlugins as p}
+            <option value={p.name}>
+              {$_(p.metadata?.name) || p.name} {p.version ? `(v${p.version})` : ''}
+            </option>
+          {/each}
+        </select>
+        {#if availablePlugins.length === 0}
+          <label class="label">
+            <span class="label-text-alt text-warning">
+              ⚠️  {$_('plugin.noEnabledPlugins')}
+              <a href="#/plugins" class="link link-primary">{$_('nav.plugins')}</a>
+            </span>
+          </label>
+        {:else if selectedPluginName}
+          {@const plugin = availablePlugins.find(p => p.name === selectedPluginName)}
+          {#if plugin?.description}
+            <label class="label">
+              <span class="label-text-alt text-gray-500">{$_(plugin.description)}</span>
+            </label>
+          {/if}
+        {/if}
+      </div>
+
+      <!-- 动态配置表单 -->
+      {#if selectedPluginName && selectedPluginSchema.length > 0}
+        <div class="divider my-2">{$_('plugin.pluginConfiguration')}</div>
+        <DynamicPluginForm
+          schema={selectedPluginSchema}
+          bind:value={pluginConfig}
+          bind:errors={configErrors}
+          on:change={handleConfigChange}
+          on:validate={handleConfigValidate}
+        />
+      {:else if selectedPluginName}
+        <div class="alert alert-info py-2 mt-4">
+          <span class="text-sm">{$_('plugin.noConfigurationRequired')}</span>
+        </div>
+      {/if}
+
+      <!-- 操作按钮 -->
+      <div class="modal-action">
+        <button
+          type="button"
+          class="btn btn-ghost"
+          on:click={handleCancelDialog}
+        >
+          {$_('common.cancel')}
+        </button>
+        <button
+          type="button"
+          class="btn btn-primary"
+          disabled={!selectedPluginName || Object.keys(configErrors).length > 0}
+          on:click={handleSavePlugin}
+        >
+          {editingPluginIndex !== null ? $_('plugin.update') : $_('common.add')}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}

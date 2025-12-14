@@ -25,7 +25,8 @@
     "home": "Home",
     "routes": "Routes",
     "logs": "Request Logs",
-    "configuration": "Configuration"
+    "configuration": "Configuration",
+    "plugins": "Plugins"
   },
   "breadcrumb": {
     "home": "Home",
@@ -178,6 +179,8 @@
     "addUpstream": "Add Upstream",
     "transformer": "Route Transformer",
     "transformerHelp": "Transformer applied to the entire route (optional)",
+    "routePlugins": "Route Plugins",
+    "routePluginsHelp": "Plugins applied to the entire route (optional)",
     "noPluginsAvailable": "No route transformer plugins available",
     "optional": "Optional",
     "failoverTitle": "Failover",
@@ -283,8 +286,12 @@
     "targetHelp": "Full URL of the upstream server",
     "weight": "Weight",
     "weightHelp": "Load balancing weight (1-100)",
+    "priority": "Priority",
+    "priorityHelp": "Failover order",
     "transformer": "Upstream Transformer",
     "transformerHelp": "Transformer applied only to this upstream (optional)",
+    "upstreamPlugins": "Upstream Plugins",
+    "upstreamPluginsHelp": "Plugins applied only to this upstream (optional)",
     "disabled": "Disable",
     "disabledHelp": "When checked, this upstream will not participate in load balancing",
     "enableTooltip": "Click to enable",
@@ -305,8 +312,20 @@
     "input": "Input (Original Format)",
     "output": "Output (Transformed Format)",
     "inputPlaceholder": "Enter test data...",
+    "outputPlaceholder": "Transformed result will appear here...",
     "testSuccess": "Transform successful",
-    "testFailed": "Transform failed: {error}"
+    "testFailed": "Transform failed: {error}",
+    "addPlugin": "Add Plugin",
+    "editPlugin": "Edit Plugin",
+    "removePlugin": "Remove",
+    "noPluginsConfigured": "No plugins configured",
+    "noEnabledPlugins": "No plugins are currently enabled. Please enable plugins in",
+    "selectPluginPrompt": "-- Select a plugin --",
+    "pluginConfiguration": "Configuration",
+    "noConfigurationRequired": "This plugin requires no configuration",
+    "fieldRequired": "{field} is required",
+    "update": "Update",
+    "cancel": "Cancel"
   },
   "headers": {
     "title": "Request Headers",
@@ -621,5 +640,20 @@
     "unauthorized": "Invalid access token",
     "logout": "Logout",
     "logoutConfirm": "Are you sure you want to logout?"
+  },
+  "plugins": {
+    "title": "Plugins",
+    "subtitle": "Manage installed plugins",
+    "noPlugins": "No Plugins Loaded",
+    "noPluginsDesc": "Add plugins to your configuration file to get started.",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "enable": "Enable",
+    "disable": "Disable",
+    "settings": "Settings",
+    "notFound": "Plugin Not Found",
+    "backToPlugins": "Back to Plugins",
+    "moreInfo": "More info",
+    "noDescription": "No description provided."
   }
 }

@@ -8,13 +8,21 @@ import type { AppConfig } from '@jeffusion/bungee-types';
 import { handleRequest, initializeRuntimeState, initializePluginRegistryForTests, cleanupPluginRegistry } from '../../src/worker';
 import { setMockEnv, cleanupEnv } from './test-helpers';
 
-// Mock config with gemini-to-anthropic transformer
+// Mock config with ai-transformer plugin (gemini to anthropic)
 const mockConfig: AppConfig = {
   routes: [
     {
       path: '/v1/gemini-to-anthropic',
       pathRewrite: { '^/v1/gemini-to-anthropic': '/v1' },
-      plugins: ['gemini-to-anthropic'],
+      plugins: [
+        {
+          name: 'ai-transformer',
+          options: {
+            from: 'gemini',
+            to: 'anthropic'
+          }
+        }
+      ],
       upstreams: [{ target: 'http://mock-anthropic.com', weight: 100, priority: 1 }]
     }
   ]

@@ -10,13 +10,21 @@ import type { AppConfig } from '@jeffusion/bungee-types';
 import { handleRequest, initializeRuntimeState, initializePluginRegistryForTests, cleanupPluginRegistry } from '../../src/worker';
 import { setMockEnv, cleanupEnv } from './test-helpers';
 
-// Mock config with anthropic-to-openai transformer
+// Mock config with ai-transformer plugin (anthropic to openai)
 const mockConfig: AppConfig = {
   routes: [
     {
       path: '/v1/anthropic-to-openai',
       pathRewrite: { '^/v1/anthropic-to-openai': '/v1' },
-      plugins: ['anthropic-to-openai'],
+      plugins: [
+        {
+          name: 'ai-transformer',
+          options: {
+            from: 'anthropic',
+            to: 'openai'
+          }
+        }
+      ],
       upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }]
     }
   ]

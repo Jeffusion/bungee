@@ -1,10 +1,16 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { _ } from '../lib/i18n';
   import type { StatsHistoryV2, TimeRange } from '../lib/types';
   import MonitoringCharts from '../lib/components/MonitoringCharts.svelte';
+  import PluginHost from '../lib/components/PluginHost.svelte';
+  import { pluginList, refreshPlugins } from '../lib/stores/plugins';
 
   // 时间范围状态（受控）
   let selectedRange: TimeRange = '1h';
+
+  // 插件面板
+  let pluginPanels: Array<{pluginName: string, path: string, title: string, w: number, h: number}> = [];
 
   // 计算的统计数据
   let calculatedStats: {
@@ -60,6 +66,53 @@
       default: return 3600;
     }
   }
+
+  // Reactive update of panels based on pluginList store
+  $: {
+    const panels: any[] = [];
+    $pluginList.forEach(p => {
+      if (!p.enabled || !p.metadata) return;
+
+      // New structure: contributes.widgets
+      if (p.metadata.contributes?.widgets) {
+        p.metadata.contributes.widgets.forEach(widget => {
+          let w = 1, h = 1;
+          switch (widget.size) {
+            case 'medium': w = 2; h = 1; break;
+            case 'large': w = 2; h = 2; break;
+            case 'full': w = 4; h = 2; break;
+            case 'small':
+            default: w = 1; h = 1; break;
+          }
+
+          panels.push({
+            pluginName: p.name,
+            path: widget.path,
+            title: widget.title,
+            w, h
+          });
+        });
+      }
+      // Legacy structure: ui.dashboard
+      else if (p.metadata.ui?.dashboard) {
+        p.metadata.ui.dashboard.forEach(panel => {
+          panels.push({
+            pluginName: p.name,
+            path: panel.path,
+            title: panel.title,
+            w: panel.size?.w || 1,
+            h: panel.size?.h || 1
+          });
+        });
+      }
+    });
+    pluginPanels = panels;
+  }
+
+  onMount(() => {
+    // Ensure we have the latest plugins loaded
+    refreshPlugins();
+  });
 </script>
 
 <div class="p-6">
@@ -205,4 +258,27 @@
     selectedRange={selectedRange}
     onDataLoaded={handleDataLoaded}
   />
+
+  <!-- 插件面板 -->
+  {#if pluginPanels.length > 0}
+    <div class="divider mt-8">Extensions</div>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      {#each pluginPanels as panel}
+        <div
+          class="card bg-base-100 shadow-xl overflow-hidden h-64"
+          class:md:col-span-2={panel.w >= 2}
+          class:lg:col-span-2={panel.w === 2}
+          class:lg:col-span-4={panel.w === 4}
+          class:row-span-2={panel.h >= 2}
+        >
+          <div class="card-body p-0 relative h-full">
+            <div class="absolute top-2 right-2 z-10 opacity-50 text-xs bg-base-200 px-2 py-1 rounded">
+              {panel.title}
+            </div>
+            <PluginHost pluginName={panel.pluginName} path={panel.path} />
+          </div>
+        </div>
+      {/each}
+    </div>
+  {/if}
 </div>

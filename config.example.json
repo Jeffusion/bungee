@@ -39,7 +39,12 @@
     },
     {
       "path": "/api/ai",
-      "plugins": ["anthropic-to-openai"],
+      "plugins": [
+        {
+          "name": "ai-transformer",
+          "options": { "from": "anthropic", "to": "openai" }
+        }
+      ],
       "upstreams": [
         {
           "target": "https://api.openai.com",
@@ -50,7 +55,12 @@
           "target": "https://api.gemini.com",
           "priority": 2,
           "weight": 100,
-          "plugins": ["anthropic-to-gemini"]
+          "plugins": [
+            {
+              "name": "ai-transformer",
+              "options": { "from": "anthropic", "to": "gemini" }
+            }
+          ]
         }
       ]
     },
@@ -134,11 +144,11 @@
       ],
       "failover": {
         "enabled": true,
-        "retryableStatusCodes": [500, 502, 503, 504]
-      },
-      "healthCheck": {
-        "enabled": true,
-        "intervalSeconds": 10
+        "retryableStatusCodes": [500, 502, 503, 504],
+        "healthCheck": {
+          "enabled": true,
+          "intervalMs": 10000
+        }
       }
     }
   ]

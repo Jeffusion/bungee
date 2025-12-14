@@ -1,47 +1,71 @@
-const API_BASE = '/__ui/api';
+import { api } from './client';
 
-/**
- * Plugins API响应类型
- */
-export interface PluginsResponse {
-  plugins: string[];
-  count: number;
+export interface PluginMetadata {
+  name?: string;
+  description?: string;
+  icon?: string;
+  contributes?: {
+    navigation?: Array<{
+      label: string;
+      path: string;
+      icon?: string;
+      target?: 'sidebar' | 'header';
+    }>;
+    widgets?: Array<{
+      title: string;
+      path: string;
+      size?: 'small' | 'medium' | 'large' | 'full';
+    }>;
+    settings?: string;
+  };
+  /** @deprecated */
+  menus?: Array<{
+    id: string;
+    title: string;
+    path: string;
+    icon?: string;
+    location?: 'sidebar' | 'header';
+  }>;
+  /** @deprecated */
+  ui?: {
+    dashboard?: Array<{
+      id: string;
+      title: string;
+      path: string;
+      size?: { w: number; h: number };
+    }>;
+    settings?: string;
+  };
 }
 
-export interface PluginDetailResponse {
-  id: string;
-  config: any[];
+export interface Plugin {
+  name: string;
+  version?: string;
+  enabled: boolean;
+  metadata?: PluginMetadata;
 }
 
-/**
- * Plugins API客户端
- */
-export class PluginsAPI {
+export interface PluginSchema {
+  name: string;
+  version?: string;
+  description?: string;
+  metadata?: PluginMetadata;
+  configSchema: any[];
+}
+
+export const PluginsAPI = {
+  list: () => api.get<Plugin[]>('/plugins'),
+
   /**
-   * 获取所有可用的plugins列表
+   * 获取所有插件的配置 schema
    */
-  static async getAll(): Promise<string[]> {
-    const response = await fetch(`${API_BASE}/transformers`);
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const data: any = await response.json();
-    // 支持新旧两种响应格式，保持向后兼容
-    return data.plugins || data.transformers || [];
-  }
+  getSchemas: () => api.get<Record<string, PluginSchema>>('/plugins/schemas'),
 
   /**
-   * 获取特定plugin的详细配置
+   * 获取已启用插件的配置 schema（用于路由/上游编辑）
    */
-  static async getById(id: string): Promise<PluginDetailResponse> {
-    const response = await fetch(`${API_BASE}/transformers/${encodeURIComponent(id)}`);
+  getEnabledSchemas: () => api.get<Record<string, PluginSchema>>('/plugins/schemas?enabledOnly=true'),
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    return await response.json();
-  }
-}
+  enable: (name: string) => api.post(`/plugins/${name}/enable`, {}),
+  disable: (name: string) => api.post(`/plugins/${name}/disable`, {}),
+};

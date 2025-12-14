@@ -1,4 +1,5 @@
 import { logger } from './logger';
+import { getPluginName, type Plugin } from './plugin.types';
 
 /**
  * 对象池配置选项
@@ -45,7 +46,7 @@ interface PooledObject<T> {
  * - 支持空闲超时自动销毁（可选）
  * - 线程安全的获取/归还机制
  *
- * @template T 池化对象类型，必须有 name 属性
+ * @template T 池化对象类型，必须实现 Plugin 接口
  *
  * @example
  * ```ts
@@ -62,7 +63,7 @@ interface PooledObject<T> {
  * }
  * ```
  */
-export class PluginPool<T extends { name: string; reset?(): void | Promise<void>; onDestroy?(): void | Promise<void> }> {
+export class PluginPool<T extends Plugin> {
   private pool: PooledObject<T>[] = [];
   private factory: () => T;
   private options: Required<PoolOptions>;
@@ -146,7 +147,7 @@ export class PluginPool<T extends { name: string; reset?(): void | Promise<void>
 
       logger.debug(
         {
-          instanceName: available.instance.name,
+          instanceName: getPluginName(available.instance),
           poolSize: this.pool.length,
           inUse: this.pool.filter(o => o.inUse).length
         },
@@ -171,7 +172,7 @@ export class PluginPool<T extends { name: string; reset?(): void | Promise<void>
 
         logger.debug(
           {
-            instanceName: instance.name,
+            instanceName: getPluginName(instance),
             poolSize: this.pool.length,
             inUse: this.pool.filter(o => o.inUse).length
           },
@@ -221,7 +222,7 @@ export class PluginPool<T extends { name: string; reset?(): void | Promise<void>
         await instance.reset();
       } catch (error) {
         logger.error(
-          { error, instanceName: instance.name },
+          { error, instanceName: getPluginName(instance) },
           'Error during instance reset, removing from pool'
         );
 
@@ -238,7 +239,7 @@ export class PluginPool<T extends { name: string; reset?(): void | Promise<void>
           }
         } catch (destroyError) {
           logger.error(
-            { error: destroyError, instanceName: instance.name },
+            { error: destroyError, instanceName: getPluginName(instance) },
             'Error during instance destroy'
           );
         }
@@ -253,7 +254,7 @@ export class PluginPool<T extends { name: string; reset?(): void | Promise<void>
 
     logger.debug(
       {
-        instanceName: instance.name,
+        instanceName: getPluginName(instance),
         poolSize: this.pool.length,
         available: this.pool.filter(o => !o.inUse).length
       },
@@ -273,7 +274,7 @@ export class PluginPool<T extends { name: string; reset?(): void | Promise<void>
       minSize: this.options.minSize,
       maxSize: this.options.maxSize,
       objects: this.pool.map(obj => ({
-        name: obj.instance.name,
+        name: getPluginName(obj.instance),
         inUse: obj.inUse,
         ageMs: now - obj.createdAt,
         idleMs: now - obj.lastUsedAt
@@ -307,7 +308,7 @@ export class PluginPool<T extends { name: string; reset?(): void | Promise<void>
         }
       } catch (error) {
         logger.error(
-          { error, instanceName: pooledObject.instance.name },
+          { error, instanceName: getPluginName(pooledObject.instance) },
           'Error during pool destruction'
         );
       }
@@ -351,12 +352,12 @@ export class PluginPool<T extends { name: string; reset?(): void | Promise<void>
               await obj.instance.onDestroy();
             }
             logger.debug(
-              { instanceName: obj.instance.name, idleMs: now - obj.lastUsedAt },
+              { instanceName: getPluginName(obj.instance), idleMs: now - obj.lastUsedAt },
               'Removed idle instance from pool'
             );
           } catch (error) {
             logger.error(
-              { error, instanceName: obj.instance.name },
+              { error, instanceName: getPluginName(obj.instance) },
               'Error destroying idle instance'
             );
           }

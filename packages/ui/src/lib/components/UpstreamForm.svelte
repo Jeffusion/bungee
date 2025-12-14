@@ -20,11 +20,10 @@
     upstream.headers = upstream.headers || { add: {}, remove: [], default: {} };
     upstream.body = upstream.body || { add: {}, remove: [], replace: {}, default: {} };
     upstream.query = upstream.query || { add: {}, remove: [], replace: {}, default: {} };
+    if (!upstream.plugins) {
+      upstream.plugins = [];
+    }
   }
-
-  // 处理 plugin 变化 - convert between single value UI and array storage
-  let pluginValue = upstream.plugins?.[0] || null;
-  $: upstream.plugins = pluginValue ? [pluginValue] : undefined;
 </script>
 
 <div class="card bg-base-100 shadow-sm border border-base-300">
@@ -130,8 +129,8 @@
 
         <div class="form-control">
           <label class="label" for="upstream-priority-{index}">
-            <span class="label-text">Priority</span>
-            <span class="label-text-alt text-xs">Failover order</span>
+            <span class="label-text">{$_('upstream.priority')}</span>
+            <span class="label-text-alt text-xs">{$_('upstream.priorityHelp')}</span>
           </label>
           <input
             id="upstream-priority-{index}"
@@ -145,10 +144,16 @@
       </div>
 
       <!-- Plugin -->
-      <PluginEditor bind:plugin={pluginValue} label={$_('upstream.transformer')} />
+      <div>
+        <h4 class="text-sm font-semibold mb-1">{$_('upstream.upstreamPlugins')}</h4>
+        <p class="text-xs text-gray-500 mb-2">
+          {$_('upstream.upstreamPluginsHelp')}
+        </p>
+        <PluginEditor bind:plugins={upstream.plugins} label="" />
+      </div>
 
       <!-- Advanced Settings Section -->
-      <div class="divider text-sm font-semibold">{$_('upstream.transformerHelp')}</div>
+      <div class="divider text-sm font-semibold">{$_('routeEditor.requestModification')}</div>
 
       <!-- Advanced Settings - Headers -->
       <div class="collapse collapse-arrow bg-base-200">
