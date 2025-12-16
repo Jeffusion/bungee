@@ -13,7 +13,7 @@
  */
 
 import type { AIConverter } from './base';
-import type { PluginContext, StreamChunkContext } from '../../../plugin.types';
+import type { MutableRequestContext, ResponseContext, StreamChunkContext } from '../../../hooks';
 
 interface GeminiPart {
   text?: string;
@@ -63,7 +63,7 @@ export class GeminiToAnthropicConverter implements AIConverter {
   /**
    * 修改请求 URL 和 body，转换为 Anthropic 格式
    */
-  async onBeforeRequest(ctx: PluginContext): Promise<void> {
+  async onBeforeRequest(ctx: MutableRequestContext): Promise<void> {
     const body = ctx.body as any;
     if (!body) return;
 
@@ -306,7 +306,7 @@ export class GeminiToAnthropicConverter implements AIConverter {
    * 处理非流式响应
    * 将 Anthropic 响应转换为 Gemini 格式
    */
-  async onResponse(ctx: PluginContext & { response: Response }): Promise<Response | void> {
+  async onResponse(ctx: ResponseContext): Promise<Response | void> {
     // 只处理成功的 JSON 响应
     const contentType = ctx.response.headers.get('content-type') || '';
     if (!contentType.includes('application/json')) {
@@ -336,7 +336,7 @@ export class GeminiToAnthropicConverter implements AIConverter {
   /**
    * 转换 Anthropic 错误响应为 Gemini 格式
    */
-  private async transformErrorResponse(ctx: PluginContext & { response: Response }): Promise<Response> {
+  private async transformErrorResponse(ctx: ResponseContext): Promise<Response> {
     try {
       const responseClone = ctx.response.clone();
       const errorBody = await responseClone.json();

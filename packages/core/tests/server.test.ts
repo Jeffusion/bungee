@@ -51,8 +51,9 @@ const mockConfig: AppConfig = {
     {
       path: '/failover-path',
       upstreams: [
-        { target: 'http://fails.com', weight: 50, priority: 1 },
-        { target: 'http://works.com', weight: 50, priority: 1 },
+        // 设置高权重以确保 fails.com 总是被优先选择（加权随机算法）
+        { target: 'http://fails.com', weight: 99, priority: 1 },
+        { target: 'http://works.com', weight: 1, priority: 1 },
       ],
       failover: {
         enabled: true,
@@ -243,16 +244,10 @@ describe('Server Request Handler', () => {
   });
 
   test('should failover to a healthy upstream when one fails', async () => {
-    let callCount = 0;
-    const deterministicSelector = (upstreams: any[]) => {
-      // First call, return the failing upstream. Second call, return the working one.
-      const target = callCount === 0 ? 'http://fails.com' : 'http://works.com';
-      callCount++;
-      return upstreams.find(u => u.target === target);
-    };
-
+    // 注意：failover 逻辑使用真实的 FailoverCoordinator，不使用自定义 selector
+    // 通过配置中的权重（fails.com: 99, works.com: 1）确保 fails.com 被优先选择
     const req = new Request('http://localhost/failover-path');
-    const res = await handleRequest(req, mockConfig, deterministicSelector);
+    const res = await handleRequest(req, mockConfig);
 
     expect(res.status).toBe(200);
     const body = await res.text();

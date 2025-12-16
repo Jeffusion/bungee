@@ -15,8 +15,9 @@
  */
 
 import { isArray, filter, map, includes, isEmpty } from 'lodash-es';
-import type { Plugin, PluginContext, PluginTranslations } from '../plugin.types';
+import type { Plugin, PluginTranslations } from '../plugin.types';
 import { definePlugin } from '../plugin.types';
+import type { PluginHooks, MutableRequestContext } from '../hooks';
 
 export const AnthropicFilterErrorToolResultsPlugin = definePlugin(
   class implements Plugin {
@@ -57,60 +58,76 @@ export const AnthropicFilterErrorToolResultsPlugin = definePlugin(
       // 插件不需要任何配置选项
     }
 
-  /**
-   * 在发送到 upstream 之前过滤无效的 tool_result
-   */
-  async onBeforeRequest(ctx: PluginContext): Promise<void> {
-    const body = ctx.body as any;
+    /**
+     * 注册插件 hooks
+     */
+    register(hooks: PluginHooks): void {
+      // 使用 tap 同步注册（数据过滤操作不需要异步）
+      hooks.onBeforeRequest.tap(
+        { name: 'anthropic-filter-error-tool-results', stage: 0 },
+        (ctx) => {
+          const body = ctx.body as any;
 
-    if (!body || !isArray(body.messages)) {
-      return;
-    }
-
-    const messages = body.messages;
-    const newMessages: any[] = [];
-
-    for (let i = 0; i < messages.length; i++) {
-      const message = messages[i];
-
-      // 只处理 user 消息，且 content 为数组的情况
-      if (message.role === 'user' && isArray(message.content)) {
-        let validToolIds: string[] = [];
-
-        // 检查上一条消息是否为 assistant 且包含 content
-        if (i > 0) {
-          const prevMessage = messages[i - 1];
-          if (prevMessage.role === 'assistant' && isArray(prevMessage.content)) {
-            // 使用 lodash 提取所有 tool_use 的 id
-            validToolIds = map(
-              filter(prevMessage.content, { type: 'tool_use' }),
-              'id'
-            );
+          if (!body || !isArray(body.messages)) {
+            return ctx;
           }
+
+          const messages = body.messages;
+          const newMessages: any[] = [];
+
+          for (let i = 0; i < messages.length; i++) {
+            const message = messages[i];
+
+            // 只处理 user 消息，且 content 为数组的情况
+            if (message.role === 'user' && isArray(message.content)) {
+              let validToolIds: string[] = [];
+
+              // 检查上一条消息是否为 assistant 且包含 content
+              if (i > 0) {
+                const prevMessage = messages[i - 1];
+                if (prevMessage.role === 'assistant' && isArray(prevMessage.content)) {
+                  // 使用 lodash 提取所有 tool_use 的 id
+                  validToolIds = map(
+                    filter(prevMessage.content, { type: 'tool_use' }),
+                    'id'
+                  );
+                }
+              }
+
+              // 过滤当前 user 消息的 content
+              // 保留条件：
+              // 1. 不是 tool_result (如 text)
+              // 2. 是 tool_result 且其 tool_use_id 在 validToolIds 中
+              message.content = filter(message.content, (item) => {
+                if (item && item.type === 'tool_result') {
+                  return includes(validToolIds, item.tool_use_id);
+                }
+                return true;
+              });
+            }
+
+            // 只有 content 不为空（且不是空数组）时才保留该消息
+            if (!isEmpty(message.content)) {
+              newMessages.push(message);
+            }
+          }
+
+          // 更新请求体
+          ctx.body.messages = newMessages;
+
+          // Waterfall hook 必须返回 context
+          return ctx;
         }
-
-        // 过滤当前 user 消息的 content
-        // 保留条件：
-        // 1. 不是 tool_result (如 text)
-        // 2. 是 tool_result 且其 tool_use_id 在 validToolIds 中
-        message.content = filter(message.content, (item) => {
-          if (item && item.type === 'tool_result') {
-            return includes(validToolIds, item.tool_use_id);
-          }
-          return true;
-        });
-      }
-
-      // 只有 content 不为空（且不是空数组）时才保留该消息
-      if (!isEmpty(message.content)) {
-        newMessages.push(message);
-      }
+      );
     }
 
-    // 更新请求体
-    ctx.body.messages = newMessages;
+    /**
+     * 重置插件状态（对象池复用时调用）
+     */
+    async reset(): Promise<void> {
+      // 无状态插件，无需重置
+    }
   }
-}
 );
 
 export default AnthropicFilterErrorToolResultsPlugin;

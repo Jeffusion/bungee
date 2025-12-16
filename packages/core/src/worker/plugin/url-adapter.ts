@@ -4,8 +4,32 @@
  * 提供受保护的 URL 对象给 plugins，确保 plugins 只能修改白名单字段。
  */
 
-import type { PluginUrl, ModifiableUrlFields } from '../../plugin.types';
 import { logger } from '../../logger';
+
+/**
+ * 可修改的 URL 字段
+ */
+export interface ModifiableUrlFields {
+  pathname: string;
+  search: string;
+  hash: string;
+}
+
+/**
+ * Plugin 可访问的 URL 接口
+ * 只允许修改 pathname、search、hash
+ */
+export interface PluginUrl {
+  readonly href: string;
+  readonly protocol: string;
+  readonly host: string;
+  readonly hostname: string;
+  readonly port: string;
+  readonly origin: string;
+  pathname: string;
+  search: string;
+  hash: string;
+}
 
 /**
  * 创建一个受保护的 URL 对象供 plugin 使用
@@ -71,7 +95,7 @@ export function createPluginUrl(
     /**
      * 拦截属性读取
      */
-    get(target, prop: string) {
+    get(_target, prop: string) {
       // 特殊方法：获取修改后的字段
       if (prop === 'getModifiedFields') {
         return () => ({ ...modifications });
@@ -101,7 +125,7 @@ export function createPluginUrl(
     /**
      * 拦截属性赋值
      */
-    set(target, prop: string, value) {
+    set(_target, prop: string, value) {
       // 只允许修改白名单字段
       if (modifiableFields.has(prop)) {
         modifications[prop as keyof ModifiableUrlFields] = value;
@@ -145,7 +169,7 @@ export function createPluginUrl(
     /**
      * 拦截 in 操作符（如 'pathname' in pluginUrl）
      */
-    has(target, prop: string) {
+    has(_target, prop: string) {
       return (
         prop === 'getModifiedFields' ||
         modifiableFields.has(prop) ||
@@ -156,7 +180,7 @@ export function createPluginUrl(
     /**
      * 拦截 Object.keys(), Object.getOwnPropertyNames() 等
      */
-    ownKeys(target) {
+    ownKeys(_target) {
       return [
         ...Array.from(modifiableFields),
         ...Array.from(readonlyFields),
@@ -167,7 +191,7 @@ export function createPluginUrl(
     /**
      * 拦截 Object.getOwnPropertyDescriptor()
      */
-    getOwnPropertyDescriptor(target, prop: string) {
+    getOwnPropertyDescriptor(_target, prop: string) {
       if (
         prop === 'getModifiedFields' ||
         modifiableFields.has(prop) ||

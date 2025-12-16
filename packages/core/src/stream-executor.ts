@@ -1,5 +1,4 @@
-import { getPluginName } from "./plugin.types";
-import type { Plugin, StreamChunkContext } from './plugin.types';
+import type { PluginHooks, StreamChunkContext, RequestContext } from './hooks';
 import { logger } from './logger';
 
 /**
@@ -110,89 +109,68 @@ export function createSSESerializerStream(): TransformStream<any, Uint8Array> {
 
 /**
  * 流式执行器
- * 负责执行 plugins 的流式转换逻辑，支持 N:M 转换
+ * 使用 Hook 系统执行流式转换，支持 N:M 转换
+ *
+ * 性能优化：
+ * - Context 复用：StreamChunkContext 只创建一次，每次更新字段
+ * - 减少对象创建和 GC 压力
  */
 export class StreamExecutor {
-  private plugins: Plugin[];
-  private streamStates: Map<string, Map<string, any>>; // pluginName -> state Map
+  private hooks: PluginHooks;
+  private streamState: Map<string, any> = new Map();
   private chunkIndex: number = 0;
   private isFirstChunk: boolean = true;
   private isLastChunk: boolean = false;
-  private requestLog: any;
+  private requestContext: RequestContext;
 
-  constructor(plugins: Plugin[], requestLog: any) {
-    this.plugins = plugins.filter(p => p.processStreamChunk || p.flushStream);
-    this.streamStates = new Map();
-    this.requestLog = requestLog;
+  // 复用的 context 对象，避免每次 processChunk 都创建新对象
+  private ctx: StreamChunkContext;
 
-    // 为每个 plugin 初始化 state map
-    for (const plugin of this.plugins) {
-      this.streamStates.set(getPluginName(plugin), new Map());
-    }
+  constructor(hooks: PluginHooks, requestContext: RequestContext) {
+    this.hooks = hooks;
+    this.requestContext = requestContext;
+
+    // 初始化复用的 context
+    this.ctx = {
+      ...requestContext,
+      chunkIndex: 0,
+      isFirstChunk: true,
+      isLastChunk: false,
+      streamState: this.streamState,
+      request: requestContext,
+    };
   }
 
   /**
-   * 处理单个 chunk，应用所有 plugins 的转换
+   * 更新 context 字段（复用对象，只更新变化的字段）
+   */
+  private updateContext(): void {
+    this.ctx.chunkIndex = this.chunkIndex;
+    this.ctx.isFirstChunk = this.isFirstChunk;
+    this.ctx.isLastChunk = this.isLastChunk;
+  }
+
+  /**
+   * 处理单个 chunk，应用所有插件的转换
    * 支持 N:M 转换（一个输入可以产生 0 到多个输出）
    */
   async processChunk(chunk: any): Promise<any[]> {
-    let chunks = [chunk];
+    // 更新 context 字段（复用对象）
+    this.updateContext();
 
-    // 依次应用每个 plugin 的转换
-    for (const plugin of this.plugins) {
-      if (!plugin.processStreamChunk) {
-        continue;
-      }
-
-      const streamState = this.streamStates.get(getPluginName(plugin))!;
-      const newChunks: any[] = [];
-
-      // 对每个输入 chunk 应用转换
-      for (const inputChunk of chunks) {
-        const context: StreamChunkContext = {
-          chunkIndex: this.chunkIndex,
-          isFirstChunk: this.isFirstChunk,
-          isLastChunk: this.isLastChunk,
-          streamState,
-          request: this.requestLog
-        };
-
-        try {
-          const result = await plugin.processStreamChunk(inputChunk, context);
-
-          if (result === null || result === undefined) {
-            // 不处理，原样输出
-            newChunks.push(inputChunk);
-          } else if (Array.isArray(result)) {
-            // N:M 转换
-            // [] = 缓冲（不输出）
-            // [item] = 1:1 转换
-            // [item1, item2, ...] = 1:M 拆分
-            newChunks.push(...result);
-          } else {
-            logger.warn(
-              { pluginName: getPluginName(plugin), result },
-              'processStreamChunk must return an array or null, got unexpected type'
-            );
-            newChunks.push(inputChunk);
-          }
-        } catch (error) {
-          logger.error(
-            { error, pluginName: getPluginName(plugin), chunk: inputChunk },
-            'Error in processStreamChunk'
-          );
-          // 出错时原样输出
-          newChunks.push(inputChunk);
-        }
-      }
-
-      chunks = newChunks;
+    try {
+      // 使用 Hook 系统处理 chunk
+      // AsyncSeriesMapHook 会依次调用所有注册的回调，每个回调可以返回 0 到多个输出
+      const results = await this.hooks.onStreamChunk.promise(chunk, this.ctx);
+      return results;
+    } catch (error) {
+      logger.error({ error, chunk }, 'Error in onStreamChunk hook');
+      // 出错时原样输出
+      return [chunk];
+    } finally {
+      this.chunkIndex++;
+      this.isFirstChunk = false;
     }
-
-    this.chunkIndex++;
-    this.isFirstChunk = false;
-
-    return chunks;
   }
 
   /**
@@ -203,120 +181,57 @@ export class StreamExecutor {
   }
 
   /**
-   * 刷新所有 plugins 的缓冲区
+   * 刷新所有插件的缓冲区
    * 在流结束时调用，输出缓冲的 chunks
    */
   async flush(): Promise<any[]> {
-    let chunks: any[] = [];
+    // 更新 context 字段（复用对象）
+    this.updateContext();
 
-    // 依次执行每个 plugin 的 flush
-    for (const plugin of this.plugins) {
-      if (!plugin.flushStream) {
-        continue;
-      }
-
-      const streamState = this.streamStates.get(getPluginName(plugin))!;
-      const context: StreamChunkContext = {
-        chunkIndex: this.chunkIndex,
-        isFirstChunk: false,
-        isLastChunk: true,
-        streamState,
-        request: this.requestLog
-      };
-
-      try {
-        const result = await plugin.flushStream(context);
-
-        if (result && Array.isArray(result)) {
-          // 将 flush 返回的 chunks 继续传递给后续 plugins 处理
-          for (const chunk of result) {
-            const processed = await this.processPluginsAfter(getPluginName(plugin), chunk, context);
-            chunks.push(...processed);
-          }
-        }
-      } catch (error) {
-        logger.error(
-          { error, pluginName: getPluginName(plugin) },
-          'Error in flushStream'
-        );
-      }
+    try {
+      // 使用 Hook 系统刷新缓冲区
+      // AsyncSeriesWaterfallHook 会依次调用所有注册的回调
+      // 每个回调接收上一个回调的输出，返回处理后的 chunks
+      const results = await this.hooks.onFlushStream.promise([], this.ctx);
+      return results;
+    } catch (error) {
+      logger.error({ error }, 'Error in onFlushStream hook');
+      return [];
     }
-
-    return chunks;
-  }
-
-  /**
-   * 将 chunk 传递给指定 plugin 之后的所有 plugins 处理
-   * 用于 flush 时正确处理 plugin 链
-   */
-  private async processPluginsAfter(
-    afterPluginName: string,
-    chunk: any,
-    context: StreamChunkContext
-  ): Promise<any[]> {
-    let chunks = [chunk];
-    let foundPlugin = false;
-
-    for (const plugin of this.plugins) {
-      if (getPluginName(plugin) === afterPluginName) {
-        foundPlugin = true;
-        continue;
-      }
-
-      if (!foundPlugin || !plugin.processStreamChunk) {
-        continue;
-      }
-
-      const streamState = this.streamStates.get(getPluginName(plugin))!;
-      const newChunks: any[] = [];
-
-      for (const inputChunk of chunks) {
-        const pluginContext: StreamChunkContext = {
-          ...context,
-          streamState
-        };
-
-        try {
-          const result = await plugin.processStreamChunk(inputChunk, pluginContext);
-
-          if (result === null || result === undefined) {
-            newChunks.push(inputChunk);
-          } else if (Array.isArray(result)) {
-            newChunks.push(...result);
-          } else {
-            newChunks.push(inputChunk);
-          }
-        } catch (error) {
-          logger.error(
-            { error, pluginName: getPluginName(plugin) },
-            'Error processing chunk after flush'
-          );
-          newChunks.push(inputChunk);
-        }
-      }
-
-      chunks = newChunks;
-    }
-
-    return chunks;
   }
 
   /**
    * 清理资源
    */
   cleanup(): void {
-    this.streamStates.clear();
+    this.streamState.clear();
+  }
+
+  /**
+   * 检查是否有流式处理的回调注册
+   */
+  hasStreamCallbacks(): boolean {
+    return this.hooks.onStreamChunk.hasCallbacks();
   }
 }
 
 /**
  * 创建用于流式转换的 TransformStream
+ *
+ * 性能优化：
+ * - 零开销透传：如果没有注册任何 onStreamChunk 回调，直接返回透传 stream
+ * - 避免不必要的函数调用和对象创建
  */
 export function createPluginTransformStream(
-  plugins: Plugin[],
-  requestLog: any
+  hooks: PluginHooks,
+  requestContext: RequestContext
 ): TransformStream<any, any> {
-  const executor = new StreamExecutor(plugins, requestLog);
+  // 零开销透传：没有注册任何 stream chunk 回调时，直接透传
+  if (!hooks.onStreamChunk.hasCallbacks() && !hooks.onFlushStream.hasCallbacks()) {
+    return new TransformStream();
+  }
+
+  const executor = new StreamExecutor(hooks, requestContext);
 
   return new TransformStream({
     async transform(chunk, controller) {

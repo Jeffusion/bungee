@@ -46,6 +46,12 @@ export interface RequestSnapshot {
   contentType: string;
   /** Whether the body is JSON (true) or binary/other (false) */
   isJsonBody: boolean;
+  /**
+   * Whether JSON body has been deep cloned (lazy clone optimization)
+   * - false/undefined: Not cloned, first request uses original parsed body
+   * - true: Cloned, safe for failover retry
+   */
+  isBodyCloned?: boolean;
 }
 
 /**

@@ -1,4 +1,3 @@
-import { getPluginName } from "../../plugin.types";
 /**
  * Response processor module
  * Handles response modification and streaming
@@ -8,8 +7,7 @@ import { logger } from '../../logger';
 import type { RequestLogger } from '../../logger/request-logger';
 import type { AppConfig, ModificationRules } from '@jeffusion/bungee-types';
 import type { ExpressionContext } from '../../expression-engine';
-import type { Plugin } from '../../plugin.types';
-import type { PluginRegistry } from '../../plugin-registry';
+import type { PluginHooks, RequestContext } from '../../hooks';
 import { applyBodyRules } from '../rules/modifier';
 import {
   createPluginTransformStream,
@@ -48,8 +46,8 @@ export interface PrepareResponseResult {
  * @param isStreamingRequest - Whether the request is streaming (SSE)
  * @param reqLogger - Request logger for recording
  * @param config - Application configuration
- * @param dedupedRoutePlugins - Route-specific plugins (for streaming)
- * @param pluginRegistry - Global plugin registry (for streaming)
+ * @param pluginHooks - Plugin hooks for stream processing (optional)
+ * @param streamRequestContext - Request context for stream processing (optional)
  * @returns Modified headers and body
  *
  * @example
@@ -62,8 +60,8 @@ export interface PrepareResponseResult {
  *   false, // not streaming
  *   reqLogger,
  *   config,
- *   routePlugins,
- *   pluginRegistry
+ *   pluginExecutor.getHooks(),
+ *   requestContext
  * );
  *
  * return new Response(body, { status: 200, headers });
@@ -77,8 +75,8 @@ export async function prepareResponse(
   isStreamingRequest: boolean,
   reqLogger?: RequestLogger,
   config?: AppConfig,
-  dedupedRoutePlugins?: Plugin[],
-  pluginRegistry?: PluginRegistry | null
+  pluginHooks?: PluginHooks,
+  streamRequestContext?: RequestContext
 ): Promise<PrepareResponseResult> {
   const headers = new Headers(res.headers);
   const contentType = headers.get('content-type') || '';
@@ -103,31 +101,14 @@ export async function prepareResponse(
     // For streams, we don't modify content-length here as the final length is unknown.
     let streamBody: ReadableStream;
 
-    // ===== 洋葱模型：流式处理（内→外）=====
-    // Collect all plugins with processStreamChunk capability (route → global order)
-    const streamPlugins: Plugin[] = [];
-    const pluginNames = new Set<string>();
+    // Check if there are stream processing hooks registered
+    const hasStreamCallbacks = pluginHooks?.onStreamChunk.hasCallbacks() ?? false;
 
-    // Add route plugins in reverse order (inbound)
-    // Note: dedupedRoutePlugins already contains all plugins (route + upstream merged)
-    if (dedupedRoutePlugins) {
-      for (const plugin of [...dedupedRoutePlugins].reverse()) {
-        if (plugin.processStreamChunk && !pluginNames.has(getPluginName(plugin))) {
-          streamPlugins.push(plugin);
-          pluginNames.add(getPluginName(plugin));
-        }
-      }
-    }
-
-    if (streamPlugins.length > 0) {
-      // Use plugin chain for stream transformation
+    if (hasStreamCallbacks && pluginHooks && streamRequestContext) {
+      // Use Hook system for stream transformation
       logger.info(
-        {
-          request: requestLog,
-          pluginCount: streamPlugins.length,
-          plugins: streamPlugins.map(p => getPluginName(p))
-        },
-        'Using plugin chain for stream transformation'
+        { request: requestLog },
+        'Using Hook system for stream transformation'
       );
 
       // 串联三个 TransformStream：
@@ -136,7 +117,7 @@ export async function prepareResponse(
       // 3. SSE 序列化器：JSON objects → Uint8Array
       streamBody = res.body
         .pipeThrough(createSSEParserStream())
-        .pipeThrough(createPluginTransformStream(streamPlugins, requestLog))
+        .pipeThrough(createPluginTransformStream(pluginHooks, streamRequestContext))
         .pipeThrough(createSSESerializerStream());
     } else {
       // No stream plugins - pass through unchanged

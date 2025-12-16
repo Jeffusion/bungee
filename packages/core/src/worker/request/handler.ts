@@ -9,13 +9,11 @@ import { find, map } from 'lodash-es';
 import type { AppConfig } from '@jeffusion/bungee-types';
 import type { ExpressionContext } from '../../expression-engine';
 import type { RuntimeUpstream } from '../types';
-import { getPluginName } from '../../plugin.types';
 import { selectUpstream } from '../upstream/selector';
 import { FailoverCoordinator } from '../upstream/failover-coordinator';
 import { runtimeState } from '../state/runtime-state';
 import { getPluginRegistry } from '../state/plugin-manager';
-import type { Plugin } from '../../plugin.types';
-import { createRequestSnapshot } from './snapshot';
+import { createRequestSnapshot, ensureSnapshotBodyCloned } from './snapshot';
 import { proxyRequest } from './proxy';
 import { authenticateRequest } from '../../auth';
 import { handleUIRequest } from '../../ui/server';
@@ -99,9 +97,6 @@ export async function handleRequest(
   let routePath: string | undefined;
   let upstream: string | undefined;
 
-  // Plugin 清理函数，需要在 try 外层声明以便 finally 块访问
-  let releasePlugins: (() => Promise<void>) | undefined;
-
   try {
     logger.debug({ request: requestLog }, `\n=== Incoming Request ===`);
 
@@ -138,41 +133,8 @@ export async function handleRequest(
       reqLogger.setOriginalRequestBody(requestSnapshot.body);
     }
 
-    // ✅ 获取路由级别 plugins（每请求实例化）
-    const pluginRegistry = getPluginRegistry();
-    let routePlugins: Plugin[] = [];
-
-    if (route.plugins && route.plugins.length > 0 && pluginRegistry) {
-      // 确保所有需要的 plugins 已加载到 registry（仅在首次请求时加载）
-      const pluginNames: string[] = [];
-
-      for (const pluginConfig of route.plugins) {
-        try {
-          const pluginName = await pluginRegistry.ensurePluginLoaded(pluginConfig);
-          pluginNames.push(pluginName);
-        } catch (error) {
-          logger.error({ error, pluginConfig }, 'Failed to load route plugin');
-        }
-      }
-
-      // 为当前请求创建或获取 plugin 实例
-      if (pluginNames.length > 0) {
-        try {
-          const result = await pluginRegistry.acquirePluginInstances(pluginNames);
-          routePlugins = result.plugins;
-          releasePlugins = result.release; // 赋值给外层声明的变量
-          logger.debug(
-            {
-              pluginCount: routePlugins.length,
-              plugins: routePlugins.map(p => getPluginName(p))
-            },
-            'Route plugins acquired for request'
-          );
-        } catch (error) {
-          logger.error({ error }, 'Failed to acquire route plugin instances');
-        }
-      }
-    }
+    // 获取路由 ID（用于预编译 hooks 查找）
+    const routeId = route.path;
 
     // --- Authentication Check ---
     // 确定最终使用的 auth 配置：路由级 > 全局级
@@ -260,7 +222,7 @@ export async function handleRequest(
       }
 
       reqLogger.addStep('upstream_selected', { target: upstream });
-      const response = await proxyRequest(requestSnapshot, route, selectedUpstream, requestLog, config, routePlugins, attemptLogger);
+      const response = await proxyRequest(requestSnapshot, route, selectedUpstream, requestLog, config, routeId, attemptLogger);
       responseStatus = response.status;
       if (response.status >= 400) {
         success = false;
@@ -303,6 +265,11 @@ export async function handleRequest(
       const { upstream: selectedUpstream, shouldTransitionToHalfOpen } = selection;
       attemptCount++;
       upstream = selectedUpstream.target;
+
+      // Lazy clone: only deep clone body when failover retry is needed
+      if (attemptCount > 1) {
+        ensureSnapshotBodyCloned(requestSnapshot);
+      }
 
       // 状态转换：UNHEALTHY → HALF_OPEN（如果满足恢复间隔）
       if (shouldTransitionToHalfOpen) {
@@ -349,7 +316,7 @@ export async function handleRequest(
       }
 
       try {
-        const response = await proxyRequest(requestSnapshot, route, selectedUpstream, requestLog, config, routePlugins, attemptLogger);
+        const response = await proxyRequest(requestSnapshot, route, selectedUpstream, requestLog, config, routeId, attemptLogger);
         responseStatus = response.status;
 
         // 检查是否是可重试的状态码
@@ -593,17 +560,7 @@ export async function handleRequest(
     const responseTime = Date.now() - startTime;
     statsCollector.recordRequest(success, responseTime);
 
-    // 清理 plugin 实例（归还到池或销毁）
-    if (releasePlugins) {
-      try {
-        await releasePlugins();
-        logger.debug('Route plugins released successfully');
-      } catch (error) {
-        logger.error({ error }, 'Error releasing route plugins');
-      }
-    }
-
-    // 不再写入主请求日志到数据库
+    // 注：预编译 hooks 无需 acquire/release，长生命周期实例
     // 每个 attempt 会创建独立的日志记录
   }
 }

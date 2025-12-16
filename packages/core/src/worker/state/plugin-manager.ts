@@ -5,6 +5,11 @@
 
 import { logger } from '../../logger';
 import { PluginRegistry } from '../../plugin-registry';
+import {
+  initScopedPluginRegistry,
+  getScopedPluginRegistry,
+  destroyScopedPluginRegistry
+} from '../../scoped-plugin-registry';
 import type { AppConfig } from '@jeffusion/bungee-types';
 
 /**
@@ -22,7 +27,7 @@ let pluginRegistry: PluginRegistry | null = null;
  * ```typescript
  * const registry = getPluginRegistry();
  * if (registry) {
- *   const plugins = registry.getEnabledPlugins();
+ *   const metadata = registry.getAllPluginsMetadata();
  * }
  * ```
  */
@@ -73,12 +78,13 @@ export async function initializePluginRegistryForTests(
   config: AppConfig,
   basePath: string = process.cwd()
 ): Promise<void> {
-  // Clean up existing registry if any
+  // Clean up existing registries if any
   if (pluginRegistry) {
     await pluginRegistry.unloadAll();
   }
+  await destroyScopedPluginRegistry();
 
-  // Create new registry
+  // Create new plugin registry (for UI and plugin metadata)
   pluginRegistry = new PluginRegistry(basePath);
 
   // Load global plugins if configured
@@ -86,7 +92,11 @@ export async function initializePluginRegistryForTests(
     await pluginRegistry.loadPlugins(config.plugins);
   }
 
-  logger.debug('Plugin registry initialized for tests');
+  // Initialize ScopedPluginRegistry (precompiled hooks)
+  const scopedRegistry = initScopedPluginRegistry(basePath);
+  await scopedRegistry.initializeFromConfig(config);
+
+  logger.debug('Plugin registries initialized for tests');
 }
 
 /**
@@ -112,8 +122,12 @@ export async function initializePluginRegistryForTests(
  * ```
  */
 export async function cleanupPluginRegistry(): Promise<void> {
+  // Clean up legacy registry
   if (pluginRegistry) {
     await pluginRegistry.unloadAll();
     pluginRegistry = null;
   }
+
+  // Clean up scoped registry
+  await destroyScopedPluginRegistry();
 }

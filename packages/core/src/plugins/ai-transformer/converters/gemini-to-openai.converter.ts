@@ -10,13 +10,13 @@
  */
 
 import type { AIConverter } from './base';
-import type { PluginContext, StreamChunkContext } from '../../../plugin.types';
+import type { MutableRequestContext, ResponseContext, StreamChunkContext } from '../../../hooks';
 
 export class GeminiToOpenAIConverter implements AIConverter {
   readonly from = 'gemini';
   readonly to = 'openai';
 
-  async onBeforeRequest(ctx: PluginContext): Promise<void> {
+  async onBeforeRequest(ctx: MutableRequestContext): Promise<void> {
     const body = ctx.body as any;
     if (!body) return;
 
@@ -198,7 +198,7 @@ export class GeminiToOpenAIConverter implements AIConverter {
     return openaiBody;
   }
 
-  async onResponse(ctx: PluginContext & { response: Response }): Promise<Response | void> {
+  async onResponse(ctx: ResponseContext): Promise<Response | void> {
     const contentType = ctx.response.headers.get('content-type') || '';
     if (!contentType.includes('application/json') || !ctx.response.ok) {
       return;

@@ -1,7 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { PluginRegistry } from '../src/plugin-registry';
 import { initializePluginContextManager } from '../src/plugin-context-manager';
-import type { PluginContext } from '../src/plugin.types';
 import type { PluginConfig } from '@jeffusion/bungee-types';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -13,8 +12,8 @@ const TEST_PLUGINS_DIR = path.join(import.meta.dir, 'temp-plugins');
 // 测试用的 plugin 实现
 const simplePluginCode = `
 export class SimplePlugin {
-  name = 'simple-test-plugin';
-  version = '1.0.0';
+  static name = 'simple-test-plugin';
+  static version = '1.0.0';
 
   constructor(options = {}) {
     this.options = options;
@@ -30,8 +29,8 @@ export default SimplePlugin;
 
 const interceptorPluginCode = `
 export class InterceptorPlugin {
-  name = 'interceptor-test-plugin';
-  version = '1.0.0';
+  static name = 'interceptor-test-plugin';
+  static version = '1.0.0';
 
   async onInterceptRequest(ctx) {
     if (ctx.url.pathname === '/intercept-me') {
@@ -49,8 +48,8 @@ export default InterceptorPlugin;
 
 const errorPluginCode = `
 export class ErrorPlugin {
-  name = 'error-test-plugin';
-  version = '1.0.0';
+  static name = 'error-test-plugin';
+  static version = '1.0.0';
 
   async onRequestInit(ctx) {
     throw new Error('Test error from plugin');
@@ -134,10 +133,11 @@ describe('PluginRegistry', () => {
 
       await registry.loadPlugin(config);
 
-      const plugin = registry.getPlugin('simple-test-plugin');
+      const metadata = registry.getAllPluginsMetadata();
+      const plugin = metadata.find(p => p.name === 'simple-test-plugin');
       expect(plugin).toBeDefined();
-      expect(plugin?.name).toBe('simple-test-plugin');
-      expect(plugin?.version).toBe('1.0.0');
+      expect(plugin!.name).toBe('simple-test-plugin');
+      expect(plugin!.version).toBe('1.0.0');
     });
 
     test('should load plugin with absolute path', async () => {
@@ -150,23 +150,9 @@ describe('PluginRegistry', () => {
 
       await registry.loadPlugin(config);
 
-      const plugin = registry.getPlugin('simple-test-plugin');
+      const metadata = registry.getAllPluginsMetadata();
+      const plugin = metadata.find(p => p.name === 'simple-test-plugin');
       expect(plugin).toBeDefined();
-    });
-
-    test('should pass options to plugin constructor', async () => {
-      const config: PluginConfig = {
-        name: 'simple-with-options',
-        path: 'simple.plugin.ts',
-        options: {
-          testOption: 'test-value'
-        }
-      };
-
-      await registry.loadPlugin(config);
-
-      const plugin = registry.getPlugin('simple-test-plugin') as any;
-      expect(plugin.options).toEqual({ testOption: 'test-value' });
     });
 
     test('should respect enabled flag', async () => {
@@ -178,8 +164,10 @@ describe('PluginRegistry', () => {
 
       await registry.loadPlugin(config);
 
-      const plugin = registry.getPlugin('simple-test-plugin');
-      expect(plugin).toBeUndefined();
+      const metadata = registry.getAllPluginsMetadata();
+      const plugin = metadata.find(p => p.name === 'simple-test-plugin');
+      expect(plugin).toBeDefined();
+      expect(plugin!.enabled).toBe(false);
     });
   });
 
@@ -192,45 +180,23 @@ describe('PluginRegistry', () => {
 
       await registry.loadPlugins(configs);
 
-      expect(registry.getPlugin('simple-test-plugin')).toBeDefined();
-      expect(registry.getPlugin('interceptor-test-plugin')).toBeDefined();
+      const metadata = registry.getAllPluginsMetadata();
+      expect(metadata.find(p => p.name === 'simple-test-plugin')).toBeDefined();
+      expect(metadata.find(p => p.name === 'interceptor-test-plugin')).toBeDefined();
     });
 
     test('should continue loading on error', async () => {
       const configs: PluginConfig[] = [
         { name: 'simple', path: 'simple.plugin.ts' },
-        { name: 'non-existent', path: 'non-existent.plugin.ts' }, // 这个会失败
+        { name: 'non-existent', path: 'non-existent.plugin.ts' },
         { name: 'interceptor', path: 'interceptor.plugin.ts' }
       ];
 
       await registry.loadPlugins(configs);
 
-      // 应该加载成功的 plugins
-      expect(registry.getPlugin('simple-test-plugin')).toBeDefined();
-      expect(registry.getPlugin('interceptor-test-plugin')).toBeDefined();
-    });
-  });
-
-  describe('getEnabledPlugins', () => {
-    test('should return only enabled plugins', async () => {
-      await registry.loadPlugins([
-        { name: 'simple', path: 'simple.plugin.ts', enabled: true },
-        { name: 'interceptor', path: 'interceptor.plugin.ts', enabled: false }
-      ]);
-
-      const plugins = registry.getEnabledPlugins();
-      expect(plugins.length).toBe(1);
-      expect(plugins[0].name).toBe('simple-test-plugin');
-    });
-
-    test('should return all plugins when all are enabled', async () => {
-      await registry.loadPlugins([
-        { name: 'simple', path: 'simple.plugin.ts' },
-        { name: 'interceptor', path: 'interceptor.plugin.ts' }
-      ]);
-
-      const plugins = registry.getEnabledPlugins();
-      expect(plugins.length).toBe(2);
+      const metadata = registry.getAllPluginsMetadata();
+      expect(metadata.find(p => p.name === 'simple-test-plugin')).toBeDefined();
+      expect(metadata.find(p => p.name === 'interceptor-test-plugin')).toBeDefined();
     });
   });
 
@@ -242,11 +208,15 @@ describe('PluginRegistry', () => {
         enabled: false
       });
 
-      expect(registry.getPlugin('simple-test-plugin')).toBeUndefined();
+      let metadata = registry.getAllPluginsMetadata();
+      let plugin = metadata.find(p => p.name === 'simple-test-plugin');
+      expect(plugin!.enabled).toBe(false);
 
       registry.enablePlugin('simple-test-plugin');
 
-      expect(registry.getPlugin('simple-test-plugin')).toBeDefined();
+      metadata = registry.getAllPluginsMetadata();
+      plugin = metadata.find(p => p.name === 'simple-test-plugin');
+      expect(plugin!.enabled).toBe(true);
     });
 
     test('should disable an enabled plugin', async () => {
@@ -256,11 +226,15 @@ describe('PluginRegistry', () => {
         enabled: true
       });
 
-      expect(registry.getPlugin('simple-test-plugin')).toBeDefined();
+      let metadata = registry.getAllPluginsMetadata();
+      let plugin = metadata.find(p => p.name === 'simple-test-plugin');
+      expect(plugin!.enabled).toBe(true);
 
       registry.disablePlugin('simple-test-plugin');
 
-      expect(registry.getPlugin('simple-test-plugin')).toBeUndefined();
+      metadata = registry.getAllPluginsMetadata();
+      plugin = metadata.find(p => p.name === 'simple-test-plugin');
+      expect(plugin!.enabled).toBe(false);
     });
 
     test('should return false for non-existent plugin', () => {
@@ -269,399 +243,12 @@ describe('PluginRegistry', () => {
     });
   });
 
-  describe('executeOnRequestInit', () => {
-    test('should execute onRequestInit hook', async () => {
-      await registry.loadPlugin({ name: 'simple', path: 'simple.plugin.ts' });
-
-      const context: PluginContext = {
-        method: 'GET',
-        url: new URL('http://localhost/test'),
-        headers: {},
-        body: null,
-        request: {}
-      };
-
-      await registry.executeOnRequestInit(context);
-
-      expect(context.request.simple).toBe('initialized');
-    });
-
-    test('should handle errors in onRequestInit gracefully', async () => {
-      await registry.loadPlugin({ name: 'error', path: 'error.plugin.ts' });
-
-      const context: PluginContext = {
-        method: 'GET',
-        url: new URL('http://localhost/test'),
-        headers: {},
-        body: null,
-        request: {}
-      };
-
-      // 不应该抛出错误
-      await expect(registry.executeOnRequestInit(context)).resolves.toBeUndefined();
-    });
-  });
-
-  describe('executeOnInterceptRequest', () => {
-    test('should return null if no plugin intercepts', async () => {
-      await registry.loadPlugin({ name: 'interceptor', path: 'interceptor.plugin.ts' });
-
-      const context: PluginContext = {
-        method: 'GET',
-        url: new URL('http://localhost/normal-path'),
-        headers: {},
-        body: null,
-        request: {}
-      };
-
-      const result = await registry.executeOnInterceptRequest(context);
-      expect(result).toBeNull();
-    });
-
-    test('should return response if plugin intercepts', async () => {
-      await registry.loadPlugin({ name: 'interceptor', path: 'interceptor.plugin.ts' });
-
-      const context: PluginContext = {
-        method: 'GET',
-        url: new URL('http://localhost/intercept-me'),
-        headers: {},
-        body: null,
-        request: {}
-      };
-
-      const result = await registry.executeOnInterceptRequest(context);
-      expect(result).toBeInstanceOf(Response);
-      expect(result?.status).toBe(200);
-
-      const json = await result?.json();
-      expect(json).toEqual({ intercepted: true });
-    });
-
-    test('should return first interceptor response', async () => {
-      // 创建第二个 interceptor plugin
-      const secondInterceptorCode = `
-        export default class {
-          name = 'second-interceptor';
-          async onInterceptRequest(ctx) {
-            return new Response('second', { status: 200 });
-          }
-        }
-      `;
-      fs.writeFileSync(
-        path.join(TEST_PLUGINS_DIR, 'second-interceptor.plugin.ts'),
-        secondInterceptorCode
-      );
-
-      await registry.loadPlugins([
-        { name: 'interceptor', path: 'interceptor.plugin.ts' },
-        { name: 'second-interceptor', path: 'second-interceptor.plugin.ts' }
-      ]);
-
-      const context: PluginContext = {
-        method: 'GET',
-        url: new URL('http://localhost/intercept-me'),
-        headers: {},
-        body: null,
-        request: {}
-      };
-
-      const result = await registry.executeOnInterceptRequest(context);
-
-      // 应该返回第一个 interceptor 的响应
-      const json = await result?.json();
-      expect(json).toEqual({ intercepted: true });
-    });
-  });
-
-  describe('executePluginOnRequestInit', () => {
-    test('should execute specific plugin onRequestInit hook', async () => {
-      await registry.loadPlugin({ name: 'simple', path: 'simple.plugin.ts' });
-
-      const context: PluginContext = {
-        method: 'GET',
-        url: new URL('http://localhost/test'),
-        headers: {},
-        body: null,
-        request: {}
-      };
-
-      await registry.executePluginOnRequestInit('simple-test-plugin', context);
-
-      expect(context.request.simple).toBe('initialized');
-    });
-
-    test('should handle non-existent plugin gracefully', async () => {
-      const context: PluginContext = {
-        method: 'GET',
-        url: new URL('http://localhost/test'),
-        headers: {},
-        body: null,
-        request: {}
-      };
-
-      await expect(
-        registry.executePluginOnRequestInit('non-existent', context)
-      ).resolves.toBeUndefined();
-    });
-
-    test('should handle errors in hook gracefully', async () => {
-      await registry.loadPlugin({ name: 'error', path: 'error.plugin.ts' });
-
-      const context: PluginContext = {
-        method: 'GET',
-        url: new URL('http://localhost/test'),
-        headers: {},
-        body: null,
-        request: {}
-      };
-
-      await expect(
-        registry.executePluginOnRequestInit('error-test-plugin', context)
-      ).resolves.toBeUndefined();
-    });
-  });
-
-  describe('executePluginOnInterceptRequest', () => {
-    test('should execute specific plugin onInterceptRequest hook', async () => {
-      await registry.loadPlugin({ name: 'interceptor', path: 'interceptor.plugin.ts' });
-
-      const context: PluginContext = {
-        method: 'GET',
-        url: new URL('http://localhost/intercept-me'),
-        headers: {},
-        body: null,
-        request: {}
-      };
-
-      const result = await registry.executePluginOnInterceptRequest('interceptor-test-plugin', context);
-      expect(result).toBeInstanceOf(Response);
-      expect(result?.status).toBe(200);
-
-      const json = await result?.json();
-      expect(json).toEqual({ intercepted: true });
-    });
-
-    test('should return null if plugin does not intercept', async () => {
-      await registry.loadPlugin({ name: 'interceptor', path: 'interceptor.plugin.ts' });
-
-      const context: PluginContext = {
-        method: 'GET',
-        url: new URL('http://localhost/normal-path'),
-        headers: {},
-        body: null,
-        request: {}
-      };
-
-      const result = await registry.executePluginOnInterceptRequest('interceptor-test-plugin', context);
-      expect(result).toBeNull();
-    });
-
-    test('should return null for non-existent plugin', async () => {
-      const context: PluginContext = {
-        method: 'GET',
-        url: new URL('http://localhost/test'),
-        headers: {},
-        body: null,
-        request: {}
-      };
-
-      const result = await registry.executePluginOnInterceptRequest('non-existent', context);
-      expect(result).toBeNull();
-    });
-  });
-
-  describe('executePluginOnBeforeRequest', () => {
-    test('should execute specific plugin onBeforeRequest hook', async () => {
-      const beforeRequestPluginCode = `
-        export default class {
-          name = 'before-request-plugin';
-          async onBeforeRequest(ctx) {
-            ctx.headers['x-custom'] = 'modified';
-            ctx.url.pathname = '/modified-path';
-          }
-        }
-      `;
-      fs.writeFileSync(
-        path.join(TEST_PLUGINS_DIR, 'before-request.plugin.ts'),
-        beforeRequestPluginCode
-      );
-
-      await registry.loadPlugin({ name: 'before-request', path: 'before-request.plugin.ts' });
-
-      const context: PluginContext = {
-        method: 'GET',
-        url: new URL('http://localhost/original-path'),
-        headers: {},
-        body: null,
-        request: {}
-      };
-
-      await registry.executePluginOnBeforeRequest('before-request-plugin', context);
-
-      expect(context.headers['x-custom']).toBe('modified');
-      expect(context.url.pathname).toBe('/modified-path');
-    });
-
-    test('should handle non-existent plugin gracefully', async () => {
-      const context: PluginContext = {
-        method: 'GET',
-        url: new URL('http://localhost/test'),
-        headers: {},
-        body: null,
-        request: {}
-      };
-
-      await expect(
-        registry.executePluginOnBeforeRequest('non-existent', context)
-      ).resolves.toBeUndefined();
-    });
-  });
-
-  describe('executePluginOnResponse', () => {
-    test('should execute specific plugin onResponse hook and return modified response', async () => {
-      const responsePluginCode = `
-        export default class {
-          name = 'response-plugin';
-          async onResponse(ctx) {
-            const originalBody = await ctx.response.text();
-            return new Response(
-              JSON.stringify({ modified: true, original: originalBody }),
-              {
-                status: ctx.response.status,
-                headers: { 'Content-Type': 'application/json' }
-              }
-            );
-          }
-        }
-      `;
-      fs.writeFileSync(
-        path.join(TEST_PLUGINS_DIR, 'response.plugin.ts'),
-        responsePluginCode
-      );
-
-      await registry.loadPlugin({ name: 'response', path: 'response.plugin.ts' });
-
-      const originalResponse = new Response('original body', { status: 200 });
-      const context: PluginContext & { response: Response } = {
-        method: 'GET',
-        url: new URL('http://localhost/test'),
-        headers: {},
-        body: null,
-        request: {},
-        response: originalResponse
-      };
-
-      const result = await registry.executePluginOnResponse('response-plugin', context);
-
-      expect(result).toBeInstanceOf(Response);
-      expect(result.status).toBe(200);
-
-      const json = await result.json();
-      expect(json.modified).toBe(true);
-      expect(json.original).toBe('original body');
-    });
-
-    test('should return original response if plugin does not modify', async () => {
-      const passthroughPluginCode = `
-        export default class {
-          name = 'passthrough-plugin';
-          async onResponse(ctx) {
-            // Don't return anything - should keep original response
-          }
-        }
-      `;
-      fs.writeFileSync(
-        path.join(TEST_PLUGINS_DIR, 'passthrough.plugin.ts'),
-        passthroughPluginCode
-      );
-
-      await registry.loadPlugin({ name: 'passthrough', path: 'passthrough.plugin.ts' });
-
-      const originalResponse = new Response('original', { status: 200 });
-      const context: PluginContext & { response: Response } = {
-        method: 'GET',
-        url: new URL('http://localhost/test'),
-        headers: {},
-        body: null,
-        request: {},
-        response: originalResponse
-      };
-
-      const result = await registry.executePluginOnResponse('passthrough-plugin', context);
-      expect(result).toBe(originalResponse);
-    });
-
-    test('should return original response for non-existent plugin', async () => {
-      const originalResponse = new Response('original', { status: 200 });
-      const context: PluginContext & { response: Response } = {
-        method: 'GET',
-        url: new URL('http://localhost/test'),
-        headers: {},
-        body: null,
-        request: {},
-        response: originalResponse
-      };
-
-      const result = await registry.executePluginOnResponse('non-existent', context);
-      expect(result).toBe(originalResponse);
-    });
-  });
-
-  describe('executePluginOnError', () => {
-    test('should execute specific plugin onError hook', async () => {
-      const errorHandlerPluginCode = `
-        export default class {
-          name = 'error-handler-plugin';
-          async onError(ctx) {
-            ctx.request.errorHandled = true;
-            ctx.request.errorMessage = ctx.error.message;
-          }
-        }
-      `;
-      fs.writeFileSync(
-        path.join(TEST_PLUGINS_DIR, 'error-handler.plugin.ts'),
-        errorHandlerPluginCode
-      );
-
-      await registry.loadPlugin({ name: 'error-handler', path: 'error-handler.plugin.ts' });
-
-      const testError = new Error('Test error');
-      const context: PluginContext & { error: Error } = {
-        method: 'GET',
-        url: new URL('http://localhost/test'),
-        headers: {},
-        body: null,
-        request: {},
-        error: testError
-      };
-
-      await registry.executePluginOnError('error-handler-plugin', context);
-
-      expect(context.request.errorHandled).toBe(true);
-      expect(context.request.errorMessage).toBe('Test error');
-    });
-
-    test('should handle non-existent plugin gracefully', async () => {
-      const context: PluginContext & { error: Error } = {
-        method: 'GET',
-        url: new URL('http://localhost/test'),
-        headers: {},
-        body: null,
-        request: {},
-        error: new Error('Test error')
-      };
-
-      await expect(
-        registry.executePluginOnError('non-existent', context)
-      ).resolves.toBeUndefined();
-    });
-  });
-
   describe('unloadAll', () => {
     test('should call onDestroy for all plugins', async () => {
       const destroyTrackerCode = `
-        export default class {
-          name = 'destroy-tracker';
+        export default class DestroyTracker {
+          static name = 'destroy-tracker';
+          static version = '1.0.0';
           static destroyed = false;
 
           async onDestroy() {
@@ -689,67 +276,44 @@ describe('PluginRegistry', () => {
         { name: 'interceptor', path: 'interceptor.plugin.ts' }
       ]);
 
-      expect(registry.getEnabledPlugins().length).toBe(2);
+      expect(registry.getAllPluginsMetadata().length).toBe(2);
 
       await registry.unloadAll();
 
-      expect(registry.getEnabledPlugins().length).toBe(0);
+      expect(registry.getAllPluginsMetadata().length).toBe(0);
     });
   });
 
-  describe('loadTransformerPlugin', () => {
-    test('should auto-load transformer plugin by name', async () => {
-      // Use a registry pointing to the actual plugins directory
-      const srcPath = path.join(import.meta.dir, '..', 'src');
-      const prodRegistry = new PluginRegistry(srcPath);
+  describe('getAllPluginsMetadata', () => {
+    test('should return metadata for all loaded plugins', async () => {
+      await registry.loadPlugins([
+        { name: 'simple', path: 'simple.plugin.ts', enabled: true },
+        { name: 'interceptor', path: 'interceptor.plugin.ts', enabled: false }
+      ]);
 
-      const pluginName = await prodRegistry.loadTransformerPlugin('anthropic-filter-error-tool-results');
+      const metadata = registry.getAllPluginsMetadata();
+      expect(metadata.length).toBe(2);
 
-      expect(pluginName).toBeDefined();
-      expect(pluginName).toBe('anthropic-filter-error-tool-results');
+      const simplePlugin = metadata.find(p => p.name === 'simple-test-plugin');
+      expect(simplePlugin).toBeDefined();
+      expect(simplePlugin!.version).toBe('1.0.0');
+      expect(simplePlugin!.enabled).toBe(true);
 
-      // Verify the plugin is loaded by acquiring an instance
-      const result = await prodRegistry.acquirePluginInstances([pluginName]);
-      expect(result.plugins.length).toBe(1);
-      expect(result.plugins[0].name).toBe('anthropic-filter-error-tool-results');
-      expect(result.plugins[0].onBeforeRequest).toBeDefined();
-
-      await result.release();
-      await prodRegistry.unloadAll();
+      const interceptorPlugin = metadata.find(p => p.name === 'interceptor-test-plugin');
+      expect(interceptorPlugin).toBeDefined();
+      expect(interceptorPlugin!.version).toBe('1.0.0');
+      expect(interceptorPlugin!.enabled).toBe(false);
     });
+  });
 
-    test('should return same name when called multiple times', async () => {
-      const srcPath = path.join(import.meta.dir, '..', 'src');
-      const prodRegistry = new PluginRegistry(srcPath);
+  describe('getAllPluginSchemas', () => {
+    test('should return schemas for all loaded plugins', async () => {
+      await registry.loadPlugin({ name: 'simple', path: 'simple.plugin.ts' });
 
-      const pluginName1 = await prodRegistry.loadTransformerPlugin('anthropic-filter-error-tool-results');
-      const pluginName2 = await prodRegistry.loadTransformerPlugin('anthropic-filter-error-tool-results');
-
-      // Both calls should return the same plugin name
-      expect(pluginName1).toBe(pluginName2);
-      expect(pluginName1).toBe('anthropic-filter-error-tool-results');
-
-      // But acquiring instances should return different instances (per-request pattern)
-      const result1 = await prodRegistry.acquirePluginInstances([pluginName1]);
-      const result2 = await prodRegistry.acquirePluginInstances([pluginName2]);
-
-      expect(result1.plugins[0]).not.toBe(result2.plugins[0]);
-      expect(result1.plugins[0].name).toBe(result2.plugins[0].name);
-
-      await result1.release();
-      await result2.release();
-      await prodRegistry.unloadAll();
-    });
-
-    test('should throw error for non-existent transformer', async () => {
-      const srcPath = path.join(import.meta.dir, '..', 'src');
-      const prodRegistry = new PluginRegistry(srcPath);
-
-      await expect(
-        prodRegistry.loadTransformerPlugin('non-existent-transformer')
-      ).rejects.toThrow("Failed to auto-load transformer plugin 'non-existent-transformer' from all paths");
-
-      await prodRegistry.unloadAll();
+      const schemas = registry.getAllPluginSchemas();
+      expect(schemas['simple-test-plugin']).toBeDefined();
+      expect(schemas['simple-test-plugin'].name).toBe('simple-test-plugin');
+      expect(schemas['simple-test-plugin'].version).toBe('1.0.0');
     });
   });
 });

@@ -7,16 +7,12 @@ import { logger } from '../../logger';
 import { forEach, isEmpty } from 'lodash-es';
 import type { AppConfig, RouteConfig } from '@jeffusion/bungee-types';
 import type { RequestLogger } from '../../logger/request-logger';
-import type { Plugin } from '../../plugin.types';
-import { getPluginName } from '../../plugin.types';
 import { processDynamicValue } from '../../expression-engine';
 import type { RuntimeUpstream, RequestSnapshot } from '../types';
-import { getPluginRegistry } from '../state/plugin-manager';
+import { getScopedPluginRegistry, type PrecompiledHooks } from '../../scoped-plugin-registry';
 import { buildRequestContextFromSnapshot } from './context-builder';
 import { deepMergeRules, applyBodyRules, applyQueryRules } from '../rules/modifier';
-import { PluginExecutor } from '../plugin/executor';
 import { prepareResponse } from '../response/processor';
-import { createPluginUrl } from '../plugin/url-adapter';
 
 /**
  * Proxies a request to an upstream server
@@ -40,7 +36,7 @@ import { createPluginUrl } from '../plugin/url-adapter';
  * @param upstream - Target upstream server
  * @param requestLog - Request log for debugging
  * @param config - Application configuration
- * @param routePlugins - Route-specific plugins
+ * @param routeId - Route ID for precompiled hooks lookup
  * @param reqLogger - Request logger for recording
  * @returns Response from upstream (or plugin)
  *
@@ -52,7 +48,7 @@ import { createPluginUrl } from '../plugin/url-adapter';
  *   selectedUpstream,
  *   requestLog,
  *   config,
- *   routePlugins,
+ *   route.path,
  *   reqLogger
  * );
  * ```
@@ -63,9 +59,12 @@ export async function proxyRequest(
   upstream: RuntimeUpstream,
   requestLog: any,
   config: AppConfig,
-  routePlugins: Plugin[],
+  routeId: string,
   reqLogger?: RequestLogger
 ): Promise<Response> {
+  // Record start time for latency calculation
+  const requestStartTime = Date.now();
+
   // Log snapshot usage for debugging
   const bodySize = requestSnapshot.body
     ? (requestSnapshot.isJsonBody
@@ -88,58 +87,29 @@ export async function proxyRequest(
     'Using request snapshot for upstream attempt'
   );
 
-  const pluginRegistry = getPluginRegistry();
+  // ===== 获取预编译的 Hooks（O(1) 查找）=====
+  const upstreamId = upstream.target;
+  const scopedRegistry = getScopedPluginRegistry();
+  const precompiledHooks = scopedRegistry?.getPrecompiledHooks(routeId, upstreamId) ?? null;
 
-  // ===== 获取 upstream-level plugins（每请求实例化）=====
-  let upstreamPluginInstances: Plugin[] = [];
-  let releaseUpstreamPlugins: (() => Promise<void>) | undefined;
+  // Extract request metadata for plugin hooks
+  const clientIP = requestSnapshot.headers['x-forwarded-for'] ||
+                   requestSnapshot.headers['x-real-ip'] ||
+                   'unknown';
+  const requestId = reqLogger?.getRequestInfo().requestId || crypto.randomUUID();
 
-  if (upstream.plugins && upstream.plugins.length > 0 && pluginRegistry) {
-    // 确保所有需要的 plugins 已加载到 registry
-    const pluginNames: string[] = [];
-
-    for (const pluginConfig of upstream.plugins) {
-      try {
-        const pluginName = await pluginRegistry.ensurePluginLoaded(pluginConfig);
-        pluginNames.push(pluginName);
-      } catch (error) {
-        logger.error(
-          { error, pluginConfig, request: requestLog },
-          'Failed to load upstream plugin'
-        );
-      }
-    }
-
-    // 为当前请求创建或获取 plugin 实例
-    if (pluginNames.length > 0) {
-      try {
-        const result = await pluginRegistry.acquirePluginInstances(pluginNames);
-        upstreamPluginInstances = result.plugins;
-        releaseUpstreamPlugins = result.release;
-        logger.debug(
-          {
-            pluginCount: upstreamPluginInstances.length,
-            plugins: upstreamPluginInstances.map(p => getPluginName(p)),
-            request: requestLog
-          },
-          'Upstream plugins acquired for request'
-        );
-      } catch (error) {
-        logger.error({ error, request: requestLog }, 'Failed to acquire upstream plugin instances');
-      }
-    }
+  // 记录使用的预编译 hooks 信息
+  if (precompiledHooks) {
+    logger.debug(
+      {
+        request: requestLog,
+        pluginCount: precompiledHooks.metadata.pluginCount,
+        plugins: precompiledHooks.metadata.pluginNames,
+        scope: precompiledHooks.metadata.scope
+      },
+      'Using precompiled hooks for request'
+    );
   }
-
-  // 合并路由和 upstream plugins，去重（优先保留路由级配置）
-  const allPlugins = [...routePlugins];
-  for (const upPlugin of upstreamPluginInstances) {
-    if (!allPlugins.some(p => getPluginName(p) === getPluginName(upPlugin))) {
-      allPlugins.push(upPlugin);
-    }
-  }
-
-  // Create plugin executor
-  const pluginExecutor = new PluginExecutor(allPlugins);
 
   // ===== 1. Set target URL and apply route-level pathRewrite =====
   const targetUrl = new URL(upstream.target);
@@ -185,23 +155,25 @@ export async function proxyRequest(
   );
 
   // ===== 3. Plugin onRequestInit (outer layer) =====
-  const headersObj: Record<string, string> = structuredClone(requestSnapshot.headers);
+  const originalUrl = new URL(requestSnapshot.url);
 
-  let pluginContext = {
-    method: requestSnapshot.method,
-    url: createPluginUrl(targetUrl),
-    headers: headersObj,
-    body: parsedBody,
-    request: requestLog
-  };
-
-  await pluginExecutor.executeOnRequestInit(pluginContext);
+  if (precompiledHooks) {
+    const ctx = {
+      method: requestSnapshot.method,
+      originalUrl,
+      clientIP,
+      requestId,
+      routeId,
+      upstreamId,
+    };
+    await precompiledHooks.hooks.onRequestInit.promise(ctx);
+  }
 
   // 记录 plugin onRequestInit 执行
-  if (reqLogger && allPlugins.length > 0) {
+  if (reqLogger && precompiledHooks && precompiledHooks.metadata.pluginCount > 0) {
     reqLogger.addStep('plugin_request_init', {
-      count: allPlugins.length,
-      plugins: allPlugins.map(p => getPluginName(p))
+      count: precompiledHooks.metadata.pluginCount,
+      plugins: precompiledHooks.metadata.pluginNames
     });
   }
 
@@ -231,7 +203,8 @@ export async function proxyRequest(
 
   // ===== 5. Prepare final headers from snapshot =====
   const finalRequestRules = routeAndUpstreamRequestRules;
-  const headers = new Headers(structuredClone(requestSnapshot.headers));
+  // Shallow copy is sufficient for headers (all values are strings)
+  const headers = new Headers({ ...requestSnapshot.headers });
   headers.delete('host');
 
   // 5.1. Remove Authorization header (if auth is enabled)
@@ -318,18 +291,39 @@ export async function proxyRequest(
   }
 
   // ===== 7. Plugin onBeforeRequest =====
-  finalBody = await pluginExecutor.executeOnBeforeRequest(
-    pluginContext,
-    targetUrl,
-    headers,
-    finalBody
-  );
+  if (precompiledHooks) {
+    // 转换 headers 为 Record
+    const headersObj: Record<string, string> = {};
+    headers.forEach((v, k) => (headersObj[k] = v));
+
+    const ctx = {
+      method: requestSnapshot.method,
+      originalUrl,
+      url: targetUrl,
+      headers: headersObj,
+      body: finalBody,
+      clientIP,
+      requestId,
+      routeId,
+      upstreamId,
+    };
+
+    const result = await precompiledHooks.hooks.onBeforeRequest.promise(ctx);
+
+    // Apply modifications from plugins
+    targetUrl.href = result.url.href;
+    headers.forEach((_, key) => headers.delete(key));
+    for (const [key, value] of Object.entries(result.headers)) {
+      headers.set(key, value);
+    }
+    finalBody = result.body;
+  }
 
   // 记录 plugin onBeforeRequest 执行
-  if (reqLogger && allPlugins.length > 0) {
+  if (reqLogger && precompiledHooks && precompiledHooks.metadata.pluginCount > 0) {
     reqLogger.addStep('plugin_before_request', {
-      count: allPlugins.length,
-      plugins: allPlugins.map(p => getPluginName(p))
+      count: precompiledHooks.metadata.pluginCount,
+      plugins: precompiledHooks.metadata.pluginNames
     });
   }
 
@@ -372,21 +366,33 @@ export async function proxyRequest(
   }
 
   // ===== 8. Plugin onInterceptRequest (may short-circuit) =====
-  const interceptedResponse = await pluginExecutor.executeOnInterceptRequest(
-    pluginContext,
-    targetUrl,
-    headers,
-    finalBody
-  );
+  if (precompiledHooks && precompiledHooks.hasInterceptCallbacks) {
+    const headersObj: Record<string, string> = {};
+    headers.forEach((v, k) => (headersObj[k] = v));
 
-  if (interceptedResponse) {
-    // 记录 plugin 拦截
-    if (reqLogger) {
-      reqLogger.addStep('plugin_intercepted', {
-        message: 'Request intercepted by plugin'
-      });
+    const ctx = {
+      method: requestSnapshot.method,
+      originalUrl,
+      url: targetUrl,
+      headers: headersObj,
+      body: finalBody,
+      clientIP,
+      requestId,
+      routeId,
+      upstreamId,
+    };
+
+    const interceptedResponse = await precompiledHooks.hooks.onInterceptRequest.promise(ctx);
+
+    if (interceptedResponse) {
+      // 记录 plugin 拦截
+      if (reqLogger) {
+        reqLogger.addStep('plugin_intercepted', {
+          message: 'Request intercepted by plugin'
+        });
+      }
+      return interceptedResponse;
     }
-    return interceptedResponse;
   }
 
   // ===== 9. Execute the request =====
@@ -455,25 +461,41 @@ export async function proxyRequest(
     );
 
     // ===== 10. Plugin onResponse (inbound) =====
-    if (!isStreamingRequest) {
-      proxyRes = await pluginExecutor.executeOnResponse(
-        requestSnapshot.method,
-        targetUrl,
-        requestLog,
-        proxyRes
-      );
+    if (!isStreamingRequest && precompiledHooks && precompiledHooks.hasResponseCallbacks) {
+      const latencyMs = Date.now() - requestStartTime;
+      const ctx = {
+        method: requestSnapshot.method,
+        originalUrl,
+        response: proxyRes,
+        latencyMs,
+        clientIP,
+        requestId,
+        routeId,
+        upstreamId,
+      };
+      proxyRes = await precompiledHooks.hooks.onResponse.promise(proxyRes, ctx);
 
       // 记录 plugin onResponse 执行
-      if (reqLogger && allPlugins.length > 0) {
+      if (reqLogger && precompiledHooks.metadata.pluginCount > 0) {
         reqLogger.addStep('plugin_response', {
-          count: allPlugins.length,
-          plugins: allPlugins.map(p => getPluginName(p)).reverse() // 反向顺序
+          count: precompiledHooks.metadata.pluginCount,
+          plugins: [...precompiledHooks.metadata.pluginNames].reverse() // 反向顺序
         });
       }
     }
 
     // ===== 11. Prepare the response =====
     const finalResponseRules = upstreamModificationRules;
+
+    // Build stream request context for stream processing
+    const streamRequestContext = {
+      method: requestSnapshot.method,
+      originalUrl,
+      clientIP,
+      requestId,
+      routeId,
+      upstreamId,
+    };
 
     const { headers: responseHeaders, body: responseBody } = await prepareResponse(
       proxyRes,
@@ -483,8 +505,8 @@ export async function proxyRequest(
       isStreamingRequest,
       reqLogger,
       config,
-      allPlugins,
-      pluginRegistry
+      precompiledHooks?.hooks,
+      streamRequestContext
     );
 
     return new Response(responseBody, {
@@ -494,34 +516,34 @@ export async function proxyRequest(
     });
   } catch (error) {
     // ===== 12. Plugin onError (inbound) =====
-    await pluginExecutor.executeOnError(
-      requestSnapshot.method,
-      targetUrl,
-      headers,
-      finalBody,
-      requestLog,
-      error as Error
-    );
+    if (precompiledHooks) {
+      const headersObj: Record<string, string> = {};
+      headers.forEach((v, k) => (headersObj[k] = v));
+
+      const ctx = {
+        method: requestSnapshot.method,
+        originalUrl,
+        error: error as Error,
+        headers: headersObj,
+        body: finalBody,
+        clientIP,
+        requestId,
+        routeId,
+        upstreamId,
+      };
+      await precompiledHooks.hooks.onError.promise(ctx);
+    }
 
     // 记录 plugin onError 执行
-    if (reqLogger && allPlugins.length > 0) {
+    if (reqLogger && precompiledHooks && precompiledHooks.metadata.pluginCount > 0) {
       reqLogger.addStep('plugin_error', {
-        count: allPlugins.length,
-        plugins: allPlugins.map(p => getPluginName(p)).reverse(), // 反向顺序
+        count: precompiledHooks.metadata.pluginCount,
+        plugins: [...precompiledHooks.metadata.pluginNames].reverse(), // 反向顺序
         error: (error as Error).message
       });
     }
 
     throw error;
-  } finally {
-    // 清理 upstream plugin 实例（归还到池或销毁）
-    if (releaseUpstreamPlugins) {
-      try {
-        await releaseUpstreamPlugins();
-        logger.debug({ request: requestLog }, 'Upstream plugins released successfully');
-      } catch (error) {
-        logger.error({ error, request: requestLog }, 'Error releasing upstream plugins');
-      }
-    }
   }
+  // 注：预编译 hooks 无需 acquire/release，长生命周期实例
 }

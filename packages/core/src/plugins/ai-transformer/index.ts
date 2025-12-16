@@ -20,8 +20,9 @@
  * - openai ↔ gemini
  */
 
-import type { Plugin, PluginContext, StreamChunkContext, PluginConfigField, PluginTranslations } from '../../plugin.types';
+import type { Plugin, PluginConfigField, PluginTranslations } from '../../plugin.types';
 import { definePlugin } from '../../plugin.types';
+import type { PluginHooks } from '../../hooks';
 import { TransformerRegistry, AIConverter } from './converters';
 import { logger } from '../../logger';
 
@@ -204,84 +205,103 @@ export const AITransformerPlugin = definePlugin(
   }
 
   /**
-   * 在请求发送到上游之前转换请求格式
+   * 注册插件 hooks
    */
-  async onBeforeRequest(ctx: PluginContext): Promise<void> {
+  register(hooks: PluginHooks): void {
+    // 1. 请求前处理：转换请求格式
     if (this.converter.onBeforeRequest) {
-      try {
-        await this.converter.onBeforeRequest(ctx);
-        logger.debug(
-          { from: this.options.from, to: this.options.to, path: ctx.url.pathname },
-          'Request transformed'
-        );
-      } catch (error) {
-        logger.error(
-          { error, from: this.options.from, to: this.options.to },
-          'Error transforming request'
-        );
-        throw error;
-      }
-    }
-  }
-
-  /**
-   * 在响应返回给客户端之前转换响应格式
-   */
-  async onResponse(ctx: PluginContext & { response: Response }): Promise<Response | void> {
-    if (this.converter.onResponse) {
-      try {
-        const result = await this.converter.onResponse(ctx);
-        if (result) {
-          logger.debug(
-            { from: this.options.from, to: this.options.to },
-            'Response transformed'
-          );
-          return result;
+      hooks.onBeforeRequest.tapPromise(
+        { name: 'ai-transformer', stage: 0 },
+        async (ctx) => {
+          try {
+            await this.converter.onBeforeRequest!(ctx);
+            logger.debug(
+              { from: this.options.from, to: this.options.to, path: ctx.url.pathname },
+              'Request transformed'
+            );
+          } catch (error) {
+            logger.error(
+              { error, from: this.options.from, to: this.options.to },
+              'Error transforming request'
+            );
+            throw error;
+          }
+          return ctx;
         }
-      } catch (error) {
-        logger.error(
-          { error, from: this.options.from, to: this.options.to },
-          'Error transforming response'
-        );
-        throw error;
-      }
+      );
     }
-  }
 
-  /**
-   * 处理流式响应的数据块
-   */
-  async processStreamChunk(chunk: any, ctx: StreamChunkContext): Promise<any[] | null> {
+    // 2. 响应处理：转换响应格式
+    if (this.converter.onResponse) {
+      hooks.onResponse.tapPromise(
+        { name: 'ai-transformer' },
+        async (response, ctx) => {
+          try {
+            const result = await this.converter.onResponse!(ctx);
+            if (result) {
+              logger.debug(
+                { from: this.options.from, to: this.options.to },
+                'Response transformed'
+              );
+              return result;
+            }
+            return response;
+          } catch (error) {
+            logger.error(
+              { error, from: this.options.from, to: this.options.to },
+              'Error transforming response'
+            );
+            throw error;
+          }
+        }
+      );
+    }
+
+    // 3. 流式响应块处理：转换流数据格式
     if (this.converter.processStreamChunk) {
-      try {
-        return await this.converter.processStreamChunk(chunk, ctx);
-      } catch (error) {
-        logger.error(
-          { error, from: this.options.from, to: this.options.to },
-          'Error processing stream chunk'
-        );
-        throw error;
-      }
+      hooks.onStreamChunk.tapPromise(
+        { name: 'ai-transformer', stage: 0 },
+        async (chunk, ctx) => {
+          try {
+            const result = await this.converter.processStreamChunk!(chunk, ctx);
+            return result;
+          } catch (error) {
+            logger.error(
+              { error, from: this.options.from, to: this.options.to },
+              'Error processing stream chunk'
+            );
+            throw error;
+          }
+        }
+      );
     }
-    return null;
+
+    // 4. 流结束时刷新缓冲区
+    if (this.converter.flushStream) {
+      hooks.onFlushStream.tapPromise(
+        { name: 'ai-transformer' },
+        async (chunks, ctx) => {
+          try {
+            const flushed = await this.converter.flushStream!(ctx);
+            // 合并已有的 chunks 和新刷新的 chunks
+            return [...chunks, ...flushed];
+          } catch (error) {
+            logger.error(
+              { error, from: this.options.from, to: this.options.to },
+              'Error flushing stream'
+            );
+            throw error;
+          }
+        }
+      );
+    }
   }
 
   /**
-   * 在流式响应结束时刷新剩余数据
+   * 重置插件状态（对象池复用时调用）
    */
-  async flushStream(ctx: StreamChunkContext): Promise<any[]> {
-    if (this.converter.flushStream) {
-      try {
-        return await this.converter.flushStream(ctx);
-      } catch (error) {
-        logger.error(
-          { error, from: this.options.from, to: this.options.to },
-          'Error flushing stream'
-        );
-        throw error;
-      }
-    }
-    return [];
+  async reset(): Promise<void> {
+    // Transformer 是无状态的，不需要重置
   }
 }
 );

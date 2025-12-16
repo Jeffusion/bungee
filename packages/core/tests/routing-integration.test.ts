@@ -193,6 +193,10 @@ describe('Path Rewrite Functionality', () => {
       ],
     };
 
+    // Re-initialize plugin registry with the new config
+    initializeRuntimeState(configWithRewriteAndPlugin);
+    await initializePluginRegistryForTests(configWithRewriteAndPlugin);
+
     const req = new Request('http://localhost/api/v1/messages', {
       method: 'POST',
       body: JSON.stringify({ messages: [] }),
@@ -551,10 +555,9 @@ describe('Streaming Response - Detailed SSE Event Testing', () => {
 });
 
 describe('Environment Variable Validation', () => {
-  const plugin = new AITransformerPlugin({
-    from: 'openai',
-    to: 'anthropic'
-  });
+  // 直接使用 converter 而不是 plugin wrapper
+  const { OpenAIToAnthropicConverter } = require('../src/plugins/ai-transformer/converters/openai-to-anthropic.converter');
+  const converter = new OpenAIToAnthropicConverter();
 
   const buildContext = (body: any): PluginContext => ({
     method: 'POST',
@@ -576,7 +579,7 @@ describe('Environment Variable Validation', () => {
         reasoning_effort: 'high'
       });
 
-      await expect(plugin.onBeforeRequest(ctx)).rejects.toThrow(
+      await expect(converter.onBeforeRequest(ctx)).rejects.toThrow(
         'Environment variable OPENAI_HIGH_TO_ANTHROPIC_TOKENS not configured for reasoning_effort conversion'
       );
     } finally {
@@ -600,7 +603,7 @@ describe('Environment Variable Validation', () => {
         reasoning_effort: 'high'
       });
 
-      await expect(plugin.onBeforeRequest(ctx)).rejects.toThrow(
+      await expect(converter.onBeforeRequest(ctx)).rejects.toThrow(
         'Invalid OPENAI_HIGH_TO_ANTHROPIC_TOKENS value: must be integer'
       );
     } finally {
