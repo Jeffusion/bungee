@@ -13,7 +13,7 @@ import { selectUpstream } from '../upstream/selector';
 import { FailoverCoordinator } from '../upstream/failover-coordinator';
 import { runtimeState } from '../state/runtime-state';
 import { getPluginRegistry } from '../state/plugin-manager';
-import { createRequestSnapshot, ensureSnapshotBodyCloned } from './snapshot';
+import { createRequestSnapshot, ensureSnapshotCloned } from './snapshot';
 import { proxyRequest } from './proxy';
 import { authenticateRequest } from '../../auth';
 import { handleUIRequest } from '../../ui/server';
@@ -136,6 +136,7 @@ export async function handleRequest(
     }
 
     // 获取路由 ID（用于预编译 hooks 查找）
+    // 统一使用 route.path 作为唯一标识
     const routeId = route.path;
 
     // --- Authentication Check ---
@@ -270,9 +271,9 @@ export async function handleRequest(
       attemptCount++;
       upstream = selectedUpstream.target;
 
-      // Lazy clone: only deep clone body when failover retry is needed
+      // Lazy clone: deep clone headers and body when failover retry is needed
       if (attemptCount > 1) {
-        ensureSnapshotBodyCloned(requestSnapshot);
+        ensureSnapshotCloned(requestSnapshot);
       }
 
       // 状态转换：UNHEALTHY → HALF_OPEN（如果满足恢复间隔）

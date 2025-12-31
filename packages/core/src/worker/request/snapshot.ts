@@ -37,9 +37,9 @@ const MAX_SNAPSHOT_BODY_SIZE = 10 * 1024 * 1024; // 10MB
  * // First attempt - uses original parsed body (no clone)
  * const response = await proxyRequest(snapshot, ...);
  *
- * // Failover retry - ensure body is cloned before retry
+ * // Failover retry - ensure snapshot is cloned before retry
  * if (needsRetry) {
- *   ensureSnapshotBodyCloned(snapshot);
+ *   ensureSnapshotCloned(snapshot);
  *   const retryResponse = await proxyRequest(snapshot, ...);
  * }
  * ```
@@ -72,7 +72,7 @@ export async function createRequestSnapshot(req: Request): Promise<RequestSnapsh
       // Clone will be done on-demand when failover retry is needed
       try {
         body = await req.clone().json();
-        // 不再立即 structuredClone，延迟到 ensureSnapshotBodyCloned() 调用时
+        // 不再立即 structuredClone，延迟到 ensureSnapshotCloned() 调用时
       } catch (err) {
         logger.error({ error: err }, 'Failed to parse JSON body for snapshot');
         throw new Error('Invalid JSON body: ' + (err as Error).message);
@@ -96,46 +96,61 @@ export async function createRequestSnapshot(req: Request): Promise<RequestSnapsh
 }
 
 /**
- * Ensures the snapshot's JSON body is deep cloned (for failover retries)
+ * Ensures the snapshot is fully cloned for failover retries
  *
- * This function implements the lazy clone strategy:
+ * This function implements the lazy clone strategy for both body and headers:
  * - First call: Executes structuredClone and marks as cloned
  * - Subsequent calls: No-op, returns immediately
  *
  * **When to call:**
  * - Before the second and subsequent upstream retry attempts
- * - NOT needed for the first attempt (uses original parsed body)
+ * - NOT needed for the first attempt (uses original parsed data)
  *
  * **Why lazy clone:**
  * - ~95% of requests succeed on first attempt (no failover needed)
  * - structuredClone is expensive (1-10ms for typical JSON bodies)
  * - Lazy clone avoids this overhead for the majority of requests
  *
- * @param snapshot - Request snapshot to ensure body is cloned
+ * @param snapshot - Request snapshot to ensure is fully cloned
  * @returns The same snapshot (mutated in-place)
  *
  * @example
  * ```typescript
  * // In failover loop
  * if (attemptNumber > 1) {
- *   ensureSnapshotBodyCloned(snapshot);
+ *   ensureSnapshotCloned(snapshot);
  * }
  * ```
  */
-export function ensureSnapshotBodyCloned(snapshot: RequestSnapshot): RequestSnapshot {
-  // Skip if already cloned, not JSON, or no body
-  if (snapshot.isBodyCloned || !snapshot.isJsonBody || snapshot.body === null) {
-    return snapshot;
+export function ensureSnapshotCloned(snapshot: RequestSnapshot): RequestSnapshot {
+  // Clone headers if not already cloned
+  if (!snapshot.isHeadersCloned) {
+    snapshot.headers = structuredClone(snapshot.headers);
+    snapshot.isHeadersCloned = true;
+
+    logger.debug(
+      { headerCount: Object.keys(snapshot.headers).length },
+      'Snapshot headers cloned for failover retry (lazy clone)'
+    );
   }
 
-  // Execute deep clone
-  snapshot.body = structuredClone(snapshot.body);
-  snapshot.isBodyCloned = true;
+  // Clone JSON body if not already cloned
+  if (!snapshot.isBodyCloned && snapshot.isJsonBody && snapshot.body !== null) {
+    snapshot.body = structuredClone(snapshot.body);
+    snapshot.isBodyCloned = true;
 
-  logger.debug(
-    { bodySize: JSON.stringify(snapshot.body).length },
-    'Snapshot body cloned for failover retry (lazy clone)'
-  );
+    logger.debug(
+      { bodySize: JSON.stringify(snapshot.body).length },
+      'Snapshot body cloned for failover retry (lazy clone)'
+    );
+  }
 
   return snapshot;
+}
+
+/**
+ * @deprecated Use ensureSnapshotCloned instead (clones both headers and body)
+ */
+export function ensureSnapshotBodyCloned(snapshot: RequestSnapshot): RequestSnapshot {
+  return ensureSnapshotCloned(snapshot);
 }

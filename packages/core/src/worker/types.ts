@@ -52,6 +52,12 @@ export interface RequestSnapshot {
    * - true: Cloned, safe for failover retry
    */
   isBodyCloned?: boolean;
+  /**
+   * Whether headers have been deep cloned (lazy clone optimization)
+   * - false/undefined: Not cloned, first request uses original headers object
+   * - true: Cloned, safe for failover retry
+   */
+  isHeadersCloned?: boolean;
 }
 
 /**

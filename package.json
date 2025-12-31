@@ -55,6 +55,7 @@
   },
   "dependencies": {
     "chart.js": "^4.5.0",
+    "js-tiktoken": "^1.0.21",
     "svelte-chartjs": "^3.1.5",
     "svelte-navigator": "^3.2.2",
     "uuid": "^13.0.0"

@@ -77,6 +77,8 @@ async function buildExternalPlugins() {
     const manifestDst = path.join(outputPath, 'manifest.json');
     if (fs.existsSync(manifestSrc)) {
       fs.copyFileSync(manifestSrc, manifestDst);
+      // 确保 manifest.json 可被所有用户读取（Docker 容器中以非 root 用户运行）
+      fs.chmodSync(manifestDst, 0o644);
       console.log(`  ✓ ${pluginName}/manifest.json copied`);
     }
 

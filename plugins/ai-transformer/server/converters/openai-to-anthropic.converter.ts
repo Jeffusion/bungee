@@ -449,10 +449,11 @@ export class OpenAIToAnthropicConverter implements AIConverter {
       else if (stopReason === 'max_tokens') finishReason = 'length';
       else if (stopReason === 'stop_sequence') finishReason = 'stop';
 
+      // Anthropic message_delta 的 usage 在顶层，包含 input_tokens 和 output_tokens
       const usage = chunk.usage ? {
         prompt_tokens: chunk.usage.input_tokens || 0,
-        completion_tokens: chunk.delta?.usage?.output_tokens || 0,
-        total_tokens: (chunk.usage.input_tokens || 0) + (chunk.delta?.usage?.output_tokens || 0)
+        completion_tokens: chunk.usage.output_tokens || 0,
+        total_tokens: (chunk.usage.input_tokens || 0) + (chunk.usage.output_tokens || 0)
       } : undefined;
 
       return [{

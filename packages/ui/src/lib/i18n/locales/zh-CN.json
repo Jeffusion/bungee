@@ -55,7 +55,14 @@
     "inputTokens": "输入 Token",
     "outputTokens": "输出 Token",
     "totalInput": "总输入",
-    "totalOutput": "总输出"
+    "totalOutput": "总输出",
+    "totalRequests": "总请求数",
+    "dimension": {
+      "all": "全部",
+      "route": "按路由",
+      "upstream": "按上游"
+    },
+    "noData": "暂无 Token 使用数据"
   },
   "monitoring": {
     "title": "监控图表",

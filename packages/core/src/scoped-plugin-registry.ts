@@ -66,7 +66,7 @@ const DEFAULT_CONFIG = {
 export type PluginScope =
   | { type: 'global' }
   | { type: 'route'; routeId: string }
-  | { type: 'upstream'; upstreamId: string };
+  | { type: 'upstream'; routeId: string; upstreamId: string };
 
 /**
  * 类型守卫：检查是否为全局作用域
@@ -85,7 +85,7 @@ export function isRouteScope(scope: PluginScope): scope is { type: 'route'; rout
 /**
  * 类型守卫：检查是否为上游作用域
  */
-export function isUpstreamScope(scope: PluginScope): scope is { type: 'upstream'; upstreamId: string } {
+export function isUpstreamScope(scope: PluginScope): scope is { type: 'upstream'; routeId: string; upstreamId: string } {
   return scope.type === 'upstream';
 }
 
@@ -99,7 +99,7 @@ export function getScopeKey(scope: PluginScope): string {
     case 'route':
       return `route:${scope.routeId}`;
     case 'upstream':
-      return `upstream:${scope.upstreamId}`;
+      return `upstream:${scope.routeId}#${scope.upstreamId}`;
   }
 }
 
@@ -232,7 +232,7 @@ export class ScopedPluginRegistry {
   /** 路由级插件实例：routeId → instances */
   private routeInstances: Map<string, ScopedPluginInstance[]> = new Map();
 
-  /** 上游级插件实例：upstreamId → instances */
+  /** 上游级插件实例：`${routeId}#${upstreamId}` → instances */
   private upstreamInstances: Map<string, ScopedPluginInstance[]> = new Map();
 
   // ========== 预编译 Hooks 缓存 ==========
@@ -646,10 +646,12 @@ export class ScopedPluginRegistry {
         break;
 
       case 'upstream':
-        const upstreamList = this.upstreamInstances.get(instance.scope.upstreamId) || [];
+        // 使用 routeId#upstreamId 作为复合 key
+        const upstreamKey = `${instance.scope.routeId}#${instance.scope.upstreamId}`;
+        const upstreamList = this.upstreamInstances.get(upstreamKey) || [];
         upstreamList.push(instance);
         sortByPriority(upstreamList);
-        this.upstreamInstances.set(instance.scope.upstreamId, upstreamList);
+        this.upstreamInstances.set(upstreamKey, upstreamList);
         break;
     }
   }
@@ -797,11 +799,8 @@ export class ScopedPluginRegistry {
     const cacheKey = this.getCombinedCacheKey(routeId, upstreamId);
     const cached = this.combinedHooksCache.get(cacheKey);
     if (cached) {
-      logger.debug({ cacheKey, hit: true }, 'Precompiled hooks cache hit');
       return cached;
     }
-
-    logger.debug({ cacheKey, hit: false }, 'Precompiled hooks cache miss, building');
 
     // 2. 缓存未命中，动态构建并缓存
     const combined = this.buildCombinedHooks(routeId, upstreamId);
@@ -953,8 +952,10 @@ export class ScopedPluginRegistry {
     // 收集所有 handler
     const globalHandlers = this.globalInstances.map(i => i.handler);
     const routeHandlers = (this.routeInstances.get(routeId) || []).map(i => i.handler);
+
+    // 使用 routeId#upstreamId 复合 key 查询 upstream 插件
     const upstreamHandlers = upstreamId
-      ? (this.upstreamInstances.get(upstreamId) || []).map(i => i.handler)
+      ? (this.upstreamInstances.get(`${routeId}#${upstreamId}`) || []).map(i => i.handler)
       : [];
 
     // 注册时去重（同一 handler 可能在多个 scope 中）
@@ -1084,7 +1085,7 @@ export class ScopedPluginRegistry {
 
     // 2. 加载路由级插件
     for (const route of config.routes || []) {
-      const routeId = route.id || route.path;
+      const routeId = route.path;
 
       for (const pluginConfig of route.plugins || []) {
         const normalized = normalizePluginConfig(pluginConfig);
@@ -1100,17 +1101,18 @@ export class ScopedPluginRegistry {
 
       // 3. 加载上游级插件
       for (const upstream of route.upstreams || []) {
-        const upstreamId = upstream.id || upstream.target;
+        const upstreamId = upstream.target;
 
         for (const pluginConfig of upstream.plugins || []) {
           const normalized = normalizePluginConfig(pluginConfig);
-          const result = await this.createInstanceWithRetry({ type: 'upstream', upstreamId }, normalized);
+          // 🔧 upstream scope 现在包含 routeId，确保插件隔离到 route+upstream 组合
+          const result = await this.createInstanceWithRetry({ type: 'upstream', routeId, upstreamId }, normalized);
           if (result.success) {
             successCount++;
           } else {
             failedCount++;
             recordFailure(normalized.name, result.error!);
-            logger.error({ error: result.error, pluginConfig, upstreamId }, 'Failed to create upstream plugin instance after retries');
+            logger.error({ error: result.error, pluginConfig, routeId, upstreamId }, 'Failed to create upstream plugin instance after retries');
           }
         }
       }
@@ -1264,19 +1266,21 @@ export class ScopedPluginRegistry {
   /**
    * 热更新上游的插件配置
    *
+   * @param routeId 路由 ID
    * @param upstreamId 上游 ID
    * @param newPluginConfigs 新的插件配置
    */
-  async hotReloadUpstreamPlugins(upstreamId: string, newPluginConfigs: PluginConfig[]): Promise<void> {
-    const scope: PluginScope = { type: 'upstream', upstreamId };
+  async hotReloadUpstreamPlugins(routeId: string, upstreamId: string, newPluginConfigs: PluginConfig[]): Promise<void> {
+    const scope: PluginScope = { type: 'upstream', routeId, upstreamId };
     const lockKey = getScopeKey(scope);
     const releaseLock = await this.acquireHotReloadLock(lockKey);
 
     try {
-      logger.info({ upstreamId }, 'Hot reloading upstream plugins');
+      logger.info({ routeId, upstreamId }, 'Hot reloading upstream plugins');
 
-      // 1. 获取旧的实例
-      const oldInstances = this.upstreamInstances.get(upstreamId) || [];
+      // 1. 获取旧的实例（使用复合 key）
+      const upstreamKey = `${routeId}#${upstreamId}`;
+      const oldInstances = this.upstreamInstances.get(upstreamKey) || [];
 
       // 2. 创建新的实例列表
       const newInstances: ScopedPluginInstance[] = [];
@@ -1284,7 +1288,7 @@ export class ScopedPluginRegistry {
       for (const pluginConfig of newPluginConfigs) {
         try {
           const pluginClass = await this.ensurePluginClassLoaded(pluginConfig);
-          const scope: PluginScope = { type: 'upstream', upstreamId };
+          const scope: PluginScope = { type: 'upstream', routeId, upstreamId };
           const initContext = await this.createInitContext(pluginClass.name, pluginConfig.options || {}, scope);
           const handler = await pluginClass.createHandler(pluginConfig.options || {}, initContext);
 
@@ -1295,27 +1299,28 @@ export class ScopedPluginRegistry {
             config: pluginConfig
           });
         } catch (error) {
-          logger.error({ error, pluginConfig, upstreamId }, 'Failed to create upstream plugin during hot reload');
+          logger.error({ error, pluginConfig, routeId, upstreamId }, 'Failed to create upstream plugin during hot reload');
         }
       }
 
       // 3. 按优先级排序
       sortByPriority(newInstances);
 
-      // 4. 原子替换
-      this.upstreamInstances.set(upstreamId, newInstances);
+      // 4. 原子替换（使用复合 key）
+      this.upstreamInstances.set(upstreamKey, newInstances);
 
       // 5. 清除相关缓存
-      this.invalidatePrecompiledCache(undefined, upstreamId);
+      this.invalidatePrecompiledCache(routeId, upstreamId);
       this.precompiled = false;
 
       // 6. 重新预编译
       this.precompileAllHooks();
 
       // 7. 延迟销毁旧实例
-      this.scheduleHandlerDestruction(oldInstances, { upstreamId });
+      this.scheduleHandlerDestruction(oldInstances, { routeId, upstreamId });
 
       logger.info({
+        routeId,
         upstreamId,
         oldCount: oldInstances.length,
         newCount: newInstances.length

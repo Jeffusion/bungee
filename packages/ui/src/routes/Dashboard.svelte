@@ -317,10 +317,7 @@
           class:lg:col-span-4={panel.w === 4}
           class:row-span-2={panel.h >= 2}
         >
-          <div class="card-body p-2 relative h-full">
-            <div class="absolute top-2 right-2 z-10 opacity-50 text-xs bg-base-200 px-2 py-1 rounded">
-              {$_(panel.title)}
-            </div>
+          <div class="card-body p-2 h-full">
             <svelte:component this={panel.component} {...panel.props} />
           </div>
         </div>

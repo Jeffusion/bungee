@@ -28,7 +28,9 @@ FROM deps AS build
 COPY packages/ui ./packages/ui
 COPY packages/types ./packages/types
 COPY packages/core ./packages/core
+COPY plugins ./plugins
 COPY scripts/bundle-ui.ts ./scripts/
+COPY scripts/build-external-plugins.ts ./scripts/
 
 # Run complete build pipeline
 # 1. Build Types (typescript) → packages/types/dist/

@@ -291,7 +291,13 @@ export class GeminiToOpenAIConverter implements AIConverter {
           },
           finishReason: geminiFinishReason,
           index: 0
-        }]
+        }],
+        // 转换 OpenAI usage → Gemini usageMetadata
+        usageMetadata: chunk.usage ? {
+          promptTokenCount: chunk.usage.prompt_tokens || 0,
+          candidatesTokenCount: chunk.usage.completion_tokens || 0,
+          totalTokenCount: chunk.usage.total_tokens || 0
+        } : undefined
       }];
     }
 
