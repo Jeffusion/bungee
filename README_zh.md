@@ -386,12 +386,21 @@ BODY_PARSER_LIMIT=100mb
       },
       "failover": {
         "enabled": true,
-        "retryableStatusCodes": [500, 502, 503, 504]
+        "retryableStatusCodes": ">=500,!503",
+        "autoDisableThreshold": 10,
+        "autoEnableOnHealthCheck": true
       }
     }
   ]
 }
 ```
+
+**故障转移小贴士**
+
+- `retryableStatusCodes` 支持表达式语法（如 `>=400`、`!404`、`4xx`、`5xx`），也可以用逗号组合：`>=500,!503`。
+- `autoDisableThreshold` 用于在连续失败达到阈值时自动禁用上游，防止继续拉低集群。
+- `autoEnableOnHealthCheck` 会在主动健康检查判定健康后自动重新启用被禁用的上游。
+- 可通过 `POST /api/routes/:routePath/upstreams/:upstreamTarget/enable|disable` 手动启用/禁用（记得对参数进行 URL 编码）。
 
 详细配置选项请参见[配置指南](docs/configuration.md)。
 

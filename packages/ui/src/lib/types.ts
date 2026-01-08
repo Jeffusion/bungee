@@ -132,8 +132,10 @@ export interface ModificationRules {
 
 export interface FailoverConfig {
   enabled: boolean;
-  retryableStatusCodes?: number[];
+  retryableStatusCodes?: number | string | (number | string)[];
   consecutiveFailuresThreshold?: number;  // 默认 3，连续失败几次后标记为 UNHEALTHY
+  autoDisableThreshold?: number;          // 连续失败达到此次数后自动禁用 upstream
+  autoEnableOnHealthCheck?: boolean;      // 当健康检查连续成功时，自动启用被禁用的 upstream
   recoveryIntervalMs?: number;  // 默认 5000，失败后等待多久尝试恢复
   recoveryTimeoutMs?: number;   // 默认 3000，恢复请求的超时时间
   healthyThreshold?: number;    // 默认 2，连续成功几次后标记为 HEALTHY

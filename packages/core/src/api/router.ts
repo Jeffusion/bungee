@@ -4,6 +4,7 @@ import { SystemHandler } from './handlers/system';
 import { TransformersHandler } from './handlers/transformers';
 import { LogsHandler } from './handlers/logs';
 import { RoutesHandler } from './handlers/routes';
+import { UpstreamControlHandler } from './handlers/upstreams';
 import { AuthHandler } from './handlers/auth';
 import { handleGetPlugins, handleTogglePlugin, handleGetPluginSandbox, handleGetPluginSchemas, handleGetPluginTranslations, handlePluginApiRequest } from './handlers/plugins';
 import { loadConfig } from '../config';
@@ -80,6 +81,16 @@ export async function handleAPIRequest(req: Request, path: string): Promise<Resp
     // 路由管理
     if (path === '/api/routes' && method === 'GET') {
       return RoutesHandler.list();
+    }
+
+    const upstreamControlMatch = path.match(/^\/api\/routes\/(.+?)\/upstreams\/(.+?)\/(enable|disable)$/);
+    if (upstreamControlMatch && method === 'POST') {
+      const [, encodedRoutePath, encodedTarget, action] = upstreamControlMatch;
+      return UpstreamControlHandler.toggle(
+        decodeURIComponent(encodedRoutePath),
+        decodeURIComponent(encodedTarget),
+        action === 'disable'
+      );
     }
 
     // 统计数据

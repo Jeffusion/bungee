@@ -383,12 +383,21 @@ Each upstream defines:
       },
       "failover": {
         "enabled": true,
-        "retryableStatusCodes": [500, 502, 503, 504]
+        "retryableStatusCodes": ">=500,!503",
+        "autoDisableThreshold": 10,
+        "autoEnableOnHealthCheck": true
       }
     }
   ]
 }
 ```
+
+**Failover Tips**
+
+- `retryableStatusCodes` accepts expressions like `>=400`, `!404`, `4xx`, `5xx`, or comma-delimited combinations (e.g. `>=500,!503`).
+- `autoDisableThreshold` automatically disables an upstream after N consecutive failures; disabled upstreams are excluded from future selections.
+- `autoEnableOnHealthCheck` re-enables disabled upstreams automatically once active health checks confirm they are healthy again.
+- Manual overrides are available via `POST /api/routes/:routePath/upstreams/:upstreamTarget/enable` (or `/disable`). Encode `routePath` and `upstreamTarget` when calling the API.
 
 For detailed configuration options, see the [Configuration Guide](docs/configuration.md).
 

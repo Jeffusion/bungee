@@ -19,6 +19,7 @@ import { authenticateRequest } from '../../auth';
 import { handleUIRequest } from '../../ui/server';
 import { statsCollector } from '../../api/collectors/stats-collector';
 import { activateSlowStart, deactivateSlowStart } from '../utils/slow-start';
+import { createStatusCodeMatcher, type StatusCodeMatcher } from '../utils/status-code-matcher';
 
 /**
  * Handles incoming HTTP requests
@@ -251,6 +252,23 @@ export async function handleRequest(
 
     // 使用 FailoverCoordinator 管理故障转移流程
     const baseRecoveryIntervalMs = route.failover?.recoveryIntervalMs || 5000;
+    const retryableRules = route.failover?.retryableStatusCodes;
+    let retryableStatusMatcher: StatusCodeMatcher | null = null;
+    if (retryableRules !== undefined) {
+      try {
+        retryableStatusMatcher = createStatusCodeMatcher(retryableRules);
+      } catch (matcherError) {
+        logger.error(
+          {
+            route: route.path,
+            rules: retryableRules,
+            error: (matcherError as Error).message
+          },
+          'Invalid retryable status code rules, fallback to no retries'
+        );
+        retryableStatusMatcher = null;
+      }
+    }
     const coordinator = new FailoverCoordinator(
       routeState.upstreams,
       route,
@@ -325,8 +343,7 @@ export async function handleRequest(
         responseStatus = response.status;
 
         // 检查是否是可重试的状态码
-        const retryableStatusCodes = route.failover?.retryableStatusCodes || [];
-        const isRetryableStatus = retryableStatusCodes.length > 0 && retryableStatusCodes.includes(response.status);
+        const isRetryableStatus = retryableStatusMatcher ? retryableStatusMatcher(response.status) : false;
 
         // 只有在以下情况才返回响应：
         // 1. 不是可重试状态码（成功或非重试错误）
@@ -498,6 +515,27 @@ export async function handleRequest(
         // 递增失败计数器，重置成功计数器
         selectedUpstream.consecutiveFailures++;
         selectedUpstream.consecutiveSuccesses = 0;
+
+        const autoDisableThreshold = route.failover?.autoDisableThreshold;
+        if (
+          autoDisableThreshold &&
+          selectedUpstream.consecutiveFailures >= autoDisableThreshold &&
+          !selectedUpstream.disabled
+        ) {
+          selectedUpstream.disabled = true;
+          logger.error(
+            {
+              target: selectedUpstream.target,
+              consecutiveFailures: selectedUpstream.consecutiveFailures,
+              autoDisableThreshold
+            },
+            'Upstream automatically disabled after exceeding failure threshold'
+          );
+          reqLogger.addStep('upstream_auto_disabled', {
+            target: selectedUpstream.target,
+            consecutiveFailures: selectedUpstream.consecutiveFailures
+          });
+        }
 
         // 断路器状态转换逻辑
         if (selectedUpstream.status === 'HALF_OPEN') {

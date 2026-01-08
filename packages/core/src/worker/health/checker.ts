@@ -31,6 +31,9 @@ export interface HealthCheckConfig {
   expectedStatus: number[];
   unhealthyThreshold: number;
   healthyThreshold: number;
+  autoEnableOnHealthCheck: boolean;
+  body?: string;
+  contentType: string;
 }
 
 /**
@@ -51,6 +54,9 @@ export function getHealthCheckConfig(route: RouteConfig): HealthCheckConfig | nu
     expectedStatus: hc.expectedStatus ?? [200],
     unhealthyThreshold: hc.unhealthyThreshold ?? 3,
     healthyThreshold: hc.healthyThreshold ?? 2,
+    autoEnableOnHealthCheck: route.failover?.autoEnableOnHealthCheck ?? true,
+    body: hc.body,
+    contentType: hc.contentType ?? 'application/json',
   };
 }
 
@@ -66,17 +72,19 @@ export async function performHealthCheck(
   config: HealthCheckConfig
 ): Promise<HealthCheckResult> {
   const startTime = Date.now();
-  const targetUrl = new URL(upstream.target);
-
   // Construct health check URL
   const healthCheckUrl = new URL(config.path, upstream.target);
+  const method = config.method.toUpperCase();
+  const supportsRequestBody = ['POST', 'PUT', 'PATCH'].includes(method);
 
   logger.debug(
     {
       upstream: upstream.target,
       path: config.path,
-      method: config.method,
-      timeout: config.timeoutMs
+      method,
+      timeout: config.timeoutMs,
+      bodyConfigured: Boolean(config.body),
+      bodyApplied: Boolean(config.body && supportsRequestBody),
     },
     'Performing health check'
   );
@@ -86,13 +94,29 @@ export async function performHealthCheck(
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), config.timeoutMs);
 
-    const response = await fetch(healthCheckUrl.href, {
+    const headers: Record<string, string> = {
+      'User-Agent': 'Bungee-HealthCheck/1.0',
+    };
+    const requestOptions: RequestInit = {
       method: config.method,
       signal: controller.signal,
-      headers: {
-        'User-Agent': 'Bungee-HealthCheck/1.0',
-      },
-    });
+      headers,
+    };
+
+    if (config.body && supportsRequestBody) {
+      requestOptions.body = config.body;
+      headers['Content-Type'] = config.contentType;
+    } else if (config.body && !supportsRequestBody) {
+      logger.warn(
+        {
+          upstream: upstream.target,
+          method: config.method,
+        },
+        'Health check body configured but HTTP method does not support a request payload, skipping body'
+      );
+    }
+
+    const response = await fetch(healthCheckUrl.href, requestOptions);
 
     clearTimeout(timeoutId);
     const latency = Date.now() - startTime;
@@ -165,9 +189,11 @@ export function processHealthCheckResult(
     upstream.healthCheckSuccesses++;
     upstream.healthCheckFailures = 0;
 
+    let recoveredByHealthCheck = false;
     // Check if we should mark as HEALTHY
     if (upstream.status === 'UNHEALTHY' || upstream.status === 'HALF_OPEN') {
       if (upstream.healthCheckSuccesses >= config.healthyThreshold) {
+        recoveredByHealthCheck = true;
         upstream.status = 'HEALTHY';
         upstream.lastFailureTime = undefined;
         upstream.healthCheckSuccesses = 0; // Reset counter
@@ -189,6 +215,18 @@ export function processHealthCheckResult(
           'Health check success recorded, not yet marked HEALTHY'
         );
       }
+    }
+
+    if (config.autoEnableOnHealthCheck && upstream.disabled && recoveredByHealthCheck) {
+      upstream.disabled = false;
+      upstream.consecutiveFailures = 0;
+      logger.info(
+        {
+          upstream: upstream.target,
+          autoEnabled: true
+        },
+        'Previously disabled upstream automatically re-enabled after successful health checks'
+      );
     }
   } else {
     // Failure: increment failure counter, reset success counter

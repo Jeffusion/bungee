@@ -14,6 +14,9 @@ import { buildRequestContextFromSnapshot } from './context-builder';
 import { deepMergeRules, applyBodyRules, applyQueryRules } from '../rules/modifier';
 import { prepareResponse } from '../response/processor';
 
+type ExtendedRequestInit = RequestInit & { verbose?: boolean };
+type NetworkError = Error & { code?: string };
+
 /**
  * Proxies a request to an upstream server
  *
@@ -409,30 +412,76 @@ export async function proxyRequest(
   targetUrl.pathname = (targetBasePath === '/' ? '' : targetBasePath.replace(/\/$/, '')) + targetUrl.pathname;
   logger.debug({ request: requestLog, finalPath: targetUrl.pathname }, 'Final path with base path');
 
+  let requestTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  const clearRequestTimeout = () => {
+    if (requestTimeoutId) {
+      clearTimeout(requestTimeoutId);
+      requestTimeoutId = null;
+    }
+  };
+
   try {
     // Determine timeout based on upstream health status
     // HALF_OPEN uses recovery timeout (test window), others use normal timeout
     const isRecoveryAttempt = upstream.status === 'UNHEALTHY' || upstream.status === 'HALF_OPEN';
     const recoveryTimeoutMs = route.failover?.recoveryTimeoutMs || 3000;
-    const requestTimeoutMs = route.failover?.requestTimeoutMs || 30000;
-    const timeoutMs = isRecoveryAttempt ? recoveryTimeoutMs : requestTimeoutMs;
+    const configuredRequestTimeoutMs = route.failover?.requestTimeoutMs || 30000;
+    const timeoutMs = isRecoveryAttempt ? recoveryTimeoutMs : configuredRequestTimeoutMs;
+    const connectTimeoutMs = route.failover?.connectTimeoutMs || 5000;
 
-    let fetchOptions: RequestInit = {
+    let fetchOptions: ExtendedRequestInit = {
       method: requestSnapshot.method,
       headers,
       body,
-      redirect: 'manual'
+      redirect: 'manual',
+      keepalive: true,
+      verbose: true
     };
+
+    let headerCount = 0;
+    headers.forEach(() => {
+      headerCount += 1;
+    });
+    logger.debug(
+      {
+        request: requestLog,
+        target: targetUrl.href,
+        fetchOptions: {
+          method: fetchOptions.method,
+          redirect: fetchOptions.redirect,
+          keepalive: fetchOptions.keepalive,
+          verbose: fetchOptions.verbose,
+          hasBody: Boolean(fetchOptions.body),
+          headerCount
+        },
+        timeouts: {
+          connectTimeoutMs,
+          requestTimeoutMs: timeoutMs
+        }
+      },
+      'Configured fetch options for upstream request'
+    );
 
     // Add timeout control for all requests (with AbortController)
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    type TimeoutReason = 'connect_timeout' | 'request_timeout';
+    let abortReason: TimeoutReason | null = null;
+    const abortWithReason = (reason: TimeoutReason) => {
+      if (abortReason) {
+        return;
+      }
+      abortReason = reason;
+      controller.abort();
+    };
+    const connectTimeoutId = setTimeout(() => abortWithReason('connect_timeout'), connectTimeoutMs);
+    requestTimeoutId = setTimeout(() => abortWithReason('request_timeout'), timeoutMs);
     fetchOptions.signal = controller.signal;
 
     logger.debug(
       {
         request: requestLog,
         timeout: timeoutMs,
+        connectTimeout: connectTimeoutMs,
         upstreamStatus: upstream.status,
         isRecoveryAttempt,
         target: targetUrl.href
@@ -443,23 +492,75 @@ export async function proxyRequest(
     let proxyRes: Response;
     try {
       proxyRes = await fetch(targetUrl.href, fetchOptions);
-      clearTimeout(timeoutId);
+      clearTimeout(connectTimeoutId);
     } catch (error) {
-      clearTimeout(timeoutId);
+      clearTimeout(connectTimeoutId);
+      clearRequestTimeout();
       if ((error as Error).name === 'AbortError') {
+        const timeoutType = abortReason === 'connect_timeout' ? 'connect' : 'request';
+        const exceededMs = timeoutType === 'connect' ? connectTimeoutMs : timeoutMs;
+        const timeoutMessage =
+          timeoutType === 'connect'
+            ? `Connection timeout: ${connectTimeoutMs}ms exceeded`
+            : `Request timeout: ${timeoutMs}ms exceeded`;
         logger.warn(
           {
             request: requestLog,
             target: targetUrl.href,
-            timeout: timeoutMs,
+            timeout: exceededMs,
+            timeoutType,
             upstreamStatus: upstream.status,
             isRecoveryAttempt
           },
-          `Request timed out after ${timeoutMs}ms`
+          timeoutMessage
         );
-        throw new Error(`Request timeout: ${timeoutMs}ms exceeded`);
+        throw new Error(timeoutMessage, { cause: error as Error });
       }
-      throw error;
+      const networkError = error as NetworkError;
+      const code = networkError?.code;
+      const rawMessage = networkError?.message || 'Unknown network error';
+      const normalizedMessage = rawMessage.toLowerCase();
+      let category: 'connection' | 'socket' | 'dns' | 'network' = 'network';
+      let friendlyMessage = `Network error while proxying to ${targetUrl.href}: ${rawMessage}`;
+
+      const connectionErrorCodes = new Set([
+        'ECONNREFUSED',
+        'ECONNRESET',
+        'ECONNABORTED',
+        'EHOSTUNREACH',
+        'EPIPE',
+        'ETIMEDOUT'
+      ]);
+      const dnsErrorCodes = new Set(['ENOTFOUND', 'EAI_AGAIN', 'EAI_FAIL', 'ESERVFAIL']);
+
+      if (code && connectionErrorCodes.has(code)) {
+        category = 'connection';
+        friendlyMessage = `Connection error (${code}) while proxying to ${targetUrl.href}`;
+      } else if (code && dnsErrorCodes.has(code)) {
+        category = 'dns';
+        friendlyMessage = `DNS lookup failed (${code}) for ${targetUrl.hostname}`;
+      } else if (normalizedMessage.includes('socket')) {
+        category = 'socket';
+        friendlyMessage = `Socket error while communicating with ${targetUrl.href}: ${rawMessage}`;
+      }
+
+      logger.error(
+        {
+          request: requestLog,
+          target: targetUrl.href,
+          errorCode: code,
+          category,
+          upstreamStatus: upstream.status,
+          isRecoveryAttempt,
+          message: rawMessage,
+          timeouts: {
+            connectTimeoutMs,
+            requestTimeoutMs: timeoutMs
+          }
+        },
+        `Proxy request failed (${category})`
+      );
+      throw new Error(friendlyMessage, { cause: error as Error });
     }
 
     logger.debug(
@@ -518,12 +619,14 @@ export async function proxyRequest(
       streamRequestContext
     );
 
+    clearRequestTimeout();
     return new Response(responseBody, {
       status: proxyRes.status,
       statusText: proxyRes.statusText,
       headers: responseHeaders,
     });
   } catch (error) {
+    clearRequestTimeout();
     // ===== 12. Plugin onError (inbound) =====
     let errorDuration = 0;
     if (precompiledHooks) {

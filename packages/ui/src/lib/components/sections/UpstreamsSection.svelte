@@ -201,7 +201,7 @@
     <table class="table table-zebra w-full">
       <thead>
         <tr>
-          <th class="w-16 text-center">{$_('upstream.status')}</th>
+          <th class="w-24 text-center">{$_('upstream.status')}</th>
           <th class="w-20">{$_('upstream.priority')}</th>
           <th class="w-20">{$_('upstream.weight')}</th>
           <th>{$_('upstream.target')}</th>
@@ -213,13 +213,15 @@
         {#each filteredUpstreamsWithIndex as { u: upstream, i: index } (upstream._uid)}
           <tr class="hover" class:opacity-50={upstream.disabled}>
             <td class="text-center">
-              <input
-                type="checkbox"
-                class="checkbox checkbox-sm checkbox-success"
-                checked={!upstream.disabled}
-                on:change={() => toggleUpstreamStatus(index)}
-                title={upstream.disabled ? $_('upstream.enableTooltip') : $_('upstream.disableTooltip')}
-              />
+              <div class="flex items-center justify-center gap-2">
+                <input
+                  type="checkbox"
+                  class="toggle toggle-sm toggle-success"
+                  checked={!upstream.disabled}
+                  on:change={() => toggleUpstreamStatus(index)}
+                  title={upstream.disabled ? $_('upstream.enableTooltip') : $_('upstream.disableTooltip')}
+                />
+              </div>
             </td>
             <td>
               {#if editingIndex === index && editingField === 'priority'}

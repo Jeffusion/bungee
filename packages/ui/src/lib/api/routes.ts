@@ -46,7 +46,10 @@ export interface ModificationRules {
 
 export interface FailoverConfig {
   enabled: boolean;
-  retryableStatusCodes?: number[];
+  retryableStatusCodes?: number | string | (number | string)[];
+  consecutiveFailuresThreshold?: number;
+  autoDisableThreshold?: number;
+  autoEnableOnHealthCheck?: boolean;
   recoveryIntervalMs?: number;
   recoveryTimeoutMs?: number;
 }

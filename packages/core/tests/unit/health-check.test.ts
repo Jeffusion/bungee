@@ -10,7 +10,29 @@ import {
   getHealthCheckConfig,
   processHealthCheckResult,
   type HealthCheckResult,
+  type HealthCheckConfig,
 } from '../../src/worker/health/checker';
+
+const defaultConfig: HealthCheckConfig = {
+  enabled: true,
+  intervalMs: 10000,
+  timeoutMs: 3000,
+  path: '/health',
+  method: 'GET',
+  expectedStatus: [200],
+  unhealthyThreshold: 3,
+  healthyThreshold: 2,
+  autoEnableOnHealthCheck: true,
+};
+
+function buildConfig(overrides: Partial<HealthCheckConfig> = {}): HealthCheckConfig {
+  return {
+    ...defaultConfig,
+    ...overrides,
+    expectedStatus: overrides.expectedStatus ?? [...defaultConfig.expectedStatus],
+    autoEnableOnHealthCheck: overrides.autoEnableOnHealthCheck ?? defaultConfig.autoEnableOnHealthCheck,
+  };
+}
 
 describe('Health Check - Configuration', () => {
   test('should return null when health check is not enabled', () => {
@@ -50,6 +72,7 @@ describe('Health Check - Configuration', () => {
     expect(config?.expectedStatus).toEqual([200]);
     expect(config?.unhealthyThreshold).toBe(3);
     expect(config?.healthyThreshold).toBe(2);
+    expect(config?.autoEnableOnHealthCheck).toBe(true);
   });
 
   test('should use custom configuration values', () => {
@@ -69,6 +92,7 @@ describe('Health Check - Configuration', () => {
           unhealthyThreshold: 5,
           healthyThreshold: 3,
         },
+        autoEnableOnHealthCheck: false,
       },
     };
 
@@ -81,6 +105,7 @@ describe('Health Check - Configuration', () => {
     expect(config?.expectedStatus).toEqual([200, 204]);
     expect(config?.unhealthyThreshold).toBe(5);
     expect(config?.healthyThreshold).toBe(3);
+    expect(config?.autoEnableOnHealthCheck).toBe(false);
   });
 });
 
@@ -109,16 +134,7 @@ describe('Health Check - Result Processing', () => {
       timestamp: Date.now(),
     };
 
-    const config = {
-      enabled: true,
-      intervalMs: 10000,
-      timeoutMs: 3000,
-      path: '/health',
-      method: 'GET',
-      expectedStatus: [200],
-      unhealthyThreshold: 3,
-      healthyThreshold: 2,
-    };
+    const config = buildConfig();
 
     processHealthCheckResult(upstream, result, config);
 
@@ -136,16 +152,7 @@ describe('Health Check - Result Processing', () => {
       timestamp: Date.now(),
     };
 
-    const config = {
-      enabled: true,
-      intervalMs: 10000,
-      timeoutMs: 3000,
-      path: '/health',
-      method: 'GET',
-      expectedStatus: [200],
-      unhealthyThreshold: 3,
-      healthyThreshold: 2,
-    };
+    const config = buildConfig();
 
     processHealthCheckResult(upstream, result, config);
 
@@ -155,16 +162,7 @@ describe('Health Check - Result Processing', () => {
   });
 
   test('should mark as UNHEALTHY after reaching unhealthy threshold', () => {
-    const config = {
-      enabled: true,
-      intervalMs: 10000,
-      timeoutMs: 3000,
-      path: '/health',
-      method: 'GET',
-      expectedStatus: [200],
-      unhealthyThreshold: 3,
-      healthyThreshold: 2,
-    };
+    const config = buildConfig();
 
     const result: HealthCheckResult = {
       upstream: 'http://server1.com',
@@ -195,16 +193,7 @@ describe('Health Check - Result Processing', () => {
     upstream.status = 'UNHEALTHY';
     upstream.lastFailureTime = Date.now() - 10000;
 
-    const config = {
-      enabled: true,
-      intervalMs: 10000,
-      timeoutMs: 3000,
-      path: '/health',
-      method: 'GET',
-      expectedStatus: [200],
-      unhealthyThreshold: 3,
-      healthyThreshold: 2,
-    };
+    const config = buildConfig();
 
     const result: HealthCheckResult = {
       upstream: 'http://server1.com',
@@ -230,16 +219,7 @@ describe('Health Check - Result Processing', () => {
     upstream.status = 'UNHEALTHY';
     upstream.healthCheckSuccesses = 1;
 
-    const config = {
-      enabled: true,
-      intervalMs: 10000,
-      timeoutMs: 3000,
-      path: '/health',
-      method: 'GET',
-      expectedStatus: [200],
-      unhealthyThreshold: 3,
-      healthyThreshold: 2,
-    };
+    const config = buildConfig();
 
     const result: HealthCheckResult = {
       upstream: 'http://server1.com',
@@ -258,16 +238,7 @@ describe('Health Check - Result Processing', () => {
   test('should reset failure counter on success', () => {
     upstream.healthCheckFailures = 2;
 
-    const config = {
-      enabled: true,
-      intervalMs: 10000,
-      timeoutMs: 3000,
-      path: '/health',
-      method: 'GET',
-      expectedStatus: [200],
-      unhealthyThreshold: 3,
-      healthyThreshold: 2,
-    };
+    const config = buildConfig();
 
     const result: HealthCheckResult = {
       upstream: 'http://server1.com',
@@ -287,16 +258,7 @@ describe('Health Check - Result Processing', () => {
     upstream.status = 'HALF_OPEN';
     upstream.lastFailureTime = Date.now() - 6000;
 
-    const config = {
-      enabled: true,
-      intervalMs: 10000,
-      timeoutMs: 3000,
-      path: '/health',
-      method: 'GET',
-      expectedStatus: [200],
-      unhealthyThreshold: 3,
-      healthyThreshold: 2,
-    };
+    const config = buildConfig();
 
     // Success should promote to HEALTHY
     const successResult: HealthCheckResult = {
@@ -314,17 +276,46 @@ describe('Health Check - Result Processing', () => {
     expect(upstream.lastFailureTime).toBeUndefined();
   });
 
-  test('should handle multiple expected status codes', () => {
-    const config = {
-      enabled: true,
-      intervalMs: 10000,
-      timeoutMs: 3000,
-      path: '/health',
-      method: 'GET',
-      expectedStatus: [200, 204, 206],
-      unhealthyThreshold: 3,
-      healthyThreshold: 2,
+  test('should auto enable disabled upstream after successful health checks', () => {
+    upstream.status = 'UNHEALTHY';
+    upstream.disabled = true;
+    upstream.healthCheckSuccesses = 1;
+
+    const config = buildConfig();
+    const successResult: HealthCheckResult = {
+      upstream: 'http://server1.com',
+      success: true,
+      status: 200,
+      latency: 50,
+      timestamp: Date.now(),
     };
+
+    processHealthCheckResult(upstream, successResult, config);
+    expect(upstream.status as string).toBe('HEALTHY');
+    expect(upstream.disabled).toBe(false);
+  });
+
+  test('should respect autoEnableOnHealthCheck=false', () => {
+    upstream.status = 'UNHEALTHY';
+    upstream.disabled = true;
+    upstream.healthCheckSuccesses = 1;
+
+    const config = buildConfig({ autoEnableOnHealthCheck: false });
+    const successResult: HealthCheckResult = {
+      upstream: 'http://server1.com',
+      success: true,
+      status: 200,
+      latency: 50,
+      timestamp: Date.now(),
+    };
+
+    processHealthCheckResult(upstream, successResult, config);
+    expect(upstream.status as string).toBe('HEALTHY');
+    expect(upstream.disabled).toBe(true);
+  });
+
+  test('should handle multiple expected status codes', () => {
+    const config = buildConfig({ expectedStatus: [200, 204, 206] });
 
     // Test 200
     let result: HealthCheckResult = {
@@ -370,16 +361,7 @@ describe('Health Check - Edge Cases', () => {
       // healthCheckSuccesses and healthCheckFailures are undefined
     };
 
-    const config = {
-      enabled: true,
-      intervalMs: 10000,
-      timeoutMs: 3000,
-      path: '/health',
-      method: 'GET',
-      expectedStatus: [200],
-      unhealthyThreshold: 3,
-      healthyThreshold: 2,
-    };
+    const config = buildConfig();
 
     const result: HealthCheckResult = {
       upstream: 'http://server1.com',
@@ -407,16 +389,7 @@ describe('Health Check - Edge Cases', () => {
       healthCheckFailures: 0,
     };
 
-    const config = {
-      enabled: true,
-      intervalMs: 10000,
-      timeoutMs: 3000,
-      path: '/health',
-      method: 'GET',
-      expectedStatus: [200],
-      unhealthyThreshold: 1,
-      healthyThreshold: 1,
-    };
+    const config = buildConfig({ unhealthyThreshold: 1, healthyThreshold: 1 });
 
     const failureResult: HealthCheckResult = {
       upstream: 'http://server1.com',

@@ -6,7 +6,7 @@
  *
  * 如需添加新组件，请在插件的 manifest.json 中声明 ui.components
  *
- * 生成时间: 2025-12-23T02:17:21.929Z
+ * 生成时间: 2026-01-08T17:46:59.718Z
  */
 
 import type { ComponentType, SvelteComponent } from 'svelte';

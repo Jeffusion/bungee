@@ -96,10 +96,15 @@
   }
 
   // 切换启用/禁用状态
-  function toggleUpstreamStatus(index: number) {
+  async function toggleUpstreamStatus(index: number) {
     editingUpstreams[index].disabled = !editingUpstreams[index].disabled;
     editingUpstreams = editingUpstreams;
-    // 移除即时保存
+    
+    // 立即保存更改
+    await saveToBackend();
+    
+    const status = editingUpstreams[index].disabled ? $_('routeEditor.upstreamDisabledSuccess') : $_('routeEditor.upstreamEnabledSuccess');
+    // saveToBackend 已经显示了 toast，这里可能不需要重复显示，或者 saveToBackend 显示的是 generic saved message
   }
 
   // 开始编辑字段
@@ -212,12 +217,12 @@
       <table class="table table-zebra w-full">
         <thead>
           <tr>
-            <th class="w-20">{$_('routeCard.tableHeaders.status')}</th>
-            <th class="w-16 text-center">{$_('upstream.status')}</th>
+            <th class="w-24">{$_('routeCard.tableHeaders.status')}</th>
             <th>{$_('upstream.target')}</th>
             <th class="w-40">{$_('upstream.description')}</th>
             <th class="w-20 text-right">{$_('upstream.priority')}</th>
             <th class="w-24 text-right">{$_('upstream.weight')}</th>
+            <th class="w-24 text-center">{$_('routes.actions')}</th>
           </tr>
         </thead>
         <tbody>
@@ -226,38 +231,25 @@
               <!-- 健康状态列 -->
               <td>
                 <div class="flex items-center gap-2">
-                  <div
-                    class="w-3 h-3 rounded-full tooltip tooltip-right"
-                    class:bg-success={getUpstreamStatus(upstream) === 'healthy' && !upstream.disabled}
-                    class:bg-error={getUpstreamStatus(upstream) === 'unhealthy' && !upstream.disabled}
-                    class:bg-warning={getUpstreamStatus(upstream) === 'unknown' && !upstream.disabled}
-                    class:bg-gray-400={upstream.disabled}
-                    data-tip={upstream.disabled
-                      ? $_('upstream.disabled')
-                      : upstream.lastFailureTime
+                  {#if upstream.disabled}
+                    <span class="badge badge-error badge-sm">{$_('routeEditor.upstreamDisabled')}</span>
+                  {:else}
+                    <div
+                      class="w-3 h-3 rounded-full tooltip tooltip-right"
+                      class:bg-success={getUpstreamStatus(upstream) === 'healthy'}
+                      class:bg-error={getUpstreamStatus(upstream) === 'unhealthy'}
+                      class:bg-warning={getUpstreamStatus(upstream) === 'unknown'}
+                      data-tip={upstream.lastFailureTime
                         ? `最后失败: ${formatLastFailureTime(upstream.lastFailureTime)}`
                         : getUpstreamStatus(upstream) === 'healthy'
                           ? $_('upstreamsModal.statusHealthy')
                           : getUpstreamStatus(upstream) === 'unhealthy'
                             ? $_('upstreamsModal.statusUnhealthy')
                             : $_('upstreamsModal.statusUnknown')}
-                  ></div>
-                  {#if getUpstreamStatus(upstream) === 'unhealthy' && !upstream.disabled}
-                    <span class="text-xs text-error font-semibold">RED</span>
+                    ></div>
+                    <span class="text-sm">{$_('routeEditor.upstreamEnabled')}</span>
                   {/if}
                 </div>
-              </td>
-
-              <!-- 启用 checkbox 列 -->
-              <td class="text-center">
-                <input
-                  type="checkbox"
-                  class="checkbox checkbox-sm checkbox-success"
-                  checked={!upstream.disabled}
-                  on:change={() => toggleUpstreamStatus(index)}
-                  disabled={saving}
-                  title={upstream.disabled ? $_('upstream.enableTooltip') : $_('upstream.disableTooltip')}
-                />
               </td>
 
               <!-- 目标列 -->
@@ -374,6 +366,19 @@
                     {upstream.weight || 100}
                   </span>
                 {/if}
+              </td>
+
+              <!-- Actions 列 -->
+              <td class="text-center">
+                 <button 
+                  class="btn btn-xs"
+                  class:btn-success={upstream.disabled}
+                  class:btn-error={!upstream.disabled}
+                  on:click={() => toggleUpstreamStatus(index)}
+                  disabled={saving}
+                >
+                  {upstream.disabled ? $_('routeEditor.enableUpstream') : $_('routeEditor.disableUpstream')}
+                </button>
               </td>
             </tr>
           {/each}

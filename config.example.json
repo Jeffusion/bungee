@@ -144,7 +144,10 @@
       ],
       "failover": {
         "enabled": true,
-        "retryableStatusCodes": [500, 502, 503, 504],
+        "retryableStatusCodes": ">=500,!503",
+        "consecutiveFailuresThreshold": 3,
+        "autoDisableThreshold": 10,
+        "autoEnableOnHealthCheck": true,
         "healthCheck": {
           "enabled": true,
           "intervalMs": 10000

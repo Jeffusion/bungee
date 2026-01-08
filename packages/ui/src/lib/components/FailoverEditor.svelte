@@ -10,7 +10,7 @@
   let initialized = false;
 
   // 基础配置
-  let retryableStatusCodes: number[] = [];
+  let retryableStatusCodes: (number | string)[] = [];
   let statusCodesInput = '';
 
   // 被动健康检查配置
@@ -20,6 +20,10 @@
   let connectTimeoutMs: number | undefined;
   let recoveryIntervalMs: number | undefined;
   let recoveryTimeoutMs: number | undefined;
+  
+  // 自动禁用配置
+  let autoDisableThreshold: number | undefined;
+  let autoEnableOnHealthCheck: boolean = true;
 
   // 主动健康检查配置
   let healthCheckEnabled = false;
@@ -27,6 +31,8 @@
   let healthCheckTimeoutMs: number | undefined;
   let healthCheckPath: string | undefined;
   let healthCheckMethod: string | undefined;
+  let healthCheckBody: string | undefined;
+  let healthCheckContentType: string | undefined;
   let healthCheckExpectedStatus: number[] = [];
   let healthCheckExpectedStatusInput = '';
   let healthCheckUnhealthyThreshold: number | undefined;
@@ -54,6 +60,10 @@
       connectTimeoutMs = value.connectTimeoutMs;
       recoveryIntervalMs = value.recoveryIntervalMs;
       recoveryTimeoutMs = value.recoveryTimeoutMs;
+      
+      // 自动禁用配置
+      autoDisableThreshold = value.autoDisableThreshold;
+      autoEnableOnHealthCheck = value.autoEnableOnHealthCheck ?? true;
 
       // 主动健康检查
       if (value.healthCheck) {
@@ -62,6 +72,8 @@
         healthCheckTimeoutMs = value.healthCheck.timeoutMs;
         healthCheckPath = value.healthCheck.path;
         healthCheckMethod = value.healthCheck.method;
+        healthCheckBody = value.healthCheck.body;
+        healthCheckContentType = value.healthCheck.contentType;
         healthCheckExpectedStatus = value.healthCheck.expectedStatus || [200];
         healthCheckExpectedStatusInput = healthCheckExpectedStatus.join(', ');
         healthCheckUnhealthyThreshold = value.healthCheck.unhealthyThreshold;
@@ -96,6 +108,10 @@
         if (connectTimeoutMs !== undefined) value.connectTimeoutMs = connectTimeoutMs;
         if (recoveryIntervalMs !== undefined) value.recoveryIntervalMs = recoveryIntervalMs;
         if (recoveryTimeoutMs !== undefined) value.recoveryTimeoutMs = recoveryTimeoutMs;
+        
+        // 自动禁用配置
+        if (autoDisableThreshold !== undefined) value.autoDisableThreshold = autoDisableThreshold;
+        value.autoEnableOnHealthCheck = autoEnableOnHealthCheck;
 
         // 主动健康检查
         if (healthCheckEnabled) {
@@ -105,6 +121,8 @@
             timeoutMs: healthCheckTimeoutMs,
             path: healthCheckPath,
             method: healthCheckMethod,
+            body: healthCheckBody,
+            contentType: healthCheckContentType,
             expectedStatus: healthCheckExpectedStatus.length > 0 ? healthCheckExpectedStatus : [200],
             unhealthyThreshold: healthCheckUnhealthyThreshold,
             healthyThreshold: healthCheckHealthyThreshold
@@ -130,7 +148,23 @@
   }
 
   // 解析状态码输入
-  function parseStatusCodes(input: string): number[] {
+  function parseStatusCodes(input: string): (number | string)[] {
+    return input
+      .split(',')
+      .map(s => s.trim())
+      .filter(s => s.length > 0)
+      .map(s => {
+        const n = parseInt(s);
+        // 如果是纯数字且解析正确，返回数字
+        if (!isNaN(n) && n.toString() === s) {
+          return n;
+        }
+        // 否则返回字符串（保留表达式）
+        return s;
+      });
+  }
+
+  function parseNumberStatusCodes(input: string): number[] {
     return input
       .split(',')
       .map(s => parseInt(s.trim()))
@@ -138,7 +172,7 @@
   }
 
   $: retryableStatusCodes = parseStatusCodes(statusCodesInput);
-  $: healthCheckExpectedStatus = parseStatusCodes(healthCheckExpectedStatusInput);
+  $: healthCheckExpectedStatus = parseNumberStatusCodes(healthCheckExpectedStatusInput);
 </script>
 
 <div class="form-control w-full">
@@ -302,6 +336,38 @@
                 <span class="label-text-alt text-xs">{$_('routeEditor.recoveryTimeoutHelp')}</span>
               </div>
             </div>
+
+            <!-- 新增：自动禁用配置 -->
+            <div class="form-control">
+              <label class="label" for="auto-disable-threshold">
+                <span class="label-text">{$_('routeEditor.autoDisableThreshold')}</span>
+              </label>
+              <input
+                id="auto-disable-threshold"
+                type="number"
+                placeholder={$_('routeEditor.autoDisableThresholdPlaceholder')}
+                class="input input-bordered input-sm"
+                bind:value={autoDisableThreshold}
+                min="1"
+              />
+              <div class="label">
+                <span class="label-text-alt text-xs">{$_('routeEditor.autoDisableThresholdHelp')}</span>
+              </div>
+            </div>
+
+            <div class="form-control">
+              <label class="label cursor-pointer justify-start gap-2">
+                <input
+                  type="checkbox"
+                  class="checkbox checkbox-sm"
+                  bind:checked={autoEnableOnHealthCheck}
+                />
+                <span class="label-text">{$_('routeEditor.autoEnableOnHealthCheck')}</span>
+              </label>
+              <div class="label">
+                <span class="label-text-alt text-xs">{$_('routeEditor.autoEnableOnHealthCheckHelp')}</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -394,8 +460,9 @@
                   bind:value={healthCheckMethod}
                 >
                   <option value="">GET (default)</option>
-                  <option value="GET">GET</option>
                   <option value="POST">POST</option>
+                  <option value="PUT">PUT</option>
+                  <option value="PATCH">PATCH</option>
                   <option value="HEAD">HEAD</option>
                 </select>
               </div>
@@ -449,6 +516,44 @@
                   <span class="label-text-alt text-xs">{$_('routeEditor.healthCheckHealthyThresholdHelp')}</span>
                 </div>
               </div>
+
+              <!-- 仅当选择POST/PUT/PATCH时显示 -->
+              {#if healthCheckMethod && ['POST', 'PUT', 'PATCH'].includes(healthCheckMethod.toUpperCase())}
+                <div class="form-control md:col-span-2">
+                  <label class="label" for="health-check-content-type">
+                    <span class="label-text">{$_('routeEditor.healthCheckContentType')}</span>
+                  </label>
+                  <select
+                    id="health-check-content-type"
+                    class="select select-bordered select-sm"
+                    bind:value={healthCheckContentType}
+                  >
+                    <option value="">application/json (default)</option>
+                    <option value="application/json">application/json</option>
+                    <option value="application/x-www-form-urlencoded">application/x-www-form-urlencoded</option>
+                    <option value="text/plain">text/plain</option>
+                  </select>
+                  <div class="label">
+                    <span class="label-text-alt text-xs">{$_('routeEditor.healthCheckContentTypeHelp')}</span>
+                  </div>
+                </div>
+
+                <div class="form-control md:col-span-2">
+                  <label class="label" for="health-check-body">
+                    <span class="label-text">{$_('routeEditor.healthCheckBody')}</span>
+                  </label>
+                  <textarea
+                    id="health-check-body"
+                    placeholder={$_('routeEditor.healthCheckBodyPlaceholder')}
+                    class="textarea textarea-bordered textarea-sm"
+                    rows="4"
+                    bind:value={healthCheckBody}
+                  />
+                  <div class="label">
+                    <span class="label-text-alt text-xs">{$_('routeEditor.healthCheckBodyHelp')}</span>
+                  </div>
+                </div>
+              {/if}
             </div>
           {/if}
         </div>

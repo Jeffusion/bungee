@@ -62,14 +62,16 @@ export class RoutesHandler {
             return {
               ...upstream,
               status: 'HEALTHY' as const,
-              lastFailureTime: undefined
+              lastFailureTime: undefined,
+              disabled: upstream.disabled ?? false
             };
           }
 
           return {
             ...upstream,
             status: runtimeUpstream.status,
-            lastFailureTime: runtimeUpstream.lastFailureTime
+            lastFailureTime: runtimeUpstream.lastFailureTime,
+            disabled: runtimeUpstream.disabled ?? upstream.disabled ?? false
           };
         });
 
