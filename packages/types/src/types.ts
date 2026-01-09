@@ -124,6 +124,8 @@ export interface RouteConfig extends ModificationRules {
       healthyThreshold?: number;     // 连续成功多少次标记为 HEALTHY（默认 2）
       body?: string;                 // 请求体内容（仅 POST/PUT/PATCH 生效）
       contentType?: string;          // Content-Type（默认 application/json）
+      headers?: Record<string, string>; // 自定义请求头（支持表达式）
+      query?: Record<string, string>;   // 自定义查询参数（支持表达式）
     };
   };
 }

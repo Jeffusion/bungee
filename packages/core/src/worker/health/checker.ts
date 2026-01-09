@@ -6,6 +6,7 @@
 import { logger } from '../../logger';
 import type { RouteConfig } from '@jeffusion/bungee-types';
 import type { RuntimeUpstream } from '../types';
+import { evaluateExpression, type ExpressionContext } from '../../expression-engine';
 
 /**
  * Health check result
@@ -34,6 +35,8 @@ export interface HealthCheckConfig {
   autoEnableOnHealthCheck: boolean;
   body?: string;
   contentType: string;
+  headers?: Record<string, string>;
+  query?: Record<string, string>;
 }
 
 /**
@@ -57,6 +60,8 @@ export function getHealthCheckConfig(route: RouteConfig): HealthCheckConfig | nu
     autoEnableOnHealthCheck: route.failover?.autoEnableOnHealthCheck ?? true,
     body: hc.body,
     contentType: hc.contentType ?? 'application/json',
+    headers: hc.headers,
+    query: hc.query,
   };
 }
 
@@ -72,8 +77,42 @@ export async function performHealthCheck(
   config: HealthCheckConfig
 ): Promise<HealthCheckResult> {
   const startTime = Date.now();
+  const target = new URL(upstream.target);
+  const expressionContext: ExpressionContext = {
+    env: process.env as Record<string, string>,
+    headers: {},
+    body: {},
+    url: {
+      pathname: config.path,
+      search: '',
+      host: target.host,
+      protocol: target.protocol,
+    },
+    method: config.method,
+  };
+
   // Construct health check URL
   const healthCheckUrl = new URL(config.path, upstream.target);
+  if (config.query) {
+    for (const [key, value] of Object.entries(config.query)) {
+      try {
+        const evaluatedValue = evaluateExpression(value, expressionContext);
+        healthCheckUrl.searchParams.set(key, evaluatedValue);
+      } catch (error) {
+        logger.warn(
+          {
+            upstream: upstream.target,
+            queryParam: key,
+            value,
+            error: (error as Error).message,
+          },
+          'Failed to evaluate expression in health check query parameter, using raw value'
+        );
+        healthCheckUrl.searchParams.set(key, value);
+      }
+    }
+  }
+
   const method = config.method.toUpperCase();
   const supportsRequestBody = ['POST', 'PUT', 'PATCH'].includes(method);
 
@@ -85,6 +124,8 @@ export async function performHealthCheck(
       timeout: config.timeoutMs,
       bodyConfigured: Boolean(config.body),
       bodyApplied: Boolean(config.body && supportsRequestBody),
+      customHeaders: config.headers ? Object.keys(config.headers) : [],
+      customQuery: config.query ? Object.keys(config.query) : [],
     },
     'Performing health check'
   );
@@ -97,6 +138,24 @@ export async function performHealthCheck(
     const headers: Record<string, string> = {
       'User-Agent': 'Bungee-HealthCheck/1.0',
     };
+    if (config.headers) {
+      for (const [key, value] of Object.entries(config.headers)) {
+        try {
+          headers[key] = evaluateExpression(value, expressionContext);
+        } catch (error) {
+          logger.warn(
+            {
+              upstream: upstream.target,
+              header: key,
+              value,
+              error: (error as Error).message,
+            },
+            'Failed to evaluate expression in health check header, using raw value'
+          );
+          headers[key] = value;
+        }
+      }
+    }
     const requestOptions: RequestInit = {
       method: config.method,
       signal: controller.signal,

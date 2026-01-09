@@ -33,6 +33,10 @@
   let healthCheckMethod: string | undefined;
   let healthCheckBody: string | undefined;
   let healthCheckContentType: string | undefined;
+  let healthCheckHeaders: Record<string, string> | undefined;
+  let healthCheckQuery: Record<string, string> | undefined;
+  let healthCheckHeadersInput = '';
+  let healthCheckQueryInput = '';
   let healthCheckExpectedStatus: number[] = [];
   let healthCheckExpectedStatusInput = '';
   let healthCheckUnhealthyThreshold: number | undefined;
@@ -74,6 +78,10 @@
         healthCheckMethod = value.healthCheck.method;
         healthCheckBody = value.healthCheck.body;
         healthCheckContentType = value.healthCheck.contentType;
+        healthCheckHeaders = value.healthCheck.headers;
+        healthCheckQuery = value.healthCheck.query;
+        healthCheckHeadersInput = formatKeyValuePairs(value.healthCheck.headers);
+        healthCheckQueryInput = formatKeyValuePairs(value.healthCheck.query);
         healthCheckExpectedStatus = value.healthCheck.expectedStatus || [200];
         healthCheckExpectedStatusInput = healthCheckExpectedStatus.join(', ');
         healthCheckUnhealthyThreshold = value.healthCheck.unhealthyThreshold;
@@ -123,6 +131,8 @@
             method: healthCheckMethod,
             body: healthCheckBody,
             contentType: healthCheckContentType,
+            headers: healthCheckHeaders,
+            query: healthCheckQuery,
             expectedStatus: healthCheckExpectedStatus.length > 0 ? healthCheckExpectedStatus : [200],
             unhealthyThreshold: healthCheckUnhealthyThreshold,
             healthyThreshold: healthCheckHealthyThreshold
@@ -169,6 +179,39 @@
       .split(',')
       .map(s => parseInt(s.trim()))
       .filter(n => !isNaN(n) && n >= 100 && n < 600);
+  }
+
+  // 格式化键值对为多行文本
+  function formatKeyValuePairs(obj: Record<string, string> | undefined): string {
+    if (!obj) return '';
+    return Object.entries(obj)
+      .map(([key, value]) => `${key}: ${value}`)
+      .join('\n');
+  }
+
+  // 解析多行文本为键值对
+  function parseKeyValuePairs(input: string): Record<string, string> | undefined {
+    if (!input.trim()) return undefined;
+    
+    const result: Record<string, string> = {};
+    const lines = input.split('\n');
+    
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      
+      const colonIndex = trimmed.indexOf(':');
+      if (colonIndex === -1) continue;
+      
+      const key = trimmed.substring(0, colonIndex).trim();
+      const value = trimmed.substring(colonIndex + 1).trim();
+      
+      if (key) {
+        result[key] = value;
+      }
+    }
+    
+    return Object.keys(result).length > 0 ? result : undefined;
   }
 
   $: retryableStatusCodes = parseStatusCodes(statusCodesInput);
@@ -554,6 +597,46 @@
                   </div>
                 </div>
               {/if}
+
+              <!-- 自定义 Headers -->
+              <div class="form-control md:col-span-2">
+                <label class="label" for="health-check-headers">
+                  <span class="label-text">{$_('routeEditor.healthCheckHeaders')}</span>
+                </label>
+                <textarea
+                  id="health-check-headers"
+                  placeholder={$_('routeEditor.healthCheckHeadersPlaceholder')}
+                  class="textarea textarea-bordered textarea-sm font-mono text-xs"
+                  rows="4"
+                  bind:value={healthCheckHeadersInput}
+                  on:blur={() => {
+                    healthCheckHeaders = parseKeyValuePairs(healthCheckHeadersInput);
+                  }}
+                />
+                <div class="label">
+                  <span class="label-text-alt text-xs">{$_('routeEditor.healthCheckHeadersHelp')}</span>
+                </div>
+              </div>
+
+              <!-- 自定义 Query 参数 -->
+              <div class="form-control md:col-span-2">
+                <label class="label" for="health-check-query">
+                  <span class="label-text">{$_('routeEditor.healthCheckQuery')}</span>
+                </label>
+                <textarea
+                  id="health-check-query"
+                  placeholder={$_('routeEditor.healthCheckQueryPlaceholder')}
+                  class="textarea textarea-bordered textarea-sm font-mono text-xs"
+                  rows="3"
+                  bind:value={healthCheckQueryInput}
+                  on:blur={() => {
+                    healthCheckQuery = parseKeyValuePairs(healthCheckQueryInput);
+                  }}
+                />
+                <div class="label">
+                  <span class="label-text-alt text-xs">{$_('routeEditor.healthCheckQueryHelp')}</span>
+                </div>
+              </div>
             </div>
           {/if}
         </div>
