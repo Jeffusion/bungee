@@ -39,8 +39,12 @@ config.json.backup.*
 *.backup
 *~
 
-# IDE
+# IDE & AI Agents
 .claude/
+.gemini/
+AGENTS.md
+CLAUDE.md
+openspec/
 
 # Runtime data
 data/
