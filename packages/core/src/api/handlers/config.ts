@@ -154,6 +154,7 @@ export class ConfigHandler {
       ...(upstream.priority !== undefined && { priority: upstream.priority }),
       ...(upstream.disabled !== undefined && { disabled: upstream.disabled }),
       ...(upstream.description && { description: upstream.description }),
+      ...(upstream.condition !== undefined && { condition: upstream.condition }),
       ...(upstream.plugins && { plugins: upstream.plugins }),
       ...this.sanitizeModificationRules(upstream)
     };

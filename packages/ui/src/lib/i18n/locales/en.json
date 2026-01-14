@@ -337,6 +337,9 @@
     "description": "Remark",
     "descriptionHelp": "Remark for the upstream server (optional)",
     "descriptionPlaceholder": "e.g., Primary database server",
+    "condition": "Condition",
+    "conditionHelp": "Condition expression wrapped in {{ }}",
+    "conditionPlaceholder": "{{ body.model === 'gpt-4' }}",
     "remove": "Remove Upstream",
     "targetRequired": "Target URL cannot be empty",
     "invalidUrl": "Invalid URL format"

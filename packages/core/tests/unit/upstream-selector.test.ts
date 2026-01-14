@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import { selectUpstream } from '../../src/worker/upstream/selector';
 import type { RuntimeUpstream } from '../../src/worker/types';
+import type { ExpressionContext } from '../../src/expression-engine';
 
 // Helper function to create mock upstream with required fields
 function createUpstream(overrides: Partial<RuntimeUpstream> = {}): RuntimeUpstream {
@@ -16,6 +17,14 @@ function createUpstream(overrides: Partial<RuntimeUpstream> = {}): RuntimeUpstre
 }
 
 describe('selectUpstream', () => {
+  const baseContext: ExpressionContext = {
+    headers: {},
+    body: { model: 'gpt-4' },
+    url: { pathname: '/api', search: '', host: 'localhost', protocol: 'http:' },
+    method: 'POST',
+    env: {},
+  };
+
   it('should return undefined for empty array', () => {
     const result = selectUpstream([]);
     expect(result).toBeUndefined();
@@ -171,5 +180,35 @@ describe('selectUpstream', () => {
       expect(result?.priority).toBe(1);
       expect(['http://p1-a:3000', 'http://p1-b:3000']).toContain(result!.target);
     }
+  });
+
+  it('should respect condition filtering when context provided', () => {
+    const upstreams: RuntimeUpstream[] = [
+      createUpstream({ target: 'http://match', condition: "{{ body.model === 'gpt-4' }}" }),
+      createUpstream({ target: 'http://no-match', condition: "{{ body.model === 'claude-3' }}" })
+    ];
+
+    for (let i = 0; i < 5; i++) {
+      const result = selectUpstream(upstreams, undefined, baseContext);
+      expect(result?.target).toBe('http://match');
+    }
+  });
+
+  it('should return undefined when all upstreams filtered by condition', () => {
+    const upstreams: RuntimeUpstream[] = [
+      createUpstream({ target: 'http://filtered', condition: "{{ body.model === 'claude-3' }}" })
+    ];
+
+    const result = selectUpstream(upstreams, undefined, baseContext);
+    expect(result).toBeUndefined();
+  });
+
+  it('should skip condition filtering when context is undefined', () => {
+    const upstreams: RuntimeUpstream[] = [
+      createUpstream({ target: 'http://conditional', condition: "{{ body.model === 'claude-3' }}" })
+    ];
+
+    const result = selectUpstream(upstreams, undefined, undefined);
+    expect(result?.target).toBe('http://conditional');
   });
 });

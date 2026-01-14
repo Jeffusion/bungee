@@ -95,6 +95,21 @@
         />
       </div>
 
+      <!-- Condition Expression -->
+      <div class="form-control">
+        <label class="label" for="upstream-condition-{index}">
+          <span class="label-text">{$_('upstream.condition')}</span>
+          <span class="label-text-alt text-xs">{$_('upstream.conditionHelp')}</span>
+        </label>
+        <input
+          id="upstream-condition-{index}"
+          type="text"
+          placeholder={$_('upstream.conditionPlaceholder')}
+          class="input input-bordered font-mono text-sm"
+          bind:value={upstream.condition}
+        />
+      </div>
+
       <!-- Disabled Toggle -->
       <div class="form-control">
         <label class="label cursor-pointer justify-start gap-3">

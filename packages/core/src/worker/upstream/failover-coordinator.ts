@@ -6,7 +6,9 @@
 import { sortBy } from 'lodash-es';
 import type { RuntimeUpstream } from '../types';
 import type { RouteConfig } from '@jeffusion/bungee-types';
+import type { ExpressionContext } from '../../expression-engine';
 import { PriorityGroup } from './priority-group';
+import { filterByCondition } from './condition-filter';
 
 /**
  * Failover Coordinator
@@ -19,7 +21,7 @@ import { PriorityGroup } from './priority-group';
  *
  * @example
  * ```typescript
- * const coordinator = new FailoverCoordinator(upstreams, route, 5000);
+ * const coordinator = new FailoverCoordinator(upstreams, route, 5000, context);
  *
  * while (coordinator.hasNext()) {
  *   const selection = coordinator.selectNext();
@@ -50,14 +52,16 @@ export class FailoverCoordinator {
    * @param upstreams - All upstreams for this route
    * @param route - Route configuration
    * @param recoveryIntervalMs - Recovery interval in milliseconds
+   * @param context - Expression context for condition evaluation (optional)
    */
   constructor(
     upstreams: RuntimeUpstream[],
     route: RouteConfig,
-    recoveryIntervalMs: number
+    recoveryIntervalMs: number,
+    context?: ExpressionContext
   ) {
-    // 1. Group upstreams by priority
-    this.priorityGroups = this.groupByPriority(upstreams, route, recoveryIntervalMs);
+    // 1. Group upstreams by priority (with condition filtering)
+    this.priorityGroups = this.groupByPriority(upstreams, route, recoveryIntervalMs, context);
 
     // 2. Sort priorities (ascending order: lower number = higher priority)
     this.sortedPriorities = sortBy(Array.from(this.priorityGroups.keys()));
@@ -66,7 +70,13 @@ export class FailoverCoordinator {
     this.currentPriorityIndex = 0;
     this.attemptedTargets = new Set();
     this.skippedTargets = new Set();
-    this.totalUpstreams = upstreams.filter(u => !u.disabled).length;
+
+    // Calculate total upstreams after filtering
+    let total = 0;
+    this.priorityGroups.forEach(group => {
+      total += group.getUpstreamCount();
+    });
+    this.totalUpstreams = total;
   }
 
   /**
@@ -178,14 +188,21 @@ export class FailoverCoordinator {
   private groupByPriority(
     upstreams: RuntimeUpstream[],
     route: RouteConfig,
-    recoveryIntervalMs: number
+    recoveryIntervalMs: number,
+    context?: ExpressionContext
   ): Map<number, PriorityGroup> {
     const groups = new Map<number, PriorityGroup>();
 
     // Filter out disabled upstreams
     const enabledUpstreams = upstreams.filter(u => !u.disabled);
 
-    enabledUpstreams.forEach(upstream => {
+    // Filter by condition expression (if context provided)
+    let filteredUpstreams = enabledUpstreams;
+    if (context) {
+      filteredUpstreams = filterByCondition(enabledUpstreams, context);
+    }
+
+    filteredUpstreams.forEach(upstream => {
       const priority = upstream.priority || 1; // Default priority is 1
 
       if (!groups.has(priority)) {

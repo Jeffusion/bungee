@@ -358,6 +358,9 @@
     "description": "备注",
     "descriptionHelp": "上游服务器的备注信息（可选）",
     "descriptionPlaceholder": "例如：主数据库服务器",
+    "condition": "生效条件",
+    "conditionHelp": "条件表达式，使用 {{ }} 包裹",
+    "conditionPlaceholder": "{{ body.model === 'gpt-4' }}",
     "remove": "移除上游",
     "targetRequired": "目标地址不能为空",
     "invalidUrl": "无效的 URL 格式"

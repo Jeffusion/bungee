@@ -6,51 +6,68 @@
 import { forEach, sumBy, sortBy } from 'lodash-es';
 import type { RuntimeUpstream, UpstreamSelector } from '../types';
 import type { RouteConfig } from '@jeffusion/bungee-types';
+import type { ExpressionContext } from '../../expression-engine';
 import { getEffectiveWeight } from '../utils/slow-start';
+import { filterByCondition } from './condition-filter';
 
 /**
  * Selects an upstream server based on priority and weight
  *
  * Selection algorithm:
- * 1. Group upstreams by priority (lower number = higher priority)
- * 2. Select the highest priority group
- * 3. Within that group, use weighted random selection
- * 4. Apply slow start weight adjustment if enabled
+ * 1. Filter out disabled upstreams
+ * 2. Filter by condition expression (if context provided)
+ * 3. Group upstreams by priority (lower number = higher priority)
+ * 4. Select the highest priority group
+ * 5. Within that group, use weighted random selection
+ * 6. Apply slow start weight adjustment if enabled
  *
  * @param upstreams - Available upstream servers
  * @param route - Route configuration (optional, for slow start)
+ * @param context - Expression context for condition evaluation (optional)
  * @returns Selected upstream or undefined if none available
  *
  * @example
  * ```typescript
  * const upstreams = [
  *   { target: 'http://server1', priority: 1, weight: 100, status: 'HEALTHY' },
- *   { target: 'http://server2', priority: 1, weight: 50, status: 'HEALTHY' },
+ *   { target: 'http://server2', priority: 1, weight: 50, status: 'HEALTHY', condition: "{{ body.model === 'gpt-4' }}" },
  *   { target: 'http://server3', priority: 2, weight: 100, status: 'HEALTHY' }
  * ];
- * const selected = selectUpstream(upstreams, route);
+ * const context = { body: { model: 'gpt-4' }, headers: {}, ... };
+ * const selected = selectUpstream(upstreams, route, context);
  * // Will select server1 or server2 (priority 1) with weight ratio adjusted by slow start
  * // server3 will only be selected if priority 1 group is exhausted
  * ```
  */
 export function selectUpstream(
   upstreams: RuntimeUpstream[],
-  route?: RouteConfig
+  route?: RouteConfig,
+  context?: ExpressionContext
 ): RuntimeUpstream | undefined {
   if (upstreams.length === 0) return undefined;
 
   // 过滤出未禁用的上游 (disabled !== true)
-  const enabledUpstreams = upstreams.filter(u => !u.disabled);
+  let filteredUpstreams = upstreams.filter(u => !u.disabled);
 
-  if (enabledUpstreams.length === 0) {
+  if (filteredUpstreams.length === 0) {
     // 所有上游都被禁用，返回 undefined
     return undefined;
+  }
+
+  // 按条件表达式过滤（如果提供了上下文）
+  if (context) {
+    filteredUpstreams = filterByCondition(filteredUpstreams, context);
+
+    if (filteredUpstreams.length === 0) {
+      // 所有上游条件都不匹配，返回 undefined
+      return undefined;
+    }
   }
 
   // 按优先级分组 (priority 值越小优先级越高)
   const priorityGroups = new Map<number, RuntimeUpstream[]>();
 
-  forEach(enabledUpstreams, (upstream) => {
+  forEach(filteredUpstreams, (upstream) => {
     const priority = upstream.priority || 1;
     if (!priorityGroups.has(priority)) {
       priorityGroups.set(priority, []);

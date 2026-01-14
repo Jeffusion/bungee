@@ -338,6 +338,7 @@ Each upstream defines:
 - `target`: URL of the upstream service
 - `weight`: (Optional) Traffic proportion for load balancing
 - `priority`: (Optional) Lower = higher priority for failover
+- `condition`: (Optional) `{{ }}` wrapped expression to include/exclude the upstream dynamically
 - `plugins`: (Optional) Array of upstream-specific plugins
 - `headers`, `body`: (Optional) Upstream-level rules
 
@@ -400,6 +401,32 @@ Each upstream defines:
 - Manual overrides are available via `POST /api/routes/:routePath/upstreams/:upstreamTarget/enable` (or `/disable`). Encode `routePath` and `upstreamTarget` when calling the API.
 
 For detailed configuration options, see the [Configuration Guide](docs/configuration.md).
+
+#### Upstream Condition Example
+
+```json
+{
+  "path": "/v1/*",
+  "upstreams": [
+    {
+      "target": "https://api.openai.com",
+      "condition": "{{ body.model?.startsWith('gpt') }}"
+    },
+    {
+      "target": "https://api.anthropic.com",
+      "condition": "{{ body.model?.startsWith('claude') }}"
+    },
+    {
+      "target": "https://fallback.example.com"
+    }
+  ]
+}
+```
+
+- Conditions use the `{{ }}` syntax and can access `headers`, `body`, `url`, `method`, and `env`.
+- Upstreams without `condition` participate in selection as usual (act as fallback).
+- When `context` is provided (e.g., request body parsed as JSON), only upstreams whose condition evaluates to truthy are considered.
+- If expression evaluation throws (syntax errors, undefined references, etc.), the upstream is skipped and a warning is logged.
 
 ---
 

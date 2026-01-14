@@ -64,7 +64,11 @@ import { createStatusCodeMatcher, type StatusCodeMatcher } from '../utils/status
 export async function handleRequest(
   req: Request,
   config: AppConfig,
-  upstreamSelector: (upstreams: RuntimeUpstream[], route?: import('@jeffusion/bungee-types').RouteConfig) => RuntimeUpstream | undefined = selectUpstream
+  upstreamSelector: (
+    upstreams: RuntimeUpstream[],
+    route?: import('@jeffusion/bungee-types').RouteConfig,
+    context?: ExpressionContext
+  ) => RuntimeUpstream | undefined = selectUpstream
 ): Promise<Response> {
   // 优先处理 UI 请求（不计入统计）
   const pluginRegistry = getPluginRegistry();
@@ -197,6 +201,15 @@ export async function handleRequest(
     }
     // --- End Authentication Check ---
 
+    // 构建表达式上下文（用于 upstream 条件过滤）
+    const expressionContext: ExpressionContext = {
+      headers: originalHeaders,
+      body: requestSnapshot.body && requestSnapshot.isJsonBody ? requestSnapshot.body : {},
+      url: { pathname: url.pathname, search: url.search, host: url.hostname, protocol: url.protocol },
+      method: req.method,
+      env: process.env as Record<string, string>,
+    };
+
     const routeState = runtimeState.get(route.path);
     if (!routeState) {
       const staticUpstreams = map(route.upstreams, (up) => ({
@@ -206,7 +219,7 @@ export async function handleRequest(
         consecutiveFailures: 0,
         consecutiveSuccesses: 0,
       } as RuntimeUpstream));
-      const selectedUpstream = upstreamSelector(staticUpstreams);
+      const selectedUpstream = upstreamSelector(staticUpstreams, route, expressionContext);
       if (!selectedUpstream) {
         logger.error({ request: requestLog }, 'No valid upstream found for route.');
         success = false;
@@ -272,7 +285,8 @@ export async function handleRequest(
     const coordinator = new FailoverCoordinator(
       routeState.upstreams,
       route,
-      baseRecoveryIntervalMs
+      baseRecoveryIntervalMs,
+      expressionContext
     );
 
     let attemptCount = 0;

@@ -89,6 +89,7 @@ export interface Upstream extends ModificationRules {
   plugins?: Array<PluginConfig | string>; // Upstream 级别的 plugins（覆盖路由和全局配置）
   disabled?: boolean; // 是否禁用该上游，默认为 false（未禁用）
   description?: string; // 上游服务器的描述信息
+  condition?: string; // 条件表达式，使用 {{ }} 包裹，例如: "{{ body.model === 'gpt-4' }}"
 }
 
 export interface RouteConfig extends ModificationRules {
