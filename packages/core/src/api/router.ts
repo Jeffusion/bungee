@@ -83,12 +83,14 @@ export async function handleAPIRequest(req: Request, path: string): Promise<Resp
       return RoutesHandler.list();
     }
 
-    const upstreamControlMatch = path.match(/^\/api\/routes\/(.+?)\/upstreams\/(.+?)\/(enable|disable)$/);
+    // Upstream control: /api/routes/{routePath}/upstreams/{index}/(enable|disable)
+    const upstreamControlMatch = path.match(/^\/api\/routes\/(.+?)\/upstreams\/(\d+)\/(enable|disable)$/);
     if (upstreamControlMatch && method === 'POST') {
-      const [, encodedRoutePath, encodedTarget, action] = upstreamControlMatch;
+      const [, encodedRoutePath, indexStr, action] = upstreamControlMatch;
+      const upstreamIndex = parseInt(indexStr, 10);
       return UpstreamControlHandler.toggle(
         decodeURIComponent(encodedRoutePath),
-        decodeURIComponent(encodedTarget),
+        upstreamIndex,
         action === 'disable'
       );
     }

@@ -42,8 +42,8 @@ export class RoutesHandler {
       const routesWithStatus: RouteWithStatus[] = config.routes.map((route: RouteConfig) => {
         const routeState = runtimeState.get(route.path);
 
-        // Map upstreams with runtime status
-        const upstreamsWithStatus: UpstreamWithStatus[] = route.upstreams.map((upstream) => {
+        // Map upstreams with runtime status by index (not by target)
+        const upstreamsWithStatus: UpstreamWithStatus[] = route.upstreams.map((upstream, index) => {
           // If failover is not enabled or no runtime state, default to HEALTHY
           if (!routeState) {
             return {
@@ -53,10 +53,8 @@ export class RoutesHandler {
             };
           }
 
-          // Find matching runtime upstream by target
-          const runtimeUpstream = routeState.upstreams.find(
-            (ru) => ru.target === upstream.target
-          );
+          // Match runtime upstream by index (allows multiple upstreams with same target)
+          const runtimeUpstream = routeState.upstreams[index];
 
           if (!runtimeUpstream) {
             return {
