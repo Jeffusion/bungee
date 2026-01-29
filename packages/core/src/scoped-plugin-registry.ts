@@ -1100,8 +1100,8 @@ export class ScopedPluginRegistry {
       }
 
       // 3. 加载上游级插件
-      for (const upstream of route.upstreams || []) {
-        const upstreamId = upstream.target;
+      for (const [upstreamIndex, upstream] of (route.upstreams || []).entries()) {
+        const upstreamId = upstream.id || String(upstreamIndex); // Use config id or fallback to index
 
         for (const pluginConfig of upstream.plugins || []) {
           const normalized = normalizePluginConfig(pluginConfig);
@@ -1112,7 +1112,14 @@ export class ScopedPluginRegistry {
           } else {
             failedCount++;
             recordFailure(normalized.name, result.error!);
-            logger.error({ error: result.error, pluginConfig, routeId, upstreamId }, 'Failed to create upstream plugin instance after retries');
+            logger.error({
+              error: result.error,
+              pluginConfig,
+              routeId,
+              upstreamId,
+              upstreamIndex,
+              upstreamTarget: upstream.target
+            }, 'Failed to create upstream plugin instance after retries');
           }
         }
       }

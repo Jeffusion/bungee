@@ -10,6 +10,8 @@ import type { Upstream } from '@jeffusion/bungee-types';
  * Extends the base Upstream configuration with runtime state
  */
 export interface RuntimeUpstream extends Upstream {
+  /** Unique identifier for this upstream (either upstream.id from config or index as fallback) */
+  upstreamId: string;
   /** Current health status of the upstream server */
   status: 'HEALTHY' | 'UNHEALTHY' | 'HALF_OPEN';
   /** Timestamp of last failure (for recovery timing) */

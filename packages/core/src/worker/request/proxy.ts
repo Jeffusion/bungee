@@ -91,7 +91,7 @@ export async function proxyRequest(
   );
 
   // ===== 获取预编译的 Hooks（O(1) 查找）=====
-  const upstreamId = upstream.target;
+  const upstreamId = upstream.upstreamId; // Use the unique upstreamId
   const scopedRegistry = getScopedPluginRegistry();
   const precompiledHooks = scopedRegistry?.getPrecompiledHooks(routeId, upstreamId) ?? null;
 

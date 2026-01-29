@@ -57,8 +57,9 @@ export function initializeRuntimeState(config: AppConfig): void {
 
   forEach(config.routes, (route) => {
     if (route.failover?.enabled && route.upstreams && route.upstreams.length > 0) {
-      const upstreams = map(route.upstreams, (up) => ({
+      const upstreams = map(route.upstreams, (up, index) => ({
         ...up,
+        upstreamId: up.id || String(index), // Use config id or fallback to index
         status: 'HEALTHY' as const,
         lastFailureTime: undefined,
         consecutiveFailures: 0,

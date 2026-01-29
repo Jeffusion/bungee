@@ -212,8 +212,9 @@ export async function handleRequest(
 
     const routeState = runtimeState.get(route.path);
     if (!routeState) {
-      const staticUpstreams = map(route.upstreams, (up) => ({
+      const staticUpstreams = map(route.upstreams, (up, index) => ({
         ...up,
+        upstreamId: up.id || String(index), // Use config id or fallback to index
         status: 'HEALTHY' as const,
         lastFailureTime: undefined,
         consecutiveFailures: 0,

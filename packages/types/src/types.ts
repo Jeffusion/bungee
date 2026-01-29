@@ -83,6 +83,7 @@ export interface AuthConfig {
 }
 
 export interface Upstream extends ModificationRules {
+  id?: string; // 可选的唯一标识符，如果未提供则使用索引
   target: string;
   weight?: number; // 权重，默认为 100
   priority?: number; // 数字越小优先级越高，默认为 1
