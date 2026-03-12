@@ -1,0 +1,141 @@
+{
+  "name": "anthropic-request-sanitizer",
+  "version": "1.0.0",
+  "builtin": true,
+  "metadata": {
+    "name": "metadata.name",
+    "description": "plugin.description",
+    "icon": "shield"
+  },
+  "configSchema": [
+    {
+      "name": "sanitizeMode",
+      "type": "select",
+      "label": "config.sanitizeMode.label",
+      "description": "config.sanitizeMode.description",
+      "default": "normal",
+      "options": [
+        {
+          "label": "config.sanitizeMode.options.normal.label",
+          "value": "normal",
+          "description": "config.sanitizeMode.options.normal.description"
+        },
+        {
+          "label": "config.sanitizeMode.options.aggressive.label",
+          "value": "aggressive",
+          "description": "config.sanitizeMode.options.aggressive.description"
+        }
+      ]
+    },
+    {
+      "name": "stripCacheControl",
+      "type": "boolean",
+      "label": "config.stripCacheControl.label",
+      "description": "config.stripCacheControl.description",
+      "default": true
+    },
+    {
+      "name": "betaMode",
+      "type": "select",
+      "label": "config.betaMode.label",
+      "description": "config.betaMode.description",
+      "default": "allowlist",
+      "options": [
+        {
+          "label": "config.betaMode.options.passthrough.label",
+          "value": "passthrough",
+          "description": "config.betaMode.options.passthrough.description"
+        },
+        {
+          "label": "config.betaMode.options.allowlist.label",
+          "value": "allowlist",
+          "description": "config.betaMode.options.allowlist.description"
+        },
+        {
+          "label": "config.betaMode.options.strip.label",
+          "value": "strip",
+          "description": "config.betaMode.options.strip.description"
+        }
+      ]
+    },
+    {
+      "name": "betaAllowlist",
+      "type": "textarea",
+      "label": "config.betaAllowlist.label",
+      "description": "config.betaAllowlist.description",
+      "default": "claude-code-20250219",
+      "showIf": {
+        "field": "betaMode",
+        "value": "allowlist"
+      }
+    },
+    {
+      "name": "removeBetaQuery",
+      "type": "boolean",
+      "label": "config.removeBetaQuery.label",
+      "description": "config.removeBetaQuery.description",
+      "default": true
+    },
+    {
+      "name": "filterOrphanToolResults",
+      "type": "boolean",
+      "label": "config.filterOrphanToolResults.label",
+      "description": "config.filterOrphanToolResults.description",
+      "default": true
+    }
+  ],
+  "translations": {
+    "en": {
+      "metadata.name": "Anthropic Request Sanitizer",
+      "plugin.description": "Sanitize Anthropic-compatible requests and headers for stricter upstream compatibility",
+      "config.sanitizeMode.label": "Sanitization Mode",
+      "config.sanitizeMode.description": "Normal keeps more fields; Aggressive removes additional compatibility-risk fields",
+      "config.sanitizeMode.options.normal.label": "Normal",
+      "config.sanitizeMode.options.normal.description": "Remove only high-risk fields and normalize tools",
+      "config.sanitizeMode.options.aggressive.label": "Aggressive",
+      "config.sanitizeMode.options.aggressive.description": "Also remove context/metadata/service-tier style fields",
+      "config.stripCacheControl.label": "Strip cache_control",
+      "config.stripCacheControl.description": "Remove cache_control recursively in the request body",
+      "config.betaMode.label": "Anthropic Beta Header Mode",
+      "config.betaMode.description": "How to process anthropic-beta header",
+      "config.betaMode.options.passthrough.label": "Pass Through",
+      "config.betaMode.options.passthrough.description": "Keep all incoming beta values",
+      "config.betaMode.options.allowlist.label": "Allowlist",
+      "config.betaMode.options.allowlist.description": "Only keep values listed in betaAllowlist",
+      "config.betaMode.options.strip.label": "Strip",
+      "config.betaMode.options.strip.description": "Remove anthropic-beta header completely",
+      "config.betaAllowlist.label": "Beta Allowlist",
+      "config.betaAllowlist.description": "Comma/newline-separated allowed beta values",
+      "config.removeBetaQuery.label": "Remove beta query flag",
+      "config.removeBetaQuery.description": "Remove ?beta=true query parameter from upstream URL",
+      "config.filterOrphanToolResults.label": "Filter orphan tool results",
+      "config.filterOrphanToolResults.description": "Remove tool_result blocks that do not match tool_use in the previous assistant message"
+    },
+    "zh-CN": {
+      "metadata.name": "Anthropic 请求净化器",
+      "plugin.description": "清洗 Anthropic 兼容请求与请求头，提升严格上游网关的兼容性",
+      "config.sanitizeMode.label": "净化模式",
+      "config.sanitizeMode.description": "普通模式保留更多字段；激进模式会移除更多可能引发兼容问题的字段",
+      "config.sanitizeMode.options.normal.label": "普通",
+      "config.sanitizeMode.options.normal.description": "仅移除高风险字段并标准化 tools",
+      "config.sanitizeMode.options.aggressive.label": "激进",
+      "config.sanitizeMode.options.aggressive.description": "额外移除 context/metadata/service-tier 等字段",
+      "config.stripCacheControl.label": "移除 cache_control",
+      "config.stripCacheControl.description": "递归删除请求体中的 cache_control 字段",
+      "config.betaMode.label": "Anthropic Beta Header 模式",
+      "config.betaMode.description": "如何处理 anthropic-beta 请求头",
+      "config.betaMode.options.passthrough.label": "透传",
+      "config.betaMode.options.passthrough.description": "保留所有传入 beta 值",
+      "config.betaMode.options.allowlist.label": "白名单",
+      "config.betaMode.options.allowlist.description": "仅保留 betaAllowlist 中声明的值",
+      "config.betaMode.options.strip.label": "删除",
+      "config.betaMode.options.strip.description": "完全删除 anthropic-beta 请求头",
+      "config.betaAllowlist.label": "Beta 白名单",
+      "config.betaAllowlist.description": "允许的 beta 值（逗号或换行分隔）",
+      "config.removeBetaQuery.label": "移除 beta 查询参数",
+      "config.removeBetaQuery.description": "从上游 URL 中移除 ?beta=true",
+      "config.filterOrphanToolResults.label": "过滤孤立工具结果",
+      "config.filterOrphanToolResults.description": "移除无法匹配前一条 assistant 消息中 tool_use 的 tool_result"
+    }
+  }
+}

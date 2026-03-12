@@ -91,9 +91,8 @@ packages/core/src/plugins/
 │   └── index.ts
 ├── token-cache/
 │   └── index.ts
-├── hooks-example/
-│   └── index.ts
-└── anthropic-filter-error-tool-results.ts  # 单文件插件
+└── hooks-example/
+    └── index.ts
 ```
 
 ### External Plugins（外部插件）
