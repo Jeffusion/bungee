@@ -585,6 +585,7 @@ export class PluginRegistry {
         keywords: manifest.keywords,
         engines: manifest.engines,
         contributes: manifest.contributes,
+        permissions: manifest.permissions,
       };
 
       logger.debug({ pluginName, source: 'manifest' }, 'Plugin metadata loaded from manifest');

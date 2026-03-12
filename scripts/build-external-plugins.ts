@@ -82,6 +82,15 @@ async function buildExternalPlugins() {
       console.log(`  ✓ ${pluginName}/manifest.json copied`);
     }
 
+    // 复制 UI 资源（如果存在）
+    const uiSrc = path.join(PLUGINS_DIR, pluginName, 'ui');
+    const uiDst = path.join(outputPath, 'ui');
+    if (fs.existsSync(uiSrc)) {
+      fs.rmSync(uiDst, { recursive: true, force: true });
+      fs.cpSync(uiSrc, uiDst, { recursive: true });
+      console.log(`  ✓ ${pluginName}/ui copied`);
+    }
+
     console.log(`  ✓ ${pluginName} → ${path.relative(process.cwd(), outputPath)}/index.js`);
   }
 

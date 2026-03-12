@@ -67,7 +67,23 @@ export class PluginPermissionManager {
     // 所有插件默认拥有storage权限
     permissions.add(Permission.STORAGE);
 
-    // 基于 capabilities 添加权限
+    // 基于 manifest.permissions 数组添加权限
+    if (metadata.permissions && Array.isArray(metadata.permissions)) {
+      for (const perm of metadata.permissions) {
+        if (perm === 'network') permissions.add(Permission.NETWORK);
+        else if (perm === 'filesystem') permissions.add(Permission.FILESYSTEM);
+        else if (perm === 'storage') permissions.add(Permission.STORAGE);
+        else if (perm === 'ui:modals') permissions.add(Permission.UI_MODALS);
+        else if (perm === 'ui:popups') permissions.add(Permission.UI_POPUPS);
+        else if (perm === 'ui:forms') permissions.add(Permission.UI_FORMS);
+        else if (perm === 'ui:navigation') permissions.add(Permission.UI_NAVIGATION);
+        else if (perm === 'api:routes') permissions.add(Permission.API_ROUTES);
+        else if (perm === 'api:plugins') permissions.add(Permission.API_PLUGINS);
+        else if (perm === 'api:logs') permissions.add(Permission.API_LOGS);
+      }
+    }
+
+    // 基于 capabilities 添加权限（向后兼容）
     if (metadata.capabilities) {
       const { network, filesystem, database } = metadata.capabilities;
 

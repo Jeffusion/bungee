@@ -585,6 +585,12 @@ export interface PluginMetadata {
    * 插件能力声明
    * 声明插件使用的系统能力
    */
+  /**
+   * 插件权限声明
+   * 声明插件需要的系统权限（如 network, storage, api:routes 等）
+   */
+  permissions?: string[];
+
   capabilities?: {
     /**
      * 是否需要网络访问

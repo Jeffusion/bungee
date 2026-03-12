@@ -290,6 +290,37 @@ export async function handleGetPluginTranslations(_req: Request): Promise<Respon
 }
 
 /**
+ * 匹配路径模式（支持路径参数）
+ *
+ * @param pattern 路径模式，如 "/accounts/:id/refresh"
+ * @param path 实际请求路径，如 "/accounts/123/refresh"
+ * @returns 如果匹配返回 true，否则返回 false
+ */
+function matchPathPattern(pattern: string, path: string): boolean {
+  // 如果没有路径参数，使用精确匹配
+  if (!pattern.includes(':')) {
+    return pattern === path;
+  }
+
+  // 将路径模式转换为正则表达式
+  // 例如：/accounts/:id/refresh -> /accounts/([^/]+)/refresh
+  const regexPattern = pattern
+    .split('/')
+    .map(segment => {
+      if (segment.startsWith(':')) {
+        // 路径参数匹配任意非斜杠字符
+        return '([^/]+)';
+      }
+      // 普通段落需要转义特殊字符
+      return segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    })
+    .join('/');
+
+  const regex = new RegExp(`^${regexPattern}$`);
+  return regex.test(path);
+}
+
+/**
  * 处理插件 API 请求
  *
  * 将请求委派给插件实例的方法处理。
@@ -346,7 +377,7 @@ export async function handlePluginApiRequest(
     const method = req.method as 'GET' | 'POST' | 'PUT' | 'DELETE';
 
     const matchedApi = apiDeclarations.find(api => {
-      return api.path === subPath && api.methods.includes(method);
+      return matchPathPattern(api.path, subPath) && api.methods.includes(method);
     });
 
     if (!matchedApi) {
