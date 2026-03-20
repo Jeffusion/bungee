@@ -76,7 +76,7 @@ export class AnthropicToOpenAIConverter implements AIConverter {
       }
     }
 
-    openaiBody.messages = messages;
+    openaiBody.messages = this.validateAndCleanToolCalls(messages);
 
     // 3. Parameters mapping
     const maxTokens = anthropicBody.max_tokens || anthropicBody.max_tokens_to_sample;
@@ -143,9 +143,119 @@ export class AnthropicToOpenAIConverter implements AIConverter {
     return openaiBody;
   }
 
+  private validateAndCleanToolCalls(messages: any[]): any[] {
+    const toolResultIds = new Set(
+      messages
+        .filter((msg: any) => msg.role === 'tool' && typeof msg.tool_call_id === 'string' && msg.tool_call_id)
+        .map((msg: any) => msg.tool_call_id)
+    );
+
+    const cleanedMessages: any[] = [];
+
+    for (const msg of messages) {
+      if (msg.role !== 'assistant' || !Array.isArray(msg.tool_calls)) {
+        cleanedMessages.push(msg);
+        continue;
+      }
+
+      const matchedToolCalls = msg.tool_calls.filter((tc: any) => typeof tc?.id === 'string' && toolResultIds.has(tc.id));
+      const hasTextContent = typeof msg.content === 'string' && msg.content.trim().length > 0;
+
+      if (matchedToolCalls.length > 0) {
+        cleanedMessages.push({
+          ...msg,
+          tool_calls: matchedToolCalls,
+          content: hasTextContent ? msg.content : null
+        });
+        continue;
+      }
+
+      if (hasTextContent) {
+        const { tool_calls, ...assistantTextOnly } = msg;
+        cleanedMessages.push(assistantTextOnly);
+      }
+    }
+
+    return cleanedMessages;
+  }
+
   /**
    * 转换 User 消息
    */
+  private normalizeToolResultContent(content: any): string {
+    if (content === undefined || content === null) {
+      return '';
+    }
+
+    if (typeof content === 'string') {
+      return content;
+    }
+
+    if (Array.isArray(content)) {
+      const normalizedBlocks = content
+        .map((part: any) => {
+          if (typeof part === 'string') {
+            return { type: 'text', text: part };
+          }
+
+          if (!part || typeof part !== 'object') {
+            return null;
+          }
+
+          if (part.type === 'text' && typeof part.text === 'string') {
+            return { type: 'text', text: part.text };
+          }
+
+          if (part.type === 'image' && part.source) {
+            if (part.source.type === 'url' && typeof part.source.url === 'string') {
+              return {
+                type: 'image_url',
+                image_url: {
+                  url: part.source.url
+                }
+              };
+            }
+
+            if (part.source.type === 'base64' && part.source.media_type && part.source.data) {
+              return {
+                type: 'image_url',
+                image_url: {
+                  url: `data:${part.source.media_type};base64,${part.source.data}`
+                }
+              };
+            }
+          }
+
+          return {
+            type: 'text',
+            text: JSON.stringify(part)
+          };
+        })
+        .filter((block: any): block is Record<string, any> => block !== null);
+
+      if (normalizedBlocks.length === 0) {
+        return '';
+      }
+
+      const firstBlock = normalizedBlocks[0];
+      if (normalizedBlocks.length === 1 && firstBlock && firstBlock.type === 'text') {
+        return typeof firstBlock.text === 'string' ? firstBlock.text : '';
+      }
+
+      return JSON.stringify(normalizedBlocks);
+    }
+
+    if (typeof content === 'object') {
+      if ('content' in content) {
+        return this.normalizeToolResultContent(content.content);
+      }
+
+      return JSON.stringify(content);
+    }
+
+    return String(content);
+  }
+
   private convertUserMessage(msg: any, messages: any[]): void {
     const content = msg.content;
 
@@ -160,47 +270,65 @@ export class AnthropicToOpenAIConverter implements AIConverter {
 
     // 数组内容
     if (Array.isArray(content)) {
-      // 检查是否包含 tool_result
-      const hasToolResult = content.some((block: any) => block.type === 'tool_result');
+      const hasToolResult = content.some((block: any) => block?.type === 'tool_result');
 
       if (hasToolResult) {
-        // 拆成 tool role 消息
         for (const block of content) {
-          if (block.type === 'tool_result') {
-            messages.push({
-              role: 'tool',
-              tool_call_id: block.tool_use_id || '',
-              content: block.content || ''
-            });
+          if (block?.type !== 'tool_result' || typeof block.tool_use_id !== 'string' || block.tool_use_id.length === 0) {
+            continue;
           }
-        }
-      } else {
-        // 普通多模态内容
-        const openaiContent: any[] = [];
 
-        for (const block of content) {
-          if (block.type === 'text') {
-            openaiContent.push({
-              type: 'text',
-              text: block.text || ''
-            });
-          } else if (block.type === 'image' && block.source) {
-            const dataUrl = `data:${block.source.media_type};base64,${block.source.data}`;
-            openaiContent.push({
-              type: 'image_url',
-              image_url: { url: dataUrl }
-            });
-          }
-        }
-
-        if (openaiContent.length > 0) {
           messages.push({
-            role: 'user',
-            content: openaiContent
+            role: 'tool',
+            tool_call_id: block.tool_use_id,
+            content: this.normalizeToolResultContent(block.content)
           });
         }
       }
+
+      const userContentBlocks = content
+        .filter((block: any) => block?.type !== 'tool_result')
+        .map((block: any) => this.convertUserContentBlock(block))
+        .filter((block: any): block is Record<string, any> => block !== null);
+
+      if (userContentBlocks.length > 0) {
+        messages.push({
+          role: 'user',
+          content: userContentBlocks
+        });
+      }
     }
+  }
+
+  private convertUserContentBlock(block: any): any | null {
+    if (!block || typeof block !== 'object') {
+      return null;
+    }
+
+    if (block.type === 'text') {
+      return {
+        type: 'text',
+        text: block.text || ''
+      };
+    }
+
+    if (block.type === 'image' && block.source) {
+      if (block.source.type === 'url' && block.source.url) {
+        return {
+          type: 'image_url',
+          image_url: { url: block.source.url }
+        };
+      }
+
+      if (block.source.type === 'base64' && block.source.media_type && block.source.data) {
+        return {
+          type: 'image_url',
+          image_url: { url: `data:${block.source.media_type};base64,${block.source.data}` }
+        };
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -220,24 +348,30 @@ export class AnthropicToOpenAIConverter implements AIConverter {
 
     // 数组内容
     if (Array.isArray(content)) {
-      // 检查是否首个块是 tool_use
-      const firstBlock = content[0];
-      if (firstBlock && firstBlock.type === 'tool_use') {
-        // 转写为 tool_calls
-        const toolCalls = content
-          .filter((block: any) => block.type === 'tool_use')
-          .map((block: any) => ({
-            id: block.id || '',
-            type: 'function',
-            function: {
-              name: block.name || '',
-              arguments: JSON.stringify(block.input || {})
-            }
-          }));
+      const toolUseBlocks = content.filter((block: any) => block.type === 'tool_use');
+
+      if (toolUseBlocks.length > 0) {
+        const toolCalls = toolUseBlocks.map((block: any) => ({
+          id: block.id || '',
+          type: 'function',
+          function: {
+            name: block.name || '',
+            arguments: JSON.stringify(block.input || {})
+          }
+        }));
+
+        let textContent = '';
+        for (const block of content) {
+          if (block.type === 'text') {
+            textContent += block.text || '';
+          } else if (block.type === 'thinking') {
+            textContent += `<thinking>\n${block.thinking || ''}\n</thinking>\n\n`;
+          }
+        }
 
         messages.push({
           role: 'assistant',
-          content: null,
+          content: textContent.trim() || null,
           tool_calls: toolCalls
         });
       } else {
@@ -305,19 +439,50 @@ export class AnthropicToOpenAIConverter implements AIConverter {
     const content: any[] = [];
 
     // tool_calls → tool_use
-    if (message.tool_calls) {
+    if (Array.isArray(message.tool_calls)) {
       for (const tc of message.tool_calls) {
+        let parsedInput: Record<string, any> = {};
+        try {
+          const parsedValue = JSON.parse(tc.function?.arguments || '{}');
+          if (parsedValue && typeof parsedValue === 'object' && !Array.isArray(parsedValue)) {
+            parsedInput = parsedValue as Record<string, any>;
+          }
+        } catch {
+          parsedInput = {};
+        }
+
         content.push({
           type: 'tool_use',
           id: tc.id || '',
           name: tc.function?.name || '',
-          input: JSON.parse(tc.function?.arguments || '{}')
+          input: parsedInput
         });
       }
-    } else if (message.content) {
+    }
+
+    if (typeof message.content === 'string' && message.content.length > 0) {
       // 文本与 <thinking> 标签拆分
       const parsedContent = parseThinkingTags(message.content);
       content.push(...parsedContent);
+    } else if (Array.isArray(message.content)) {
+      for (const part of message.content) {
+        if (part?.type === 'text' && typeof part.text === 'string') {
+          content.push(...parseThinkingTags(part.text));
+          continue;
+        }
+
+        if (typeof part === 'string') {
+          content.push(...parseThinkingTags(part));
+          continue;
+        }
+
+        if (part && typeof part === 'object') {
+          content.push({
+            type: 'text',
+            text: JSON.stringify(part)
+          });
+        }
+      }
     }
 
     // finish_reason 映射

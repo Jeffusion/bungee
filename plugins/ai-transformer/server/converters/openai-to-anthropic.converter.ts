@@ -12,7 +12,7 @@
 
 import type { AIConverter } from './base';
 import type { MutableRequestContext, ResponseContext, StreamChunkContext } from '../../../../packages/core/src/hooks';
-import { generateOpenAIChatCompletionId, parseThinkingTags } from './utils';
+import { parseThinkingTags } from './utils';
 
 export class OpenAIToAnthropicConverter implements AIConverter {
   readonly from = 'openai';
@@ -22,78 +22,81 @@ export class OpenAIToAnthropicConverter implements AIConverter {
     const body = ctx.body as any;
     if (!body) return;
 
+    const isChatEndpoint = ctx.url.pathname === '/v1/chat/completions';
+    const isResponsesEndpoint = ctx.url.pathname === '/v1/responses';
+    if (!isChatEndpoint && !isResponsesEndpoint) return;
+
     // 路径转换
-    if (ctx.url.pathname === '/v1/chat/completions') {
-      ctx.url.pathname = '/v1/messages';
-    }
+    ctx.url.pathname = '/v1/messages';
+
+    const normalizedBody = this.normalizeOpenAIRequestBody(body, isResponsesEndpoint);
 
     // 转换 body
     const anthropicBody: any = {};
 
     // Model
-    anthropicBody.model = body.model;
+    anthropicBody.model = normalizedBody.model;
 
-    // Extract system messages
-    if (body.system) {
-      anthropicBody.system = body.system;
-    } else if (body.messages) {
-      const systemMessages = body.messages
-        .filter((m: any) => m.role === 'system')
-        .map((m: any) => m.content);
+    const instructionParts: string[] = [];
+    if (typeof normalizedBody.system === 'string' && normalizedBody.system.trim()) {
+      instructionParts.push(normalizedBody.system.trim());
+    }
 
-      if (systemMessages.length > 0) {
-        anthropicBody.system = systemMessages.join('\n');
-      }
+    if (normalizedBody.messages) {
+      const instructionMessages = normalizedBody.messages
+        .filter((m: any) => m.role === 'system' || m.role === 'developer')
+        .map((m: any) => this.extractInstructionText(m.content))
+        .filter((text: string) => text.length > 0);
+
+      instructionParts.push(...instructionMessages);
+    }
+
+    if (instructionParts.length > 0) {
+      anthropicBody.system = instructionParts.join('\n');
     }
 
     // Convert non-system messages
-    if (body.messages) {
-      anthropicBody.messages = this.convertMessages(body.messages);
+    if (normalizedBody.messages) {
+      anthropicBody.messages = this.convertMessages(normalizedBody.messages);
       this.validateAndCleanToolCalls(anthropicBody.messages);
     }
 
     // Max tokens
-    if (body.max_tokens) {
-      anthropicBody.max_tokens = body.max_tokens;
+    if (normalizedBody.max_tokens) {
+      anthropicBody.max_tokens = normalizedBody.max_tokens;
     } else if (process.env.ANTHROPIC_MAX_TOKENS) {
       anthropicBody.max_tokens = parseInt(process.env.ANTHROPIC_MAX_TOKENS);
-    } else if (!body.max_completion_tokens) {
+    } else if (!normalizedBody.max_completion_tokens) {
       throw new Error('max_tokens is required. Provide it in request or set ANTHROPIC_MAX_TOKENS environment variable');
     }
 
     // Other parameters
-    if (body.temperature !== undefined) {
-      anthropicBody.temperature = body.temperature;
+    if (normalizedBody.temperature !== undefined) {
+      anthropicBody.temperature = normalizedBody.temperature;
     }
 
-    if (body.top_p !== undefined) {
-      anthropicBody.top_p = body.top_p;
+    if (normalizedBody.top_p !== undefined) {
+      anthropicBody.top_p = normalizedBody.top_p;
     }
 
     // Stop sequences
-    if (body.stop) {
-      anthropicBody.stop_sequences = Array.isArray(body.stop) ? body.stop : [body.stop];
+    if (normalizedBody.stop) {
+      anthropicBody.stop_sequences = Array.isArray(normalizedBody.stop) ? normalizedBody.stop : [normalizedBody.stop];
     }
 
     // Stream
-    if (body.stream !== undefined) {
-      anthropicBody.stream = body.stream;
+    if (normalizedBody.stream !== undefined) {
+      anthropicBody.stream = normalizedBody.stream;
     }
 
     // Tools conversion
-    if (body.tools) {
-      anthropicBody.tools = body.tools
-        .filter((t: any) => t.type === 'function' && t.function)
-        .map((t: any) => ({
-          name: t.function.name || '',
-          description: t.function.description || '',
-          input_schema: t.function.parameters || {}
-        }));
+    if (normalizedBody.tools) {
+      anthropicBody.tools = this.convertTools(normalizedBody.tools);
     }
 
     // Thinking budget conversion for reasoning models
-    if (body.max_completion_tokens) {
-      const effort = body.reasoning_effort || 'medium';
+    if (normalizedBody.max_completion_tokens) {
+      const effort = normalizedBody.reasoning_effort || 'medium';
       const envKey = `OPENAI_${effort.toUpperCase()}_TO_ANTHROPIC_TOKENS`;
       const tokens = process.env[envKey];
 
@@ -113,6 +116,221 @@ export class OpenAIToAnthropicConverter implements AIConverter {
     }
 
     ctx.body = anthropicBody;
+  }
+
+  private normalizeOpenAIRequestBody(body: any, isResponsesEndpoint: boolean): any {
+    if (!isResponsesEndpoint) return body;
+
+    const normalized: any = {
+      ...body,
+      messages: this.convertResponsesInputToMessages(body.input)
+    };
+
+    if (normalized.max_tokens === undefined && body.max_output_tokens !== undefined) {
+      normalized.max_tokens = body.max_output_tokens;
+    }
+
+    if (typeof body.instructions === 'string' && body.instructions.trim()) {
+      normalized.system = body.instructions.trim();
+    }
+
+    return normalized;
+  }
+
+  private convertResponsesInputToMessages(input: any): any[] {
+    if (typeof input === 'string') {
+      const text = input.trim();
+      return text ? [{ role: 'user', content: text }] : [];
+    }
+
+    if (!Array.isArray(input)) {
+      return [];
+    }
+
+    const messages: any[] = [];
+    const pendingTopLevelInputParts: any[] = [];
+
+    const flushPendingTopLevelInputParts = (): void => {
+      if (pendingTopLevelInputParts.length === 0) return;
+
+      messages.push({
+        role: 'user',
+        content: this.normalizeResponsesMessageContent([...pendingTopLevelInputParts])
+      });
+
+      pendingTopLevelInputParts.length = 0;
+    };
+
+    for (const item of input) {
+      if (typeof item === 'string') {
+        if (item.trim()) {
+          pendingTopLevelInputParts.push({ type: 'input_text', text: item });
+        }
+        continue;
+      }
+
+      if (!item || typeof item !== 'object') {
+        continue;
+      }
+
+      const itemType = item.type;
+
+      if (
+        itemType === 'input_text'
+        || itemType === 'output_text'
+        || itemType === 'input_image'
+        || itemType === 'text'
+        || itemType === 'image_url'
+      ) {
+        pendingTopLevelInputParts.push(item);
+        continue;
+      }
+
+      if (itemType === 'function_call') {
+        flushPendingTopLevelInputParts();
+
+        const rawArgs = item.arguments;
+        const argumentsString = typeof rawArgs === 'string'
+          ? rawArgs
+          : JSON.stringify(rawArgs || {});
+
+        messages.push({
+          role: 'assistant',
+          content: null,
+          tool_calls: [{
+            id: item.call_id || item.id || '',
+            type: 'function',
+            function: {
+              name: item.name || '',
+              arguments: argumentsString
+            }
+          }]
+        });
+        continue;
+      }
+
+      if (itemType === 'function_call_output') {
+        flushPendingTopLevelInputParts();
+
+        messages.push({
+          role: 'tool',
+          tool_call_id: item.call_id || '',
+          content: item.output ?? '',
+          is_error: item.is_error === true || item.status === 'error' || item.status === 'failed'
+        });
+        continue;
+      }
+
+      if (itemType === 'message') {
+        flushPendingTopLevelInputParts();
+
+        const role = item.role || 'user';
+        if (typeof role === 'string') {
+          messages.push({
+            role,
+            content: this.normalizeResponsesMessageContent(item.content)
+          });
+        }
+        continue;
+      }
+
+      if (typeof item.role === 'string') {
+        flushPendingTopLevelInputParts();
+
+        messages.push({
+          role: item.role,
+          content: this.normalizeResponsesMessageContent(item.content)
+        });
+      }
+    }
+
+    flushPendingTopLevelInputParts();
+
+    return messages;
+  }
+
+  private normalizeResponsesMessageContent(content: any): any {
+    if (typeof content === 'string') {
+      return content;
+    }
+
+    if (!Array.isArray(content)) {
+      return content;
+    }
+
+    const converted = content
+      .map((part: any) => {
+        if (typeof part === 'string') {
+          return { type: 'text', text: part };
+        }
+
+        if (!part || typeof part !== 'object') {
+          return null;
+        }
+
+        if (part.type === 'input_text' || part.type === 'output_text') {
+          return { type: 'text', text: part.text || '' };
+        }
+
+        if (part.type === 'input_image') {
+          const imageUrl = typeof part.image_url === 'string'
+            ? part.image_url
+            : part.image_url?.url;
+
+          if (typeof imageUrl === 'string' && imageUrl) {
+            return {
+              type: 'image_url',
+              image_url: { url: imageUrl }
+            };
+          }
+        }
+
+        return part;
+      })
+      .filter((part: any) => part !== null);
+
+    return converted;
+  }
+
+  private convertTools(tools: any[]): any[] {
+    return tools
+      .filter((t: any) => t?.type === 'function')
+      .map((t: any) => {
+        if (t.function) {
+          return {
+            name: t.function.name || '',
+            description: t.function.description || '',
+            input_schema: t.function.parameters || {}
+          };
+        }
+
+        return {
+          name: t.name || '',
+          description: t.description || '',
+          input_schema: t.parameters || {}
+        };
+      })
+      .filter((t: any) => t.name);
+  }
+
+  private extractInstructionText(content: any): string {
+    if (typeof content === 'string') {
+      return content.trim();
+    }
+
+    if (Array.isArray(content)) {
+      return content
+        .map((item: any) => {
+          if (typeof item === 'string') return item;
+          if (item?.type === 'text') return item.text || '';
+          if (typeof item?.text === 'string') return item.text;
+          return '';
+        })
+        .join('')
+        .trim();
+    }
+
+    return '';
   }
 
   private validateAndCleanToolCalls(messages: any[]): void {
@@ -138,11 +356,133 @@ export class OpenAIToAnthropicConverter implements AIConverter {
         });
       }
     }
+
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.role === 'assistant' && Array.isArray(msg.content) && msg.content.length === 0) {
+        messages.splice(i, 1);
+      }
+    }
+  }
+
+  private parseImageSource(url: string): any | null {
+    if (!url) return null;
+
+    if (url.startsWith('data:')) {
+      const parts = url.split(';base64,');
+      if (parts.length !== 2) return null;
+
+      return {
+        type: 'base64',
+        media_type: parts[0].replace('data:', ''),
+        data: parts[1]
+      };
+    }
+
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return {
+        type: 'url',
+        url
+      };
+    }
+
+    return null;
+  }
+
+  private normalizeToolResultContent(content: any): string | any[] {
+    if (content === undefined || content === null) {
+      return '';
+    }
+
+    if (typeof content === 'string') {
+      return content;
+    }
+
+    if (Array.isArray(content)) {
+      const blocks = content
+        .map((part: any) => this.convertToolResultPart(part))
+        .filter((part: any) => part !== null);
+
+      if (blocks.length === 0) {
+        return '';
+      }
+
+      if (blocks.length === 1 && blocks[0].type === 'text') {
+        return blocks[0].text;
+      }
+
+      return blocks;
+    }
+
+    if (typeof content === 'object') {
+      if ('content' in content) {
+        return this.normalizeToolResultContent(content.content);
+      }
+
+      return JSON.stringify(content);
+    }
+
+    return String(content);
+  }
+
+  private convertToolResultPart(part: any): any | null {
+    if (typeof part === 'string') {
+      const text = part.trim();
+      return text ? { type: 'text', text } : null;
+    }
+
+    if (!part || typeof part !== 'object') {
+      return null;
+    }
+
+    if (part.type === 'text' || part.type === 'input_text' || part.type === 'output_text') {
+      const text = typeof part.text === 'string' ? part.text : '';
+      return text.trim() ? { type: 'text', text } : null;
+    }
+
+    if (part.type === 'image_url' || part.type === 'input_image') {
+      const imageUrl = typeof part.image_url === 'string' ? part.image_url : part.image_url?.url;
+      const source = typeof imageUrl === 'string' ? this.parseImageSource(imageUrl) : null;
+
+      if (source) {
+        return {
+          type: 'image',
+          source
+        };
+      }
+    }
+
+    if (part.type === 'image' && part.source) {
+      return {
+        type: 'image',
+        source: part.source
+      };
+    }
+
+    return {
+      type: 'text',
+      text: JSON.stringify(part)
+    };
+  }
+
+  private convertToolMessageToResultBlock(toolMsg: any): any {
+    const resultContent = this.normalizeToolResultContent(toolMsg.content);
+    const block: any = {
+      type: 'tool_result',
+      tool_use_id: toolMsg.tool_call_id || '',
+      content: resultContent
+    };
+
+    if (toolMsg.is_error === true) {
+      block.is_error = true;
+    }
+
+    return block;
   }
 
   private convertMessages(messages: any[]): any[] {
     const anthropicMessages: any[] = [];
-    const filtered = messages.filter((m: any) => m.role !== 'system');
+    const filtered = messages.filter((m: any) => m.role !== 'system' && m.role !== 'developer');
 
     let i = 0;
     while (i < filtered.length) {
@@ -155,11 +495,7 @@ export class OpenAIToAnthropicConverter implements AIConverter {
 
         while (i < filtered.length && filtered[i].role === 'tool') {
           const toolMsg = filtered[i];
-          toolResults.push({
-            type: 'tool_result',
-            tool_use_id: toolMsg.tool_call_id || '',
-            content: String(toolMsg.content || '')
-          });
+          toolResults.push(this.convertToolMessageToResultBlock(toolMsg));
           i++;
         }
 
@@ -196,9 +532,11 @@ export class OpenAIToAnthropicConverter implements AIConverter {
           const others: any[] = [];
 
           for (const item of content) {
-            if (item.type === 'image_url') {
+            if (typeof item === 'string') {
+              texts.push({ type: 'text', text: item });
+            } else if (item.type === 'image_url' || item.type === 'input_image') {
               images.push(item);
-            } else if (item.type === 'text') {
+            } else if (item.type === 'text' || item.type === 'input_text' || item.type === 'output_text') {
               texts.push(item);
             } else {
               others.push(item);
@@ -208,20 +546,13 @@ export class OpenAIToAnthropicConverter implements AIConverter {
           const anthropicContent: any[] = [];
 
           for (const img of images) {
-            const url = img.image_url?.url || '';
-            if (url.startsWith('data:')) {
-              const parts = url.split(';base64,');
-              if (parts.length === 2) {
-                const mediaType = parts[0].replace('data:', '');
-                anthropicContent.push({
-                  type: 'image',
-                  source: {
-                    type: 'base64',
-                    media_type: mediaType,
-                    data: parts[1]
-                  }
-                });
-              }
+            const url = typeof img.image_url === 'string' ? img.image_url : (img.image_url?.url || '');
+            const source = this.parseImageSource(url);
+            if (source) {
+              anthropicContent.push({
+                type: 'image',
+                source
+              });
             }
           }
 
@@ -245,6 +576,11 @@ export class OpenAIToAnthropicConverter implements AIConverter {
       } else if (role === 'assistant') {
         if (msg.tool_calls) {
           const content: any[] = [];
+
+          const assistantText = this.extractInstructionText(msg.content);
+          if (assistantText) {
+            content.push({ type: 'text', text: assistantText });
+          }
 
           for (const tc of msg.tool_calls) {
             if (tc.type === 'function' && tc.function) {
@@ -270,9 +606,62 @@ export class OpenAIToAnthropicConverter implements AIConverter {
             anthropicMessages.push({ role: 'assistant', content });
           }
         } else {
-          const content = msg.content || '';
-          if (content.trim()) {
-            anthropicMessages.push({ role: 'assistant', content });
+          const content = msg.content;
+
+          if (typeof content === 'string') {
+            if (content.trim()) {
+              anthropicMessages.push({ role: 'assistant', content });
+            }
+          } else if (Array.isArray(content)) {
+            const anthropicContent: any[] = [];
+
+            for (const part of content) {
+              if (typeof part === 'string') {
+                if (part.trim()) {
+                  anthropicContent.push({ type: 'text', text: part });
+                }
+                continue;
+              }
+
+              if (!part || typeof part !== 'object') {
+                continue;
+              }
+
+              if (part.type === 'text' || part.type === 'input_text' || part.type === 'output_text') {
+                const text = typeof part.text === 'string' ? part.text : '';
+                if (text.trim()) {
+                  anthropicContent.push({ type: 'text', text });
+                }
+                continue;
+              }
+
+              if (part.type === 'thinking') {
+                const thinking = typeof part.thinking === 'string' ? part.thinking : '';
+                if (thinking.trim()) {
+                  anthropicContent.push({ type: 'thinking', thinking });
+                }
+                continue;
+              }
+
+              if (part.type === 'image_url' || part.type === 'input_image') {
+                const imageUrl = typeof part.image_url === 'string' ? part.image_url : part.image_url?.url;
+                const source = typeof imageUrl === 'string' ? this.parseImageSource(imageUrl) : null;
+                if (source) {
+                  anthropicContent.push({ type: 'image', source });
+                }
+                continue;
+              }
+
+              if (part.type === 'image' && part.source) {
+                anthropicContent.push({ type: 'image', source: part.source });
+              }
+            }
+
+            if (anthropicContent.length === 1 && anthropicContent[0].type === 'text') {
+              anthropicMessages.push({ role: 'assistant', content: anthropicContent[0].text });
+            } else if (anthropicContent.length > 0) {
+              anthropicMessages.push({ role: 'assistant', content: anthropicContent });
+            }
           }
         }
       }

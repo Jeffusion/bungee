@@ -158,6 +158,8 @@ export class GeminiToAnthropicConverter implements AIConverter {
    */
   private convertContentsToMessages(contents: GeminiContent[]): AnthropicMessage[] {
     const messages: AnthropicMessage[] = [];
+    const pendingToolUseIdsByName = new Map<string, string[]>();
+    let toolUseCounter = 0;
 
     for (const content of contents) {
       const parts = content.parts || [];
@@ -205,9 +207,14 @@ export class GeminiToAnthropicConverter implements AIConverter {
         } else if (part.functionCall) {
           // Tool use
           const fc = part.functionCall;
+          const toolUseId = `toolu_${fc.name}_${toolUseCounter++}`;
+          const queue = pendingToolUseIdsByName.get(fc.name) || [];
+          queue.push(toolUseId);
+          pendingToolUseIdsByName.set(fc.name, queue);
+
           anthropicContent.push({
             type: 'tool_use',
-            id: `toolu_${fc.name}_${Math.random().toString(36).substring(2, 15)}`,
+            id: toolUseId,
             name: fc.name,
             input: fc.args || {}
           });
@@ -218,9 +225,16 @@ export class GeminiToAnthropicConverter implements AIConverter {
             ? (fr.response.content || JSON.stringify(fr.response))
             : String(fr.response);
 
+          const functionName = fr.name || 'tool';
+          const pendingIds = pendingToolUseIdsByName.get(functionName);
+          const matchedToolUseId = pendingIds && pendingIds.length > 0 ? pendingIds.shift() : undefined;
+          if (pendingIds && pendingIds.length === 0) {
+            pendingToolUseIdsByName.delete(functionName);
+          }
+
           anthropicContent.push({
             type: 'tool_result',
-            tool_use_id: `toolu_${fr.name}_${Math.random().toString(36).substring(2, 15)}`,
+            tool_use_id: matchedToolUseId || `toolu_${functionName}_${toolUseCounter++}`,
             content: respContent
           });
         }
@@ -519,4 +533,3 @@ export class GeminiToAnthropicConverter implements AIConverter {
     return [];
   }
 }
-

@@ -7,6 +7,7 @@ import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
 import type { AppConfig } from '@jeffusion/bungee-types';
 import { handleRequest, initializeRuntimeState, initializePluginRegistryForTests, cleanupPluginRegistry } from '../../src/worker';
 import { setMockEnv, cleanupEnv } from './test-helpers';
+import { goldenMalformedCases } from './fixtures/golden-cases';
 
 // Mock config with ai-transformer plugin (openai to gemini)
 const mockConfig: AppConfig = {
@@ -193,6 +194,34 @@ describe('OpenAI to Gemini - Integration Tests', () => {
     expect(forwardedBody.contents[0].parts[0].text).toBe('Hello!');
   });
 
+  test('should map developer messages into systemInstruction', async () => {
+    const openaiRequest = {
+      model: 'gpt-4',
+      messages: [
+        { role: 'developer', content: 'Use concise JSON output.' },
+        { role: 'system', content: 'You are a formatter.' },
+        { role: 'user', content: 'Ping' }
+      ]
+    };
+
+    const req = new Request('http://localhost/v1/openai-to-gemini/chat/completions', {
+      method: 'POST',
+      body: JSON.stringify(openaiRequest),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    await handleRequest(req, mockConfig);
+
+    const [, fetchOptions] = mockedFetch.mock.calls[0];
+    const forwardedBody = JSON.parse(fetchOptions!.body as string);
+
+    expect(forwardedBody.systemInstruction).toBeDefined();
+    expect(forwardedBody.systemInstruction.parts[0].text).toBe('Use concise JSON output.\nYou are a formatter.');
+    expect(forwardedBody.contents).toHaveLength(1);
+    expect(forwardedBody.contents[0].role).toBe('user');
+    expect(forwardedBody.contents[0].parts[0].text).toBe('Ping');
+  });
+
   test('should convert streaming requests', async () => {
     const openaiRequest = {
       model: 'gpt-4',
@@ -246,6 +275,83 @@ describe('OpenAI to Gemini - Integration Tests', () => {
     expect(events.length).toBeGreaterThan(0);
     expect(events[0].object).toBe('chat.completion.chunk');
     expect(events[0].choices[0].delta).toBeDefined();
+    expect(events[0].choices[0].delta.role).toBe('assistant');
+
+    const streamedText = events
+      .map(e => e.choices?.[0]?.delta?.content || '')
+      .join('');
+    expect(streamedText).toBe('Hello there!');
+  });
+
+  test('should emit tool_calls finish_reason for streaming function call chunks', async () => {
+    mockedFetch.mockImplementationOnce(async (request: Request | string) => {
+      const url = typeof request === 'string' ? request : request.url;
+      if (!url.includes('mock-gemini.com')) {
+        return new Response('Not found', { status: 404 });
+      }
+
+      const streamContent = [
+        'data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_weather","args":{"location":"NYC"}}}],"role":"model"}}],"modelVersion":"gpt-4"}\n\n',
+        'data: {"candidates":[{"content":{"parts":[],"role":"model"},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":5,"totalTokenCount":13},"modelVersion":"gpt-4"}\n\n'
+      ].join('');
+
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(streamContent));
+          controller.close();
+        }
+      });
+
+      return new Response(stream, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' }
+      });
+    });
+
+    const openaiRequest = {
+      model: 'gpt-4',
+      messages: [{ role: 'user', content: 'Use tools when needed.' }],
+      stream: true
+    };
+
+    const req = new Request('http://localhost/v1/openai-to-gemini/chat/completions', {
+      method: 'POST',
+      body: JSON.stringify(openaiRequest),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    const response = await handleRequest(req, mockConfig);
+    const reader = response.body?.getReader();
+    const decoder = new TextDecoder();
+    let allData = '';
+
+    if (reader) {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        allData += decoder.decode(value);
+      }
+    }
+
+    const events = allData
+      .split('\n\n')
+      .filter(line => line.startsWith('data: ') && !line.includes('[DONE]'))
+      .map(line => {
+        const dataContent = line.substring(6);
+        try {
+          return JSON.parse(dataContent);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+
+    expect(events[0].choices[0].delta.role).toBe('assistant');
+    expect(events[0].choices[0].delta.tool_calls[0].function.name).toBe('get_weather');
+
+    const finalEvent = events[events.length - 1];
+    expect(finalEvent.choices[0].finish_reason).toBe('tool_calls');
+    expect(finalEvent.usage.total_tokens).toBe(13);
   });
 
   test('should handle multiple system messages', async () => {
@@ -464,6 +570,85 @@ describe('OpenAI to Gemini - Integration Tests', () => {
     });
   });
 
+  test('should fallback functionCall args to empty object when tool arguments are invalid JSON', async () => {
+    const openaiRequest = {
+      model: 'gpt-4',
+      messages: [
+        { role: 'user', content: 'call malformed tool' },
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call_bad_json_1',
+              type: 'function',
+              function: {
+                name: 'get_weather',
+                arguments: goldenMalformedCases.invalidFunctionArguments
+              }
+            }
+          ]
+        }
+      ]
+    };
+
+    const req = new Request('http://localhost/v1/openai-to-gemini/chat/completions', {
+      method: 'POST',
+      body: JSON.stringify(openaiRequest),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    await handleRequest(req, mockConfig);
+
+    const [, fetchOptions] = mockedFetch.mock.calls[0];
+    const forwardedBody = JSON.parse(fetchOptions!.body as string);
+    const assistantMsg = forwardedBody.contents[1];
+
+    expect(assistantMsg.parts[0].functionCall).toBeDefined();
+    expect(assistantMsg.parts[0].functionCall.name).toBe('get_weather');
+    expect(assistantMsg.parts[0].functionCall.args).toEqual({});
+  });
+
+  test('should preserve assistant text when converting tool_calls to functionCall', async () => {
+    const openaiRequest = {
+      model: 'gpt-4',
+      messages: [
+        { role: 'user', content: 'What is weather in NYC?' },
+        {
+          role: 'assistant',
+          content: 'Checking now.',
+          tool_calls: [
+            {
+              id: 'call_get_weather_abc123',
+              type: 'function',
+              function: {
+                name: 'get_weather',
+                arguments: '{"location":"NYC"}'
+              }
+            }
+          ]
+        }
+      ]
+    };
+
+    const req = new Request('http://localhost/v1/openai-to-gemini/chat/completions', {
+      method: 'POST',
+      body: JSON.stringify(openaiRequest),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    await handleRequest(req, mockConfig);
+
+    const [, fetchOptions] = mockedFetch.mock.calls[0];
+    const forwardedBody = JSON.parse(fetchOptions!.body as string);
+    const assistantMsg = forwardedBody.contents[1];
+
+    expect(assistantMsg.role).toBe('model');
+    expect(assistantMsg.parts[0].text).toBe('Checking now.');
+    expect(assistantMsg.parts[1].functionCall.name).toBe('get_weather');
+    expect(assistantMsg.parts[1].functionCall.args).toEqual({ location: 'NYC' });
+  });
+
   test('should convert tool role messages to functionResponse', async () => {
     const openaiRequest = {
       model: 'gpt-4',
@@ -473,14 +658,14 @@ describe('OpenAI to Gemini - Integration Tests', () => {
           role: 'assistant',
           content: null,
           tool_calls: [{
-            id: 'call_get_weather_xyz789',
+            id: 'opaque_tool_call_id_42',
             type: 'function',
             function: { name: 'get_weather', arguments: '{"location":"SF"}' }
           }]
         },
         {
           role: 'tool',
-          tool_call_id: 'call_get_weather_xyz789',
+          tool_call_id: 'opaque_tool_call_id_42',
           content: '{"temperature":18,"condition":"sunny"}'
         }
       ]

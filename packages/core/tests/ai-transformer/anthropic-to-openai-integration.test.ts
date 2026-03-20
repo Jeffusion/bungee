@@ -205,6 +205,16 @@ describe('Anthropic to OpenAI - Integration Tests', () => {
               input: { location: 'NYC', unit: 'celsius' }
             }
           ]
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'toolu_abc',
+              content: '{"temperature":10,"condition":"cloudy"}'
+            }
+          ]
         }
       ],
       max_tokens: 100
@@ -233,6 +243,11 @@ describe('Anthropic to OpenAI - Integration Tests', () => {
     expect(forwardedBody.messages[1].role).toBe('assistant');
     expect(forwardedBody.messages[1].tool_calls).toBeDefined();
     expect(forwardedBody.messages[1].tool_calls[0].function.name).toBe('get_weather');
+    expect(forwardedBody.messages[2]).toEqual({
+      role: 'tool',
+      tool_call_id: 'toolu_abc',
+      content: '{"temperature":10,"condition":"cloudy"}'
+    });
   });
 
   test('should convert tool_result to tool role messages', async () => {
@@ -274,6 +289,472 @@ describe('Anthropic to OpenAI - Integration Tests', () => {
     expect(toolMsg).toBeDefined();
     expect(toolMsg.tool_call_id).toBe('toolu_123');
     expect(toolMsg.content).toContain('temperature');
+  });
+
+  test('should preserve assistant text when tool_use exists in same assistant content array', async () => {
+    const anthropicRequest = {
+      model: 'gpt-4',
+      messages: [
+        { role: 'user', content: 'Need weather and summary.' },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'I will call a tool first.' },
+            { type: 'tool_use', id: 'toolu_mix_1', name: 'get_weather', input: { location: 'NYC' } }
+          ]
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'toolu_mix_1',
+              content: '{"temperature":22}'
+            }
+          ]
+        }
+      ],
+      max_tokens: 100
+    };
+
+    const req = new Request('http://localhost/v1/anthropic-to-openai/messages', {
+      method: 'POST',
+      body: JSON.stringify(anthropicRequest),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    await handleRequest(req, mockConfig);
+
+    const [, fetchOptions] = mockedFetch.mock.calls[0];
+    const forwardedBody = JSON.parse(fetchOptions!.body as string);
+
+    expect(forwardedBody.messages[1].role).toBe('assistant');
+    expect(forwardedBody.messages[1].content).toBe('I will call a tool first.');
+    expect(forwardedBody.messages[1].tool_calls).toHaveLength(1);
+    expect(forwardedBody.messages[1].tool_calls[0].function.name).toBe('get_weather');
+  });
+
+  test('should convert anthropic image source url to openai image_url remote URL', async () => {
+    const anthropicRequest = {
+      model: 'gpt-4-vision',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: {
+                type: 'url',
+                url: 'https://example.com/remote-image.jpg'
+              }
+            },
+            { type: 'text', text: 'Describe this image.' }
+          ]
+        }
+      ],
+      max_tokens: 100
+    };
+
+    const req = new Request('http://localhost/v1/anthropic-to-openai/messages', {
+      method: 'POST',
+      body: JSON.stringify(anthropicRequest),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    await handleRequest(req, mockConfig);
+
+    const [, fetchOptions] = mockedFetch.mock.calls[0];
+    const forwardedBody = JSON.parse(fetchOptions!.body as string);
+
+    expect(forwardedBody.messages[0].content[0].type).toBe('image_url');
+    expect(forwardedBody.messages[0].content[0].image_url.url).toBe('https://example.com/remote-image.jpg');
+    expect(forwardedBody.messages[0].content[1]).toEqual({ type: 'text', text: 'Describe this image.' });
+  });
+
+  test('should convert structured tool_result content to serialized tool message content', async () => {
+    const anthropicRequest = {
+      model: 'gpt-4',
+      messages: [
+        { role: 'user', content: 'Run OCR and return details.' },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', id: 'toolu_ocr_1', name: 'ocr_image', input: { image: 'sample' } }
+          ]
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'toolu_ocr_1',
+              is_error: true,
+              content: [
+                { type: 'text', text: 'OCR failed due to low quality.' },
+                {
+                  type: 'image',
+                  source: {
+                    type: 'url',
+                    url: 'https://example.com/ocr-failed.png'
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      max_tokens: 100
+    };
+
+    const req = new Request('http://localhost/v1/anthropic-to-openai/messages', {
+      method: 'POST',
+      body: JSON.stringify(anthropicRequest),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    await handleRequest(req, mockConfig);
+
+    const [, fetchOptions] = mockedFetch.mock.calls[0];
+    const forwardedBody = JSON.parse(fetchOptions!.body as string);
+
+    const toolMsg = forwardedBody.messages.find((m: any) => m.role === 'tool');
+    expect(toolMsg).toBeDefined();
+    expect(toolMsg.tool_call_id).toBe('toolu_ocr_1');
+
+    const parsedToolContent = JSON.parse(toolMsg.content);
+    expect(parsedToolContent).toEqual([
+      { type: 'text', text: 'OCR failed due to low quality.' },
+      {
+        type: 'image_url',
+        image_url: {
+          url: 'https://example.com/ocr-failed.png'
+        }
+      }
+    ]);
+  });
+
+  test('should preserve non-tool user content when tool_result and text/image are mixed in same user message', async () => {
+    const anthropicRequest = {
+      model: 'gpt-4',
+      messages: [
+        { role: 'user', content: 'Start tool flow.' },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', id: 'toolu_mix_keep_1', name: 'analyze_image', input: { imageId: 'img-1' } }
+          ]
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'This is additional context.' },
+            {
+              type: 'image',
+              source: {
+                type: 'url',
+                url: 'https://example.com/context.jpg'
+              }
+            },
+            {
+              type: 'tool_result',
+              tool_use_id: 'toolu_mix_keep_1',
+              content: { score: 0.99, status: 'ok' }
+            }
+          ]
+        }
+      ],
+      max_tokens: 100
+    };
+
+    const req = new Request('http://localhost/v1/anthropic-to-openai/messages', {
+      method: 'POST',
+      body: JSON.stringify(anthropicRequest),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    await handleRequest(req, mockConfig);
+
+    const [, fetchOptions] = mockedFetch.mock.calls[0];
+    const forwardedBody = JSON.parse(fetchOptions!.body as string);
+
+    const toolMsg = forwardedBody.messages.find((m: any) => m.role === 'tool');
+    expect(toolMsg).toBeDefined();
+    expect(toolMsg.tool_call_id).toBe('toolu_mix_keep_1');
+    expect(JSON.parse(toolMsg.content)).toEqual({ score: 0.99, status: 'ok' });
+
+    const extraUserMsg = forwardedBody.messages.find((m: any) => m.role === 'user' && Array.isArray(m.content));
+    expect(extraUserMsg).toBeDefined();
+    expect(extraUserMsg.content).toEqual([
+      { type: 'text', text: 'This is additional context.' },
+      { type: 'image_url', image_url: { url: 'https://example.com/context.jpg' } }
+    ]);
+
+    expect(forwardedBody.messages[2]).toEqual({
+      role: 'tool',
+      tool_call_id: 'toolu_mix_keep_1',
+      content: '{"score":0.99,"status":"ok"}'
+    });
+    expect(forwardedBody.messages[3]).toEqual({
+      role: 'user',
+      content: [
+        { type: 'text', text: 'This is additional context.' },
+        { type: 'image_url', image_url: { url: 'https://example.com/context.jpg' } }
+      ]
+    });
+  });
+
+  test('should keep tool_result before trailing user text when same user content starts with tool_result', async () => {
+    const anthropicRequest = {
+      model: 'gpt-4',
+      messages: [
+        { role: 'user', content: 'Start tool flow.' },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', id: 'toolu_order_1', name: 'search_docs', input: { query: 'x' } }
+          ]
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'toolu_order_1',
+              content: 'ok'
+            },
+            { type: 'text', text: 'Also note this context.' }
+          ]
+        }
+      ],
+      max_tokens: 100
+    };
+
+    const req = new Request('http://localhost/v1/anthropic-to-openai/messages', {
+      method: 'POST',
+      body: JSON.stringify(anthropicRequest),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    await handleRequest(req, mockConfig);
+
+    const [, fetchOptions] = mockedFetch.mock.calls[0];
+    const forwardedBody = JSON.parse(fetchOptions!.body as string);
+
+    expect(forwardedBody.messages[2]).toEqual({
+      role: 'tool',
+      tool_call_id: 'toolu_order_1',
+      content: 'ok'
+    });
+    expect(forwardedBody.messages[3]).toEqual({
+      role: 'user',
+      content: [{ type: 'text', text: 'Also note this context.' }]
+    });
+  });
+
+  test('should skip tool_result blocks without tool_use_id', async () => {
+    const anthropicRequest = {
+      model: 'gpt-4',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              content: 'missing tool_use_id'
+            },
+            { type: 'text', text: 'fallback user text' }
+          ]
+        }
+      ],
+      max_tokens: 100
+    };
+
+    const req = new Request('http://localhost/v1/anthropic-to-openai/messages', {
+      method: 'POST',
+      body: JSON.stringify(anthropicRequest),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    await handleRequest(req, mockConfig);
+
+    const [, fetchOptions] = mockedFetch.mock.calls[0];
+    const forwardedBody = JSON.parse(fetchOptions!.body as string);
+
+    expect(forwardedBody.messages).toEqual([
+      {
+        role: 'user',
+        content: [{ type: 'text', text: 'fallback user text' }]
+      }
+    ]);
+  });
+
+  test('should remove unmatched assistant tool_calls and drop empty assistant tool-only message', async () => {
+    const anthropicRequest = {
+      model: 'gpt-4',
+      messages: [
+        { role: 'user', content: 'hello' },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', id: 'toolu_unmatched', name: 'get_weather', input: { city: 'NYC' } }
+          ]
+        }
+      ],
+      max_tokens: 100
+    };
+
+    const req = new Request('http://localhost/v1/anthropic-to-openai/messages', {
+      method: 'POST',
+      body: JSON.stringify(anthropicRequest),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    await handleRequest(req, mockConfig);
+
+    const [, fetchOptions] = mockedFetch.mock.calls[0];
+    const forwardedBody = JSON.parse(fetchOptions!.body as string);
+
+    expect(forwardedBody.messages).toEqual([
+      { role: 'user', content: 'hello' }
+    ]);
+  });
+
+  test('should preserve assistant text while removing unmatched tool_calls', async () => {
+    const anthropicRequest = {
+      model: 'gpt-4',
+      messages: [
+        { role: 'user', content: 'hello' },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'I can still answer directly.' },
+            { type: 'tool_use', id: 'toolu_unmatched_text', name: 'lookup', input: { query: 'x' } }
+          ]
+        }
+      ],
+      max_tokens: 100
+    };
+
+    const req = new Request('http://localhost/v1/anthropic-to-openai/messages', {
+      method: 'POST',
+      body: JSON.stringify(anthropicRequest),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    await handleRequest(req, mockConfig);
+
+    const [, fetchOptions] = mockedFetch.mock.calls[0];
+    const forwardedBody = JSON.parse(fetchOptions!.body as string);
+
+    expect(forwardedBody.messages).toHaveLength(2);
+    expect(forwardedBody.messages[1]).toEqual({
+      role: 'assistant',
+      content: 'I can still answer directly.'
+    });
+  });
+
+  test('should convert OpenAI response with both content and tool_calls into mixed Anthropic blocks', async () => {
+    mockedFetch.mockImplementationOnce(async () => {
+      return new Response(JSON.stringify({
+        id: 'chatcmpl-999',
+        object: 'chat.completion',
+        created: 1234567890,
+        model: 'gpt-4',
+        choices: [{
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: 'I will call a tool and summarize after.',
+            tool_calls: [{
+              id: 'call_mixed_1',
+              type: 'function',
+              function: {
+                name: 'get_weather',
+                arguments: '{"location":"NYC"}'
+              }
+            }]
+          },
+          finish_reason: 'tool_calls'
+        }],
+        usage: { prompt_tokens: 11, completion_tokens: 6, total_tokens: 17 }
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+
+    const anthropicRequest = {
+      model: 'gpt-4',
+      messages: [{ role: 'user', content: 'Need weather.' }],
+      max_tokens: 100
+    };
+
+    const req = new Request('http://localhost/v1/anthropic-to-openai/messages', {
+      method: 'POST',
+      body: JSON.stringify(anthropicRequest),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    const response = await handleRequest(req, mockConfig);
+    const responseBody = await response.json();
+
+    expect(responseBody.content).toHaveLength(2);
+    expect(responseBody.content[0]).toEqual({
+      type: 'tool_use',
+      id: 'call_mixed_1',
+      name: 'get_weather',
+      input: { location: 'NYC' }
+    });
+    expect(responseBody.content[1]).toEqual({
+      type: 'text',
+      text: 'I will call a tool and summarize after.'
+    });
+  });
+
+  test('should fallback tool_use input to empty object when OpenAI tool arguments parse to non-object JSON', async () => {
+    mockedFetch.mockImplementationOnce(async () => {
+      return new Response(JSON.stringify({
+        id: 'chatcmpl-1000',
+        object: 'chat.completion',
+        created: 1234567890,
+        model: 'gpt-4',
+        choices: [{
+          index: 0,
+          message: {
+            role: 'assistant',
+            tool_calls: [{
+              id: 'call_scalar_args',
+              type: 'function',
+              function: {
+                name: 'parse_data',
+                arguments: '123'
+              }
+            }]
+          },
+          finish_reason: 'tool_calls'
+        }],
+        usage: { prompt_tokens: 9, completion_tokens: 3, total_tokens: 12 }
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+
+    const anthropicRequest = {
+      model: 'gpt-4',
+      messages: [{ role: 'user', content: 'trigger tool call.' }],
+      max_tokens: 100
+    };
+
+    const req = new Request('http://localhost/v1/anthropic-to-openai/messages', {
+      method: 'POST',
+      body: JSON.stringify(anthropicRequest),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    const response = await handleRequest(req, mockConfig);
+    const responseBody = await response.json();
+
+    expect(responseBody.content[0]).toEqual({
+      type: 'tool_use',
+      id: 'call_scalar_args',
+      name: 'parse_data',
+      input: {}
+    });
   });
 
   test('should convert multi-modal base64 images to data URLs', async () => {

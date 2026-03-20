@@ -502,9 +502,14 @@ describe('Gemini to Anthropic - Integration Tests', () => {
     const forwardedBody = JSON.parse(fetchOptions!.body as string);
 
     // Verify functionResponse → tool_result conversion (按文档 4.1.2 → Anthropic)
+    expect(forwardedBody.messages[1].role).toBe('assistant');
+    expect(forwardedBody.messages[1].content[0].type).toBe('tool_use');
+    const toolUseId = forwardedBody.messages[1].content[0].id;
+
     expect(forwardedBody.messages[2].role).toBe('user');
     expect(forwardedBody.messages[2].content).toHaveLength(1);
     expect(forwardedBody.messages[2].content[0].type).toBe('tool_result');
+    expect(forwardedBody.messages[2].content[0].tool_use_id).toBe(toolUseId);
     expect(forwardedBody.messages[2].content[0].content).toBeDefined();
   });
 

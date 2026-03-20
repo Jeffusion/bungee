@@ -30,6 +30,22 @@ export class GeminiToOpenAIConverter implements AIConverter {
     }
   }
 
+  private parseToolArgumentsToObject(rawArguments: any): Record<string, any> {
+    if (typeof rawArguments !== 'string') {
+      return {};
+    }
+
+    try {
+      const parsed = JSON.parse(rawArguments || '{}');
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, any>;
+      }
+      return {};
+    } catch {
+      return {};
+    }
+  }
+
   private buildOpenAIRequest(geminiBody: any): any {
     const openaiBody: any = {
       model: geminiBody.model || 'gpt-3.5-turbo'
@@ -37,6 +53,8 @@ export class GeminiToOpenAIConverter implements AIConverter {
 
     // Messages
     const messages: any[] = [];
+    const pendingToolCallIdsByName = new Map<string, string[]>();
+    let toolCallCounter = 0;
 
     // System instruction
     if (geminiBody.systemInstruction || geminiBody.system_instruction) {
@@ -57,9 +75,14 @@ export class GeminiToOpenAIConverter implements AIConverter {
           // Tool response
           for (const part of parts) {
             if (part.functionResponse) {
-              // 按文档 4.1.1 Line 156: 通过对话历史映射恢复原始 tool_call_id
-              // 目前使用简化版本：call_<name>_<random>
-              const toolCallId = `call_${part.functionResponse.name}_${Math.random().toString(36).substring(2, 15)}`;
+              const functionName = part.functionResponse.name || 'tool';
+              const pendingIds = pendingToolCallIdsByName.get(functionName);
+              const matchedId = pendingIds && pendingIds.length > 0 ? pendingIds.shift() : undefined;
+              if (pendingIds && pendingIds.length === 0) {
+                pendingToolCallIdsByName.delete(functionName);
+              }
+
+              const toolCallId = matchedId || `call_${functionName}_${toolCallCounter++}`;
               messages.push({
                 role: 'tool',
                 tool_call_id: toolCallId,
@@ -69,19 +92,31 @@ export class GeminiToOpenAIConverter implements AIConverter {
           }
         } else if (parts.some((p: any) => p.functionCall)) {
           // Tool calls
+          const functionCallParts = parts.filter((p: any) => p.functionCall);
+          const textContent = parts
+            .filter((p: any) => p.text)
+            .map((p: any) => p.text)
+            .join('');
           messages.push({
             role: 'assistant',
-            content: null,
-            tool_calls: parts
-              .filter((p: any) => p.functionCall)
-              .map((p: any, i: number) => ({
-                id: `call_${p.functionCall.name}_${i}`,
-                type: 'function',
-                function: {
-                  name: p.functionCall.name,
-                  arguments: JSON.stringify(p.functionCall.args || {})
-                }
-              }))
+            content: textContent || null,
+            tool_calls: functionCallParts
+              .map((p: any) => {
+                const functionName = p.functionCall.name || 'tool';
+                const toolCallId = `call_${functionName}_${toolCallCounter++}`;
+                const queue = pendingToolCallIdsByName.get(functionName) || [];
+                queue.push(toolCallId);
+                pendingToolCallIdsByName.set(functionName, queue);
+
+                return {
+                  id: toolCallId,
+                  type: 'function',
+                  function: {
+                    name: functionName,
+                    arguments: JSON.stringify(p.functionCall.args || {})
+                  }
+                };
+              })
           });
         } else {
           // Regular message - handle both text and multi-modal content
@@ -238,7 +273,7 @@ export class GeminiToOpenAIConverter implements AIConverter {
         parts.push({
           functionCall: {
             name: tc.function.name,
-            args: JSON.parse(tc.function.arguments || '{}')
+            args: this.parseToolArgumentsToObject(tc.function.arguments)
           }
         });
       }
@@ -322,4 +357,3 @@ export class GeminiToOpenAIConverter implements AIConverter {
     return [];
   }
 }
-

@@ -7,6 +7,7 @@ import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
 import type { AppConfig } from '@jeffusion/bungee-types';
 import { handleRequest, initializeRuntimeState, initializePluginRegistryForTests, cleanupPluginRegistry } from '../../src/worker';
 import { setMockEnv, cleanupEnv } from './test-helpers';
+import { goldenMalformedCases } from './fixtures/golden-cases';
 
 // Mock config with ai-transformer plugin (gemini to openai)
 const mockConfig: AppConfig = {
@@ -424,6 +425,81 @@ describe('Gemini to OpenAI - Integration Tests', () => {
     expect(responseBody.candidates[0].finishReason).toBe('TOOL_USE');
   });
 
+  test('should fallback Gemini functionCall args to empty object when OpenAI tool arguments are invalid JSON', async () => {
+    mockedFetch.mockImplementationOnce(async () => {
+      return new Response(JSON.stringify({
+        id: 'chatcmpl-123',
+        object: 'chat.completion',
+        created: 1234567890,
+        model: 'gpt-4',
+        choices: [{
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: null,
+            tool_calls: [{
+              id: 'call_bad_args_1',
+              type: 'function',
+              function: {
+                name: 'get_weather',
+                arguments: goldenMalformedCases.invalidFunctionArguments
+              }
+            }]
+          },
+          finish_reason: 'tool_calls'
+        }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+
+    const geminiRequest = {
+      contents: [{ role: 'user', parts: [{ text: 'Weather in NYC?' }] }]
+    };
+
+    const req = new Request('http://localhost/v1/gemini-to-openai/generateContent', {
+      method: 'POST',
+      body: JSON.stringify(geminiRequest),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    const response = await handleRequest(req, mockConfig);
+    const responseBody = await response.json();
+
+    expect(responseBody.candidates[0].content.parts[0].functionCall.name).toBe('get_weather');
+    expect(responseBody.candidates[0].content.parts[0].functionCall.args).toEqual({});
+  });
+
+  test('should preserve model text when functionCall exists in same Gemini message', async () => {
+    const geminiRequest = {
+      contents: [
+        { role: 'user', parts: [{ text: 'Need weather and summary.' }] },
+        {
+          role: 'model',
+          parts: [
+            { text: 'I will call a tool first.' },
+            { functionCall: { name: 'get_weather', args: { location: 'NYC' } } }
+          ]
+        }
+      ]
+    };
+
+    const req = new Request('http://localhost/v1/gemini-to-openai/generateContent', {
+      method: 'POST',
+      body: JSON.stringify(geminiRequest),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    await handleRequest(req, mockConfig);
+
+    const [, fetchOptions] = mockedFetch.mock.calls[0];
+    const forwardedBody = JSON.parse(fetchOptions!.body as string);
+
+    expect(forwardedBody.messages[1].role).toBe('assistant');
+    expect(forwardedBody.messages[1].content).toBe('I will call a tool first.');
+    expect(forwardedBody.messages[1].tool_calls).toHaveLength(1);
+    expect(forwardedBody.messages[1].tool_calls[0].function.name).toBe('get_weather');
+  });
+
   test('should convert functionResponse from tool role', async () => {
     const geminiRequest = {
       contents: [
@@ -458,7 +534,7 @@ describe('Gemini to OpenAI - Integration Tests', () => {
     // Tool response should become a 'tool' role message in OpenAI
     const toolMsg = forwardedBody.messages.find((m: any) => m.role === 'tool');
     expect(toolMsg).toBeDefined();
-    expect(toolMsg.tool_call_id).toMatch(/^call_get_weather_/);
+    expect(toolMsg.tool_call_id).toBe('call_get_weather_0');
     expect(toolMsg.content).toContain('temperature');
     expect(toolMsg.content).toContain('72');
   });

@@ -70,6 +70,59 @@ export class OpenAIToGeminiConverter implements AIConverter {
     return 8192;
   }
 
+  private extractInstructionText(content: any): string {
+    if (typeof content === 'string') {
+      return content.trim();
+    }
+
+    if (Array.isArray(content)) {
+      return content
+        .map((item: any) => {
+          if (typeof item === 'string') return item;
+          if (item?.type === 'text') return item.text || '';
+          if (typeof item?.text === 'string') return item.text;
+          return '';
+        })
+        .join('')
+        .trim();
+    }
+
+    return '';
+  }
+
+  private parseToolArgumentsToObject(rawArguments: any): Record<string, any> {
+    if (typeof rawArguments !== 'string') {
+      return {};
+    }
+
+    try {
+      const parsed = JSON.parse(rawArguments || '{}');
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, any>;
+      }
+      return {};
+    } catch {
+      return {};
+    }
+  }
+
+  private buildToolCallIdToNameMap(messages: any[]): Map<string, string> {
+    const toolCallIdToName = new Map<string, string>();
+
+    for (const message of messages) {
+      if (!Array.isArray(message?.tool_calls)) continue;
+      for (const toolCall of message.tool_calls) {
+        const id = typeof toolCall?.id === 'string' ? toolCall.id : '';
+        const name = typeof toolCall?.function?.name === 'string' ? toolCall.function.name : '';
+        if (id && name) {
+          toolCallIdToName.set(id, name);
+        }
+      }
+    }
+
+    return toolCallIdToName;
+  }
+
   async onBeforeRequest(ctx: MutableRequestContext): Promise<void> {
     const body = ctx.body as any;
     if (!body) return;
@@ -93,36 +146,69 @@ export class OpenAIToGeminiConverter implements AIConverter {
 
   private buildGeminiRequest(openaiBody: any): any {
     const geminiBody: any = {};
+    const messages = Array.isArray(openaiBody.messages) ? openaiBody.messages : [];
 
     // System instruction
-    const systemMessages = openaiBody.messages?.filter((m: any) => m.role === 'system') || [];
-    if (systemMessages.length > 0) {
+    const instructionParts: string[] = [];
+    if (typeof openaiBody.system === 'string' && openaiBody.system.trim()) {
+      instructionParts.push(openaiBody.system.trim());
+    }
+
+    const instructionMessages = messages
+      .filter((m: any) => m.role === 'system' || m.role === 'developer')
+      .map((m: any) => this.extractInstructionText(m.content))
+      .filter((text: string) => text.length > 0);
+
+    instructionParts.push(...instructionMessages);
+
+    if (instructionParts.length > 0) {
       geminiBody.systemInstruction = {
-        parts: [{ text: systemMessages.map((m: any) => m.content).join('\n') }]
+        parts: [{ text: instructionParts.join('\n') }]
       };
     }
 
+    const toolCallIdToName = this.buildToolCallIdToNameMap(messages);
+
     // Contents (convert messages)
-    const nonSystemMessages = openaiBody.messages?.filter((m: any) => m.role !== 'system') || [];
+    const nonSystemMessages = messages.filter((m: any) => m.role !== 'system' && m.role !== 'developer');
     geminiBody.contents = nonSystemMessages.map((m: any) => {
       // Handle tool calls
       if (m.tool_calls) {
+        const textParts: any[] = [];
+        if (typeof m.content === 'string' && m.content.trim()) {
+          textParts.push({ text: m.content });
+        } else if (Array.isArray(m.content)) {
+          for (const part of m.content) {
+            if (typeof part === 'string' && part.trim()) {
+              textParts.push({ text: part });
+            } else if (part?.type === 'text' && typeof part.text === 'string' && part.text.trim()) {
+              textParts.push({ text: part.text });
+            }
+          }
+        }
+
         return {
           role: 'model',
-          parts: m.tool_calls.map((tc: any) => ({
-            functionCall: {
-              name: tc.function.name,
-              args: JSON.parse(tc.function.arguments || '{}')
-            }
-          }))
+          parts: [
+            ...textParts,
+            ...m.tool_calls.map((tc: any) => ({
+              functionCall: {
+                name: tc.function.name,
+                args: this.parseToolArgumentsToObject(tc.function.arguments)
+              }
+            }))
+          ]
         };
       }
 
       // Handle tool responses
       if (m.role === 'tool') {
-        const fnName = m.tool_call_id.startsWith('call_')
-          ? m.tool_call_id.split('_').slice(1, -1).join('_')
-          : m.tool_call_id;
+        const toolCallId = typeof m.tool_call_id === 'string' ? m.tool_call_id : '';
+        const mappedFnName = toolCallId ? toolCallIdToName.get(toolCallId) : undefined;
+        const fallbackFnName = toolCallId.startsWith('call_')
+          ? toolCallId.split('_').slice(1, -1).join('_')
+          : toolCallId;
+        const fnName = mappedFnName || fallbackFnName || 'tool';
 
         // Parse JSON content if it's a string
         let resp = m.content;
@@ -288,12 +374,12 @@ export class OpenAIToGeminiConverter implements AIConverter {
     let textContent = '';
     const toolCalls: any[] = [];
 
-    for (const part of parts) {
+    for (const [index, part] of parts.entries()) {
       if (part.text) {
         textContent += part.text;
       } else if (part.functionCall) {
         toolCalls.push({
-          id: `call_${part.functionCall.name}_${Math.random().toString(36).substring(2, 15)}`,
+          id: `call_${part.functionCall.name}_${index}`,
           type: 'function',
           function: {
             name: part.functionCall.name,
@@ -346,20 +432,61 @@ export class OpenAIToGeminiConverter implements AIConverter {
 
     const parts = chunk.candidates?.[0]?.content?.parts || [];
     const finishReason = chunk.candidates?.[0]?.finishReason;
+    const model = chunk.modelVersion || chunk.candidates?.[0]?.model || 'gemini-pro';
 
-    // First chunk
+    let streamToolCalls = ctx.streamState.get('stream_tool_calls') as Map<string, { id: string; index: number }> | undefined;
+    if (!streamToolCalls) {
+      streamToolCalls = new Map<string, { id: string; index: number }>();
+      ctx.streamState.set('stream_tool_calls', streamToolCalls);
+    }
+    let nextToolCallIndex = (ctx.streamState.get('stream_tool_call_next_index') as number | undefined) ?? 0;
+
+    const textParts = parts.filter((p: any) => p.text);
+    const toolCallParts = parts.filter((p: any) => p.functionCall);
+
+    if (toolCallParts.length > 0) {
+      ctx.streamState.set('has_tool_calls', true);
+    }
+
+    const delta: any = {};
     if (ctx.isFirstChunk) {
-      return [{
-        id: `chatcmpl-${streamId}`,
-        object: 'chat.completion.chunk',
-        created: Math.floor(Date.now() / 1000),
-        model: chunk.modelVersion || chunk.candidates?.[0]?.model || 'gemini-pro',
-        choices: [{
-          index: 0,
-          delta: { role: 'assistant' },
-          finish_reason: null
-        }]
-      }];
+      delta.role = 'assistant';
+    }
+
+    if (textParts.length > 0) {
+      delta.content = textParts.map((p: any) => p.text).join('');
+    }
+
+    if (toolCallParts.length > 0) {
+      delta.tool_calls = parts
+        .map((part: any, partIndex: number) => ({ part, partIndex }))
+        .filter((entry: { part: any; partIndex: number }) => entry.part?.functionCall)
+        .map((entry: { part: any; partIndex: number }) => {
+          const { part, partIndex } = entry;
+          const functionName = part.functionCall.name;
+          const callKey = `${partIndex}:${functionName}`;
+          let callMeta = streamToolCalls!.get(callKey);
+
+          if (!callMeta) {
+            callMeta = {
+              id: `call_${functionName}_${nextToolCallIndex}`,
+              index: nextToolCallIndex,
+            };
+            streamToolCalls!.set(callKey, callMeta);
+            nextToolCallIndex++;
+          }
+
+          return {
+            index: callMeta.index,
+            id: callMeta.id,
+            type: 'function',
+            function: {
+              name: functionName,
+              arguments: JSON.stringify(part.functionCall.args || {})
+            }
+          };
+        });
+      ctx.streamState.set('stream_tool_call_next_index', nextToolCallIndex);
     }
 
     // Final chunk
@@ -367,42 +494,25 @@ export class OpenAIToGeminiConverter implements AIConverter {
       let openaiFinishReason = 'stop';
       if (finishReason === 'MAX_TOKENS') openaiFinishReason = 'length';
       else if (finishReason === 'SAFETY' || finishReason === 'RECITATION') openaiFinishReason = 'content_filter';
+      else if (ctx.streamState.get('has_tool_calls') === true) openaiFinishReason = 'tool_calls';
 
       return [{
         id: `chatcmpl-${streamId}`,
         object: 'chat.completion.chunk',
         created: Math.floor(Date.now() / 1000),
-        model: chunk.modelVersion || 'gemini-pro',
+        model,
         choices: [{
           index: 0,
-          delta: {},
+          delta: Object.keys(delta).length > 0 ? delta : {},
           finish_reason: openaiFinishReason
-        }]
-      }];
-    }
-
-    // Regular chunk - handle both text and tool calls
-    const textParts = parts.filter((p: any) => p.text);
-    const toolCallParts = parts.filter((p: any) => p.functionCall);
-
-    // Build delta object
-    const delta: any = {};
-
-    // Add text content
-    if (textParts.length > 0) {
-      delta.content = textParts.map((p: any) => p.text).join('');
-    }
-
-    // Add tool calls
-    if (toolCallParts.length > 0) {
-      delta.tool_calls = toolCallParts.map((p: any) => ({
-        id: `call_${p.functionCall.name}_${Math.random().toString(36).substring(2, 15)}`,
-        type: 'function',
-        function: {
-          name: p.functionCall.name,
-          arguments: JSON.stringify(p.functionCall.args || {})
+        }],
+        usage: {
+          prompt_tokens: chunk.usageMetadata?.promptTokenCount || 0,
+          completion_tokens: chunk.usageMetadata?.candidatesTokenCount || 0,
+          cached_content_token_count: chunk.usageMetadata?.cachedContentTokenCount || null,
+          total_tokens: chunk.usageMetadata?.totalTokenCount || 0
         }
-      }));
+      }];
     }
 
     // Skip empty chunks
@@ -412,7 +522,7 @@ export class OpenAIToGeminiConverter implements AIConverter {
       id: `chatcmpl-${streamId}`,
       object: 'chat.completion.chunk',
       created: Math.floor(Date.now() / 1000),
-      model: chunk.modelVersion || 'gemini-pro',
+      model,
       choices: [{
         index: 0,
         delta,
@@ -434,4 +544,3 @@ export class OpenAIToGeminiConverter implements AIConverter {
     return [];
   }
 }
-
