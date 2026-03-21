@@ -7,7 +7,7 @@
  * - 请求：/v1/messages → /v1/chat/completions
  * - 请求：system → messages[0] (role=system)
  * - 请求：tool_result → tool role, tool_use → tool_calls
- * - 请求：thinking.budget_tokens → reasoning_effort 推断
+ * - 请求：thinking.effort / output_config.effort → reasoning_effort 映射
  * - 响应：OpenAI → Anthropic (tool_calls, thinking 标签)
  * - 响应：OpenAI SSE → Anthropic SSE 事件序列
  */
@@ -23,6 +23,67 @@ import {
 export class AnthropicToOpenAIConverter implements AIConverter {
   readonly from = 'anthropic';
   readonly to = 'openai';
+  private configuredApiMode?: 'chat_completions' | 'responses';
+
+  setApiMode(mode: unknown): void {
+    if (typeof mode !== 'string') {
+      this.configuredApiMode = undefined;
+      return;
+    }
+
+    const normalized = mode.trim().toLowerCase();
+    if (normalized === 'responses' || normalized === 'chat_completions') {
+      this.configuredApiMode = normalized;
+      return;
+    }
+
+    this.configuredApiMode = undefined;
+  }
+
+  setRuntimeOptions(options: unknown): void {
+    if (!options || typeof options !== 'object') {
+      this.setApiMode(undefined);
+      return;
+    }
+
+    const value = options as Record<string, unknown>;
+    this.setApiMode(value.anthropicToOpenAIApiMode);
+  }
+
+  private parseIntegerOption(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return Math.trunc(value);
+    }
+
+    if (typeof value === 'string' && value.trim().length > 0) {
+      const parsed = parseInt(value, 10);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+
+    return undefined;
+  }
+
+  private resolveReasoningMaxCompletionTokens(maxTokens: unknown): number | undefined {
+    return this.parseIntegerOption(maxTokens);
+  }
+
+  private resolveTargetApiMode(): 'chat_completions' | 'responses' {
+    if (this.configuredApiMode) {
+      return this.configuredApiMode;
+    }
+
+    const raw = process.env.ANTHROPIC_TO_OPENAI_API_MODE;
+    if (!raw) return 'chat_completions';
+
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === 'responses' || normalized === 'chat_completions') {
+      return normalized;
+    }
+
+    return 'chat_completions';
+  }
 
   /**
    * 修改请求：转换为 OpenAI Chat Completions 格式
@@ -32,17 +93,48 @@ export class AnthropicToOpenAIConverter implements AIConverter {
     if (!body) return;
 
     // 路径转换
-    if (ctx.url.pathname === '/v1/messages/count_tokens') {
-      // count_tokens 保持不变（Anthropic 特有端点）
+    if (this.isAnthropicCountTokensPath(ctx.url.pathname)) {
+      ctx.url.pathname = '/v1/chat/completions';
+      ctx.body = this.buildOpenAICountTokensRequest(body);
       return;
     }
 
-    if (ctx.url.pathname === '/v1/messages') {
-      ctx.url.pathname = '/v1/chat/completions';
+    if (ctx.url.pathname === '/v1/messages' || ctx.url.pathname === '/messages') {
+      const targetApiMode = this.resolveTargetApiMode();
 
-      // 构建 OpenAI 请求
-      ctx.body = this.buildOpenAIRequest(body);
+      if (targetApiMode === 'responses') {
+        ctx.url.pathname = '/v1/responses';
+        ctx.body = this.buildOpenAIResponsesRequest(body);
+      } else {
+        ctx.url.pathname = '/v1/chat/completions';
+        ctx.body = this.buildOpenAIRequest(body);
+      }
     }
+  }
+
+  private isAnthropicCountTokensPath(pathname: string): boolean {
+    return pathname === '/v1/messages/count_tokens'
+      || pathname === '/messages/count_tokens'
+      || pathname.endsWith('/messages/count_tokens');
+  }
+
+  private buildOpenAICountTokensRequest(anthropicBody: any): any {
+    const requestBody = {
+      ...anthropicBody,
+      max_tokens: 1,
+      max_tokens_to_sample: 1,
+      stream: false,
+      thinking: undefined
+    };
+
+    const chatBody = this.buildOpenAIRequest(requestBody);
+    chatBody.max_tokens = 1;
+    chatBody.stream = false;
+
+    delete chatBody.reasoning_effort;
+    delete chatBody.max_completion_tokens;
+
+    return chatBody;
   }
 
   /**
@@ -58,12 +150,7 @@ export class AnthropicToOpenAIConverter implements AIConverter {
     const messages: any[] = [];
 
     // 1. System message
-    if (anthropicBody.system) {
-      messages.push({
-        role: 'system',
-        content: anthropicBody.system
-      });
-    }
+    messages.push(...this.convertSystemMessages(anthropicBody.system));
 
     // 2. Convert Anthropic messages
     if (anthropicBody.messages) {
@@ -77,6 +164,9 @@ export class AnthropicToOpenAIConverter implements AIConverter {
     }
 
     openaiBody.messages = this.validateAndCleanToolCalls(messages);
+    if (!Array.isArray(openaiBody.messages) || openaiBody.messages.length === 0) {
+      openaiBody.messages = [{ role: 'user', content: '' }];
+    }
 
     // 3. Parameters mapping
     const maxTokens = anthropicBody.max_tokens || anthropicBody.max_tokens_to_sample;
@@ -93,54 +183,354 @@ export class AnthropicToOpenAIConverter implements AIConverter {
     }
 
     // stop_sequences → stop
-    if (anthropicBody.stop_sequences) {
-      openaiBody.stop = anthropicBody.stop_sequences;
+    if (anthropicBody.stop_sequences !== undefined) {
+      openaiBody.stop = Array.isArray(anthropicBody.stop_sequences)
+        ? anthropicBody.stop_sequences
+        : [anthropicBody.stop_sequences];
     }
 
     if (anthropicBody.stream !== undefined) {
       openaiBody.stream = anthropicBody.stream;
+      if (anthropicBody.stream === true) {
+        openaiBody.stream_options = {
+          include_usage: true
+        };
+      }
     }
 
     // 4. Tools conversion
-    if (anthropicBody.tools) {
-      openaiBody.tools = anthropicBody.tools.map((tool: any) => ({
+    if (Array.isArray(anthropicBody.tools)) {
+      openaiBody.tools = anthropicBody.tools
+        .filter((tool: any) => typeof tool?.name === 'string' && tool.name.trim().length > 0)
+        .map((tool: any) => ({
         type: 'function',
         function: {
-          name: tool.name,
+          name: tool.name.trim(),
           description: tool.description || '',
-          parameters: tool.input_schema || {}
+          parameters: this.normalizeToolParametersSchema(tool.input_schema)
         }
       }));
+
+      if (openaiBody.tools.length === 0) {
+        delete openaiBody.tools;
+      }
     }
 
-    // 5. Thinking mode
-    if (anthropicBody.thinking && anthropicBody.thinking.type === 'enabled') {
-      const budgetTokens = anthropicBody.thinking.budget_tokens;
+    const toolChoice = this.mapAnthropicToolChoiceToOpenAI(anthropicBody.tool_choice);
+    if (toolChoice !== undefined) {
+      openaiBody.tool_choice = toolChoice;
+    }
 
-      if (budgetTokens !== undefined) {
-        const lowThreshold = parseInt(process.env.ANTHROPIC_TO_OPENAI_LOW_REASONING_THRESHOLD || '0');
-        const highThreshold = parseInt(process.env.ANTHROPIC_TO_OPENAI_HIGH_REASONING_THRESHOLD || '0');
+    const thinkingEnabled = this.isAnthropicThinkingEnabled(anthropicBody.thinking);
+    const thinkingEffort = this.resolveAnthropicThinkingEffort(anthropicBody.thinking);
+    const outputConfigEffort = this.resolveOutputConfigEffort(anthropicBody.output_config);
+    const shouldApplyReasoningFields = thinkingEnabled || thinkingEffort !== undefined || outputConfigEffort !== undefined;
 
-        let effort = 'medium';
-        if (budgetTokens < lowThreshold) {
-          effort = 'low';
-        } else if (budgetTokens >= highThreshold) {
-          effort = 'high';
-        }
-
+    if (shouldApplyReasoningFields) {
+      const effort = this.normalizeOpenAIReasoningEffort(
+        thinkingEffort || outputConfigEffort,
+        openaiBody.model
+      );
+      if (effort) {
         openaiBody.reasoning_effort = effort;
       }
 
-      const maxCompletionTokens = anthropicBody.max_tokens || process.env.OPENAI_REASONING_MAX_TOKENS;
-      if (!maxCompletionTokens) {
-        throw new Error('max_tokens or OPENAI_REASONING_MAX_TOKENS required for reasoning mode');
+      const maxCompletionTokens = this.resolveReasoningMaxCompletionTokens(openaiBody.max_tokens);
+      if (maxCompletionTokens !== undefined) {
+        openaiBody.max_completion_tokens = maxCompletionTokens;
+        delete openaiBody.max_tokens;
       }
-      openaiBody.max_completion_tokens = typeof maxCompletionTokens === 'string'
-        ? parseInt(maxCompletionTokens)
-        : maxCompletionTokens;
     }
 
     return openaiBody;
+  }
+
+  private isAnthropicThinkingEnabled(thinking: any): boolean {
+    if (!thinking || typeof thinking !== 'object') {
+      return false;
+    }
+
+    const rawType = typeof thinking.type === 'string' ? thinking.type.trim().toLowerCase() : '';
+    return rawType === 'enabled' || rawType === 'adaptive';
+  }
+
+  private resolveAnthropicThinkingEffort(thinking: any): 'low' | 'medium' | 'high' | 'xhigh' | undefined {
+    if (!thinking || typeof thinking !== 'object') {
+      return undefined;
+    }
+
+    const rawEffort = typeof thinking.effort === 'string' ? thinking.effort.trim().toLowerCase() : '';
+    if (rawEffort === 'low' || rawEffort === 'medium' || rawEffort === 'high') {
+      return rawEffort;
+    }
+    if (rawEffort === 'max') {
+      return 'xhigh';
+    }
+    if (rawEffort === 'min') {
+      return 'low';
+    }
+
+    return undefined;
+  }
+
+  private resolveOutputConfigEffort(outputConfig: any): 'low' | 'medium' | 'high' | 'xhigh' | undefined {
+    if (!outputConfig || typeof outputConfig !== 'object') {
+      return undefined;
+    }
+
+    const rawEffort = typeof outputConfig.effort === 'string' ? outputConfig.effort.trim().toLowerCase() : '';
+    if (rawEffort === 'low' || rawEffort === 'medium' || rawEffort === 'high') {
+      return rawEffort;
+    }
+    if (rawEffort === 'max') {
+      return 'xhigh';
+    }
+    if (rawEffort === 'min') {
+      return 'low';
+    }
+
+    return undefined;
+  }
+
+  private normalizeOpenAIReasoningEffort(
+    effort: 'low' | 'medium' | 'high' | 'xhigh' | undefined,
+    model: string
+  ): 'low' | 'medium' | 'high' | 'xhigh' | undefined {
+    if (!effort) {
+      return undefined;
+    }
+
+    if (effort !== 'xhigh') {
+      return effort;
+    }
+
+    return this.supportsXHighReasoningEffort(model) ? 'xhigh' : 'high';
+  }
+
+  private supportsXHighReasoningEffort(model: string): boolean {
+    const normalized = typeof model === 'string' ? model.trim().toLowerCase() : '';
+    if (!normalized) {
+      return false;
+    }
+
+    if (normalized.includes('gpt-5-pro')) {
+      return false;
+    }
+
+    if (normalized.includes('codex-max')) {
+      return true;
+    }
+
+    const gpt5MinorMatch = normalized.match(/gpt-5\.(\d+)/);
+    if (gpt5MinorMatch) {
+      const minor = parseInt(gpt5MinorMatch[1], 10);
+      if (Number.isFinite(minor)) {
+        return minor >= 2;
+      }
+    }
+
+    return false;
+  }
+
+  private buildOpenAIResponsesRequest(anthropicBody: any): any {
+    const chatBody = this.buildOpenAIRequest(anthropicBody);
+    const responsesInput = this.convertChatMessagesToResponsesInput(chatBody.messages);
+    const responsesBody: any = {
+      model: chatBody.model,
+      input: responsesInput.input
+    };
+
+    if (responsesInput.instructions) {
+      responsesBody.instructions = responsesInput.instructions;
+    }
+
+    const maxOutputTokens = chatBody.max_tokens ?? chatBody.max_completion_tokens;
+    if (maxOutputTokens !== undefined) {
+      responsesBody.max_output_tokens = maxOutputTokens;
+    }
+
+    if (chatBody.temperature !== undefined) {
+      responsesBody.temperature = chatBody.temperature;
+    }
+
+    if (chatBody.top_p !== undefined) {
+      responsesBody.top_p = chatBody.top_p;
+    }
+
+    if (chatBody.tools !== undefined) {
+      const mappedTools = this.mapChatToolsToResponsesTools(chatBody.tools);
+      if (mappedTools.length > 0) {
+        responsesBody.tools = mappedTools;
+      }
+    }
+
+    if (chatBody.stop !== undefined) {
+      responsesBody.stop = chatBody.stop;
+    }
+
+    if (chatBody.reasoning_effort !== undefined) {
+      responsesBody.reasoning = { effort: chatBody.reasoning_effort };
+    }
+
+    if (chatBody.stream === true) {
+      responsesBody.stream = true;
+    }
+
+    return responsesBody;
+  }
+
+  private convertChatMessagesToResponsesInput(messages: any[]): { input: any[]; instructions?: string } {
+    const input: any[] = [];
+    const instructionParts: string[] = [];
+
+    for (const msg of messages) {
+      if (msg?.role === 'system') {
+        const text = typeof msg.content === 'string' ? msg.content.trim() : '';
+        if (text) instructionParts.push(text);
+        continue;
+      }
+
+      if (msg?.role === 'user') {
+        input.push({
+          role: 'user',
+          content: this.convertChatUserContentToResponsesContent(msg.content)
+        });
+        continue;
+      }
+
+      if (msg?.role === 'assistant') {
+        const assistantText = typeof msg.content === 'string' ? msg.content.trim() : '';
+        if (assistantText) {
+          input.push({
+            role: 'assistant',
+            content: [{ type: 'output_text', text: assistantText }]
+          });
+        }
+
+        if (Array.isArray(msg.tool_calls)) {
+          for (const toolCall of msg.tool_calls) {
+            const callId = typeof toolCall?.id === 'string' ? toolCall.id : '';
+            const functionName = typeof toolCall?.function?.name === 'string' ? toolCall.function.name : '';
+            if (!callId || !functionName) continue;
+
+            input.push({
+              type: 'function_call',
+              call_id: callId,
+              name: functionName,
+              arguments: toolCall.function.arguments || '{}'
+            });
+          }
+        }
+        continue;
+      }
+
+      if (msg?.role === 'tool') {
+        const callId = typeof msg.tool_call_id === 'string' ? msg.tool_call_id : '';
+        if (!callId) continue;
+
+        input.push({
+          type: 'function_call_output',
+          call_id: callId,
+          output: msg.content ?? ''
+        });
+      }
+    }
+
+    const instructions = instructionParts.length > 0 ? instructionParts.join('\n') : undefined;
+    return { input, instructions };
+  }
+
+  private mapChatToolsToResponsesTools(chatTools: any[]): any[] {
+    if (!Array.isArray(chatTools)) {
+      return [];
+    }
+
+    return chatTools
+      .map((tool: any) => {
+        if (tool?.type !== 'function' || !tool.function || typeof tool.function !== 'object') {
+          return null;
+        }
+
+        const name = typeof tool.function.name === 'string' ? tool.function.name : '';
+        if (!name) {
+          return null;
+        }
+
+        const parameters = tool.function.parameters && typeof tool.function.parameters === 'object'
+          ? tool.function.parameters
+          : { type: 'object', properties: {} };
+
+        return {
+          type: 'function',
+          name,
+          description: typeof tool.function.description === 'string' ? tool.function.description : '',
+          parameters
+        };
+      })
+      .filter((tool: any): tool is Record<string, any> => tool !== null);
+  }
+
+  private convertChatUserContentToResponsesContent(content: any): any[] {
+    if (typeof content === 'string') {
+      const text = content.trim();
+      return text ? [{ type: 'input_text', text }] : [{ type: 'input_text', text: '' }];
+    }
+
+    if (!Array.isArray(content)) {
+      return [{ type: 'input_text', text: '' }];
+    }
+
+    const converted = content
+      .map((part: any) => {
+        if (typeof part === 'string') {
+          const text = part.trim();
+          return text ? { type: 'input_text', text } : null;
+        }
+
+        if (part?.type === 'text' && typeof part.text === 'string') {
+          return { type: 'input_text', text: part.text };
+        }
+
+        if (part?.type === 'image_url' && typeof part.image_url?.url === 'string') {
+          return { type: 'input_image', image_url: part.image_url.url };
+        }
+
+        return null;
+      })
+      .filter((part: any): part is Record<string, any> => part !== null);
+
+    return converted.length > 0 ? converted : [{ type: 'input_text', text: '' }];
+  }
+
+  private convertSystemMessages(system: unknown): Array<{ role: 'system'; content: string }> {
+    if (typeof system === 'string') {
+      const content = system.trim();
+      return content ? [{ role: 'system', content }] : [];
+    }
+
+    if (!Array.isArray(system)) {
+      return [];
+    }
+
+    const results: Array<{ role: 'system'; content: string }> = [];
+    for (const block of system) {
+      if (typeof block === 'string') {
+        const content = block.trim();
+        if (content) {
+          results.push({ role: 'system', content });
+        }
+        continue;
+      }
+
+      if (block && typeof block === 'object' && (block as any).type === 'text') {
+        const content = typeof (block as any).text === 'string' ? (block as any).text.trim() : '';
+        if (content) {
+          results.push({ role: 'system', content });
+        }
+      }
+    }
+
+    return results;
   }
 
   private validateAndCleanToolCalls(messages: any[]): any[] {
@@ -274,13 +664,14 @@ export class AnthropicToOpenAIConverter implements AIConverter {
 
       if (hasToolResult) {
         for (const block of content) {
-          if (block?.type !== 'tool_result' || typeof block.tool_use_id !== 'string' || block.tool_use_id.length === 0) {
+          const toolUseId = typeof block?.tool_use_id === 'string' ? block.tool_use_id.trim() : '';
+          if (block?.type !== 'tool_result' || toolUseId.length === 0) {
             continue;
           }
 
           messages.push({
             role: 'tool',
-            tool_call_id: block.tool_use_id,
+            tool_call_id: toolUseId,
             content: this.normalizeToolResultContent(block.content)
           });
         }
@@ -351,11 +742,14 @@ export class AnthropicToOpenAIConverter implements AIConverter {
       const toolUseBlocks = content.filter((block: any) => block.type === 'tool_use');
 
       if (toolUseBlocks.length > 0) {
-        const toolCalls = toolUseBlocks.map((block: any) => ({
-          id: block.id || '',
+        const validToolUseBlocks = toolUseBlocks
+          .filter((block: any) => typeof block?.name === 'string' && block.name.trim().length > 0);
+
+        const toolCalls = validToolUseBlocks.map((block: any, index: number) => ({
+          id: this.normalizeToolCallId(block.id, block.name, index),
           type: 'function',
           function: {
-            name: block.name || '',
+            name: String(block.name).trim(),
             arguments: JSON.stringify(block.input || {})
           }
         }));
@@ -369,11 +763,13 @@ export class AnthropicToOpenAIConverter implements AIConverter {
           }
         }
 
-        messages.push({
-          role: 'assistant',
-          content: textContent.trim() || null,
-          tool_calls: toolCalls
-        });
+        if (toolCalls.length > 0 || textContent.trim()) {
+          messages.push({
+            role: 'assistant',
+            content: textContent.trim() || null,
+            ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {})
+          });
+        }
       } else {
         // 文本/多模态内容，包含 thinking 块
         let textContent = '';
@@ -394,25 +790,296 @@ export class AnthropicToOpenAIConverter implements AIConverter {
     }
   }
 
+  private normalizeToolCallId(rawId: unknown, name: unknown, index: number): string {
+    if (typeof rawId === 'string' && rawId.trim()) {
+      return rawId.trim();
+    }
+
+    const normalizedName = typeof name === 'string' && name.trim() ? name.trim() : 'tool';
+    return `call_${normalizedName}_${index}`;
+  }
+
+  private mapAnthropicToolChoiceToOpenAI(toolChoice: unknown): any {
+    if (toolChoice === undefined || toolChoice === null) {
+      return undefined;
+    }
+
+    if (typeof toolChoice === 'string') {
+      const normalized = toolChoice.trim().toLowerCase();
+      if (normalized === 'auto' || normalized === 'none' || normalized === 'required') {
+        return normalized;
+      }
+      if (normalized === 'any') {
+        return 'required';
+      }
+      return undefined;
+    }
+
+    if (typeof toolChoice !== 'object' || Array.isArray(toolChoice)) {
+      return undefined;
+    }
+
+    const choice = toolChoice as Record<string, any>;
+    const type = typeof choice.type === 'string' ? choice.type.trim().toLowerCase() : '';
+
+    if (type === 'tool') {
+      const toolName = typeof choice.name === 'string' ? choice.name.trim() : '';
+      if (!toolName) {
+        return undefined;
+      }
+
+      return {
+        type: 'function',
+        function: {
+          name: toolName
+        }
+      };
+    }
+
+    if (type === 'any') {
+      return 'required';
+    }
+
+    if (type === 'auto' || type === 'none') {
+      return type;
+    }
+
+    return undefined;
+  }
+
+  private parseOpenAIImageUrlSource(url: string): any | null {
+    if (!url) return null;
+
+    if (url.startsWith('data:')) {
+      const parts = url.split(';base64,');
+      if (parts.length !== 2) return null;
+      return {
+        type: 'base64',
+        media_type: parts[0].replace('data:', ''),
+        data: parts[1]
+      };
+    }
+
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return {
+        type: 'url',
+        url
+      };
+    }
+
+    return null;
+  }
+
+  private normalizeToolParametersSchema(schema: unknown): Record<string, any> {
+    if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
+      return { type: 'object', properties: {} };
+    }
+
+    const normalized = this.normalizeJsonSchema(schema as Record<string, any>);
+    const typeValue = typeof normalized.type === 'string' ? normalized.type.toLowerCase() : '';
+    if (typeValue === 'object') {
+      const hasValidProperties = normalized.properties && typeof normalized.properties === 'object' && !Array.isArray(normalized.properties);
+      if (!hasValidProperties) {
+        normalized.properties = {};
+      }
+    }
+
+    return normalized;
+  }
+
+  private normalizeJsonSchema(schema: unknown): any {
+    if (!schema || typeof schema !== 'object') {
+      return schema;
+    }
+
+    if (Array.isArray(schema)) {
+      return schema.map((item) => this.normalizeJsonSchema(item));
+    }
+
+    const result: Record<string, any> = {};
+    for (const [key, value] of Object.entries(schema)) {
+      if (key === 'properties' && value && typeof value === 'object' && !Array.isArray(value)) {
+        const normalizedProperties: Record<string, any> = {};
+        for (const [propName, propSchema] of Object.entries(value)) {
+          normalizedProperties[propName] = this.normalizeJsonSchema(propSchema);
+        }
+        result[key] = normalizedProperties;
+        continue;
+      }
+
+      result[key] = this.normalizeJsonSchema(value);
+    }
+
+    const typeValue = typeof result.type === 'string' ? result.type.toLowerCase() : '';
+    if (typeValue === 'object') {
+      const hasValidProperties = result.properties && typeof result.properties === 'object' && !Array.isArray(result.properties);
+      if (!hasValidProperties) {
+        result.properties = {};
+      }
+    }
+
+    return result;
+  }
+
   /**
    * 处理非流式响应：OpenAI → Anthropic
    */
   async onResponse(ctx: ResponseContext): Promise<Response | void> {
     const contentType = ctx.response.headers.get('content-type') || '';
-    if (!contentType.includes('application/json') || !ctx.response.ok) {
+    if (!contentType.includes('application/json')) {
       return;
     }
 
     const responseClone = ctx.response.clone();
     const openaiBody = await responseClone.json();
 
-    const anthropicBody = this.convertOpenAIResponseToAnthropic(openaiBody);
+    if (this.isAnthropicCountTokensPath(ctx.originalUrl.pathname)) {
+      if (!ctx.response.ok) {
+        const anthropicError = this.convertOpenAIErrorToAnthropic(openaiBody, ctx.response.status);
+        return new Response(JSON.stringify(anthropicError), {
+          status: ctx.response.status,
+          statusText: ctx.response.statusText,
+          headers: ctx.response.headers
+        });
+      }
+
+      const inputTokens = this.extractCountTokensInput(openaiBody);
+      return new Response(JSON.stringify({ input_tokens: inputTokens }), {
+        status: ctx.response.status,
+        statusText: ctx.response.statusText,
+        headers: ctx.response.headers
+      });
+    }
+
+    if (!ctx.response.ok) {
+      const anthropicError = this.convertOpenAIErrorToAnthropic(openaiBody, ctx.response.status);
+      return new Response(JSON.stringify(anthropicError), {
+        status: ctx.response.status,
+        statusText: ctx.response.statusText,
+        headers: ctx.response.headers
+      });
+    }
+
+    const anthropicBody = this.isResponsesApiBody(openaiBody)
+      ? this.convertOpenAIResponsesToAnthropic(openaiBody)
+      : this.convertOpenAIResponseToAnthropic(openaiBody);
 
     return new Response(JSON.stringify(anthropicBody), {
       status: ctx.response.status,
       statusText: ctx.response.statusText,
       headers: ctx.response.headers
     });
+  }
+
+  private extractCountTokensInput(openaiBody: any): number {
+    const directInputTokens = openaiBody?.input_tokens;
+    if (typeof directInputTokens === 'number' && Number.isFinite(directInputTokens) && directInputTokens >= 0) {
+      return directInputTokens;
+    }
+
+    const promptTokens = openaiBody?.usage?.prompt_tokens;
+    if (typeof promptTokens === 'number' && Number.isFinite(promptTokens) && promptTokens >= 0) {
+      return promptTokens;
+    }
+
+    const inputTokens = openaiBody?.usage?.input_tokens;
+    if (typeof inputTokens === 'number' && Number.isFinite(inputTokens) && inputTokens >= 0) {
+      return inputTokens;
+    }
+
+    return 0;
+  }
+
+  private convertOpenAIErrorToAnthropic(openaiBody: any, status: number): any {
+    const message =
+      (typeof openaiBody?.error?.message === 'string' && openaiBody.error.message)
+      || (typeof openaiBody?.message === 'string' && openaiBody.message)
+      || `OpenAI request failed with status ${status}`;
+
+    return {
+      type: 'error',
+      error: {
+        type: 'api_error',
+        message
+      }
+    };
+  }
+
+  private isResponsesApiBody(openaiBody: any): boolean {
+    if (!openaiBody || typeof openaiBody !== 'object') {
+      return false;
+    }
+
+    if (openaiBody.object === 'response') {
+      return true;
+    }
+
+    return Array.isArray(openaiBody.output) && !Array.isArray(openaiBody.choices);
+  }
+
+  private convertOpenAIResponsesToAnthropic(openaiBody: any): any {
+    const content: any[] = [];
+    const output = Array.isArray(openaiBody.output) ? openaiBody.output : [];
+
+    for (const item of output) {
+      if (!item || typeof item !== 'object') continue;
+
+      if (item.type === 'function_call') {
+        let parsedInput: Record<string, any> = {};
+        const rawArgs = item.arguments;
+        if (typeof rawArgs === 'string') {
+          try {
+            const parsed = JSON.parse(rawArgs);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+              parsedInput = parsed;
+            }
+          } catch {
+            parsedInput = {};
+          }
+        }
+
+        content.push({
+          type: 'tool_use',
+          id: item.call_id || item.id || '',
+          name: item.name || '',
+          input: parsedInput
+        });
+        continue;
+      }
+
+      if (item.type === 'message' && Array.isArray(item.content)) {
+        for (const part of item.content) {
+          if (!part || typeof part !== 'object') continue;
+          if (part.type === 'output_text' && typeof part.text === 'string') {
+            content.push(...parseThinkingTags(part.text));
+            continue;
+          }
+
+          if (part.type === 'text' && typeof part.text === 'string') {
+            content.push(...parseThinkingTags(part.text));
+          }
+        }
+      }
+    }
+
+    const stopReason = content.some((block) => block.type === 'tool_use')
+      ? 'tool_use'
+      : openaiBody.status === 'incomplete'
+        ? 'max_tokens'
+        : 'end_turn';
+
+    return {
+      id: openaiBody.id || generateAnthropicMessageId(),
+      type: 'message',
+      role: 'assistant',
+      content,
+      model: openaiBody.model || 'gpt-4',
+      stop_reason: stopReason,
+      usage: {
+        input_tokens: openaiBody.usage?.input_tokens || 0,
+        output_tokens: openaiBody.usage?.output_tokens || 0
+      }
+    };
   }
 
   /**
@@ -477,6 +1144,17 @@ export class AnthropicToOpenAIConverter implements AIConverter {
         }
 
         if (part && typeof part === 'object') {
+          if (part.type === 'image_url' && typeof part.image_url?.url === 'string') {
+            const source = this.parseOpenAIImageUrlSource(part.image_url.url);
+            if (source) {
+              content.push({
+                type: 'image',
+                source
+              });
+              continue;
+            }
+          }
+
           content.push({
             type: 'text',
             text: JSON.stringify(part)
@@ -506,10 +1184,39 @@ export class AnthropicToOpenAIConverter implements AIConverter {
    * 处理流式响应：OpenAI chunk → Anthropic SSE
    */
   async processStreamChunk(chunk: any, ctx: StreamChunkContext): Promise<any[] | null> {
+    if (this.isResponsesStreamChunk(chunk)) {
+      return this.processResponsesStreamChunk(chunk, ctx);
+    }
+
     const events: any[] = [];
+    const streamUsage = this.extractOpenAIStreamUsage(chunk);
+    if (streamUsage) {
+      ctx.streamState.set('latest_usage', streamUsage);
+    }
+
     const choice = chunk.choices?.[0];
 
-    if (!choice) return [];
+    if (!choice) {
+      const pendingStopReason = ctx.streamState.get('pending_stop_reason');
+      if (pendingStopReason && streamUsage) {
+        events.push({
+          type: 'message_delta',
+          delta: {
+            stop_reason: pendingStopReason
+          },
+          usage: streamUsage
+        });
+
+        events.push({
+          type: 'message_stop'
+        });
+
+        ctx.streamState.clear();
+        return events;
+      }
+
+      return [];
+    }
 
     const delta = choice.delta;
     const finishReason = choice.finish_reason;
@@ -533,7 +1240,8 @@ export class AnthropicToOpenAIConverter implements AIConverter {
     }
 
     // 文本增量
-    if (delta.content) {
+    const deltaText = this.extractDeltaText(delta?.content);
+    if (deltaText) {
       if (!ctx.streamState.has('text_block_started')) {
         events.push({
           type: 'content_block_start',
@@ -551,7 +1259,7 @@ export class AnthropicToOpenAIConverter implements AIConverter {
         index: 0,
         delta: {
           type: 'text_delta',
-          text: delta.content
+          text: deltaText
         }
       });
     }
@@ -608,39 +1316,37 @@ export class AnthropicToOpenAIConverter implements AIConverter {
         });
       }
 
-      const toolKeys = Array.from(ctx.streamState.keys()).filter(k => k.startsWith('tool_'));
-      for (let i = 0; i < toolKeys.length; i++) {
+      const toolKeys = Array.from(ctx.streamState.keys())
+        .filter(k => k.startsWith('tool_'))
+        .sort((a, b) => Number(a.slice(5)) - Number(b.slice(5)));
+      for (const toolKey of toolKeys) {
+        const toolIndex = Number(toolKey.slice(5));
         events.push({
           type: 'content_block_stop',
-          index: i
+          index: Number.isFinite(toolIndex) ? toolIndex : 0
         });
       }
 
       const stopReason = mapOpenAIFinishReasonToAnthropic(finishReason);
 
-      const usage = chunk.usage ? {
-        output_tokens: chunk.usage.completion_tokens || 0
-      } : undefined;
+      const latestUsage = (ctx.streamState.get('latest_usage') as Record<string, number> | undefined) || streamUsage;
+      if (latestUsage) {
+        events.push({
+          type: 'message_delta',
+          delta: {
+            stop_reason: stopReason
+          },
+          usage: latestUsage
+        });
 
-      events.push({
-        type: 'message_delta',
-        delta: {
-          stop_reason: stopReason,
-          ...(usage && { usage })
-        },
-        ...(chunk.usage && {
-          usage: {
-            input_tokens: chunk.usage.prompt_tokens || 0,
-            output_tokens: chunk.usage.completion_tokens || 0
-          }
-        })
-      });
+        events.push({
+          type: 'message_stop'
+        });
 
-      events.push({
-        type: 'message_stop'
-      });
-
-      ctx.streamState.clear();
+        ctx.streamState.clear();
+      } else {
+        ctx.streamState.set('pending_stop_reason', stopReason);
+      }
     }
 
     return events;
@@ -652,10 +1358,544 @@ export class AnthropicToOpenAIConverter implements AIConverter {
   async flushStream(ctx: StreamChunkContext): Promise<any[]> {
     if (ctx.streamState.has('message_started') && !ctx.streamState.has('flushed')) {
       ctx.streamState.set('flushed', true);
+
+      const pendingStopReason = ctx.streamState.get('pending_stop_reason') as string | undefined;
+      if (pendingStopReason) {
+        const latestUsage = ctx.streamState.get('latest_usage') as Record<string, number> | undefined;
+        const out: any[] = [{
+          type: 'message_delta',
+          delta: {
+            stop_reason: pendingStopReason
+          },
+          ...(latestUsage && { usage: latestUsage })
+        }, {
+          type: 'message_stop'
+        }];
+        ctx.streamState.clear();
+        return out;
+      }
+
+      const latestUsage = ctx.streamState.get('latest_usage') as Record<string, number> | undefined;
+      ctx.streamState.clear();
       return [{
+        type: 'message_delta',
+        delta: {
+          stop_reason: 'end_turn'
+        },
+        ...(latestUsage && { usage: latestUsage })
+      }, {
         type: 'message_stop'
       }];
     }
     return [];
+  }
+
+  private isResponsesStreamChunk(chunk: any): boolean {
+    const eventType = typeof chunk?._event === 'string' ? chunk._event : '';
+    const type = typeof chunk?.type === 'string' ? chunk.type : '';
+    if (eventType.startsWith('response.')) return true;
+    if (type.startsWith('response.')) return true;
+    return false;
+  }
+
+  private async processResponsesStreamChunk(chunk: any, ctx: StreamChunkContext): Promise<any[]> {
+    const events: any[] = [];
+    const eventType = typeof chunk?._event === 'string' && chunk._event.length > 0 ? chunk._event : chunk.type;
+    const ensureMessageStarted = () => {
+      if (!ctx.streamState.has('message_started')) {
+        events.push({
+          type: 'message_start',
+          message: {
+            id: chunk.response?.id || chunk.response_id || generateAnthropicMessageId(),
+            type: 'message',
+            role: 'assistant',
+            content: [],
+            model: chunk.response?.model || 'gpt-4',
+            usage: { input_tokens: 0, output_tokens: 0 }
+          }
+        });
+        ctx.streamState.set('message_started', true);
+      }
+    };
+    const currentResponseId = typeof chunk?.response?.id === 'string'
+      ? chunk.response.id
+      : typeof chunk?.response_id === 'string'
+        ? chunk.response_id
+        : undefined;
+    const terminalEmitted = ctx.streamState.get('resp_terminal_emitted') === true;
+    const terminalResponseId = ctx.streamState.get('resp_terminal_response_id');
+    const sameTerminalStream = !terminalResponseId || !currentResponseId || terminalResponseId === currentResponseId;
+
+    if (terminalEmitted && sameTerminalStream) {
+      return this.finalizeResponsesStreamEvents(events, ctx);
+    }
+
+    if (terminalEmitted && terminalResponseId && currentResponseId && terminalResponseId !== currentResponseId) {
+      ctx.streamState.delete('resp_terminal_emitted');
+      ctx.streamState.delete('resp_terminal_response_id');
+    }
+
+    if (eventType === 'response.created') {
+      ensureMessageStarted();
+      return this.finalizeResponsesStreamEvents(events, ctx);
+    }
+
+    if (eventType === 'response.in_progress' || eventType === 'keepalive') {
+      ensureMessageStarted();
+      events.push({
+        type: 'ping'
+      });
+      return this.finalizeResponsesStreamEvents(events, ctx);
+    }
+
+    if (eventType === 'response.output_item.added') {
+      const item = chunk.item;
+      if (item?.type === 'function_call') {
+        const rawIndex = typeof chunk.output_index === 'number'
+          ? chunk.output_index + 1
+          : typeof item.output_index === 'number'
+            ? item.output_index + 1
+            : 1;
+        const index = Number.isFinite(rawIndex) ? rawIndex : 1;
+        const metaKey = `resp_tool_meta_${index}`;
+        const callId = typeof item.call_id === 'string'
+          ? item.call_id
+          : typeof item.id === 'string'
+            ? item.id
+            : `tool_${index}`;
+        const name = typeof item.name === 'string' ? item.name : 'tool';
+        ctx.streamState.set(metaKey, { callId, name });
+
+        if (!ctx.streamState.has('message_started')) {
+          events.push({
+            type: 'message_start',
+            message: {
+              id: chunk.response?.id || chunk.response_id || generateAnthropicMessageId(),
+              type: 'message',
+              role: 'assistant',
+              content: [],
+              model: chunk.response?.model || 'gpt-4',
+              usage: { input_tokens: 0, output_tokens: 0 }
+            }
+          });
+          ctx.streamState.set('message_started', true);
+        }
+      } else {
+        ensureMessageStarted();
+        events.push({
+          type: 'ping'
+        });
+      }
+
+      return this.finalizeResponsesStreamEvents(events, ctx);
+    }
+
+    if (eventType === 'response.output_item.done') {
+      const item = chunk.item;
+      if (item?.type === 'function_call') {
+        const rawIndex = typeof chunk.output_index === 'number'
+          ? chunk.output_index + 1
+          : typeof item.output_index === 'number'
+            ? item.output_index + 1
+            : 1;
+        const index = Number.isFinite(rawIndex) ? rawIndex : 1;
+        const toolKey = `resp_tool_${index}`;
+        const metaKey = `resp_tool_meta_${index}`;
+        const meta = ctx.streamState.get(metaKey) as { callId?: string; name?: string } | undefined;
+        const callId = typeof item.call_id === 'string'
+          ? item.call_id
+          : typeof meta?.callId === 'string'
+            ? meta.callId
+            : typeof item.id === 'string'
+              ? item.id
+              : `tool_${index}`;
+        const name = typeof item.name === 'string'
+          ? item.name
+          : typeof meta?.name === 'string'
+            ? meta.name
+            : 'tool';
+
+        if (!ctx.streamState.has('message_started')) {
+          events.push({
+            type: 'message_start',
+            message: {
+              id: chunk.response?.id || chunk.response_id || generateAnthropicMessageId(),
+              type: 'message',
+              role: 'assistant',
+              content: [],
+              model: chunk.response?.model || 'gpt-4',
+              usage: { input_tokens: 0, output_tokens: 0 }
+            }
+          });
+          ctx.streamState.set('message_started', true);
+        }
+
+        if (!ctx.streamState.has(toolKey)) {
+          ctx.streamState.set(toolKey, true);
+          events.push({
+            type: 'content_block_start',
+            index,
+            content_block: {
+              type: 'tool_use',
+              id: callId,
+              name,
+              input: {}
+            }
+          });
+        }
+
+      }
+
+      return this.finalizeResponsesStreamEvents(events, ctx);
+    }
+
+    if (eventType === 'response.function_call_arguments.done') {
+      const rawIndex = typeof chunk.output_index === 'number' ? chunk.output_index + 1 : 1;
+      const index = Number.isFinite(rawIndex) ? rawIndex : 1;
+      const toolKey = `resp_tool_${index}`;
+      const metaKey = `resp_tool_meta_${index}`;
+      const meta = ctx.streamState.get(metaKey) as { callId?: string; name?: string } | undefined;
+      const callId = typeof chunk.call_id === 'string'
+        ? chunk.call_id
+        : typeof meta?.callId === 'string'
+          ? meta.callId
+          : typeof chunk.item_id === 'string'
+            ? chunk.item_id
+            : `tool_${index}`;
+      const name = typeof chunk.name === 'string'
+        ? chunk.name
+        : typeof meta?.name === 'string'
+          ? meta.name
+          : 'tool';
+
+      if (!ctx.streamState.has('message_started')) {
+        events.push({
+          type: 'message_start',
+          message: {
+            id: chunk.response?.id || chunk.response_id || generateAnthropicMessageId(),
+            type: 'message',
+            role: 'assistant',
+            content: [],
+            model: chunk.response?.model || 'gpt-4',
+            usage: { input_tokens: 0, output_tokens: 0 }
+          }
+        });
+        ctx.streamState.set('message_started', true);
+      }
+
+      if (!ctx.streamState.has(toolKey)) {
+        ctx.streamState.set(toolKey, true);
+        events.push({
+          type: 'content_block_start',
+          index,
+          content_block: {
+            type: 'tool_use',
+            id: callId,
+            name,
+            input: {}
+          }
+        });
+      }
+
+      const hasDeltaKey = `resp_tool_has_delta_${index}`;
+      const hasDelta = ctx.streamState.get(hasDeltaKey) === true;
+      const fullArgsSentKey = `resp_tool_full_args_sent_${index}`;
+      const fullArgsSent = ctx.streamState.get(fullArgsSentKey) === true;
+      const argsDoneSeenKey = `resp_tool_args_done_seen_${index}`;
+      const argsDoneSeen = ctx.streamState.get(argsDoneSeenKey) === true;
+      const doneArgsKey = `resp_tool_done_arguments_${index}`;
+      const previousDoneArgs = ctx.streamState.get(doneArgsKey);
+      const fullArgs = typeof chunk.arguments === 'string' ? chunk.arguments : '';
+
+      if (argsDoneSeen && (fullArgsSent || hasDelta || (fullArgs && previousDoneArgs === fullArgs))) {
+        return this.finalizeResponsesStreamEvents(events, ctx);
+      }
+
+      ctx.streamState.set(argsDoneSeenKey, true);
+      if (fullArgs) {
+        ctx.streamState.set(doneArgsKey, fullArgs);
+      }
+
+      if (fullArgs && !hasDelta && !fullArgsSent) {
+        ctx.streamState.set(fullArgsSentKey, true);
+        events.push({
+          type: 'content_block_delta',
+          index,
+          delta: {
+            type: 'input_json_delta',
+            partial_json: fullArgs
+          }
+        });
+      }
+
+      return this.finalizeResponsesStreamEvents(events, ctx);
+    }
+
+    if (!ctx.streamState.has('message_started') && eventType === 'response.output_text.delta') {
+      events.push({
+        type: 'message_start',
+        message: {
+          id: chunk.response?.id || chunk.response_id || generateAnthropicMessageId(),
+          type: 'message',
+          role: 'assistant',
+          content: [],
+          model: chunk.response?.model || 'gpt-4',
+          usage: { input_tokens: 0, output_tokens: 0 }
+        }
+      });
+      ctx.streamState.set('message_started', true);
+    }
+
+    if (eventType === 'response.output_text.delta') {
+      if (!ctx.streamState.has('text_block_started')) {
+        events.push({
+          type: 'content_block_start',
+          index: 0,
+          content_block: {
+            type: 'text',
+            text: ''
+          }
+        });
+        ctx.streamState.set('text_block_started', true);
+      }
+
+      const deltaText = typeof chunk.delta === 'string'
+        ? chunk.delta
+        : typeof chunk.text === 'string'
+          ? chunk.text
+          : '';
+
+      if (deltaText) {
+        events.push({
+          type: 'content_block_delta',
+          index: 0,
+          delta: {
+            type: 'text_delta',
+            text: deltaText
+          }
+        });
+      }
+
+      return this.finalizeResponsesStreamEvents(events, ctx);
+    }
+
+    if (eventType === 'response.function_call_arguments.delta') {
+      const rawIndex = typeof chunk.output_index === 'number' ? chunk.output_index + 1 : 1;
+      const index = Number.isFinite(rawIndex) ? rawIndex : 1;
+      const argsDoneSeen = ctx.streamState.get(`resp_tool_args_done_seen_${index}`) === true;
+      const fullArgsSent = ctx.streamState.get(`resp_tool_full_args_sent_${index}`) === true;
+
+      if (argsDoneSeen || fullArgsSent) {
+        return this.finalizeResponsesStreamEvents(events, ctx);
+      }
+
+      if (!ctx.streamState.has('message_started')) {
+        events.push({
+          type: 'message_start',
+          message: {
+            id: chunk.response?.id || chunk.response_id || generateAnthropicMessageId(),
+            type: 'message',
+            role: 'assistant',
+            content: [],
+            model: chunk.response?.model || 'gpt-4',
+            usage: { input_tokens: 0, output_tokens: 0 }
+          }
+        });
+        ctx.streamState.set('message_started', true);
+      }
+
+      const toolKey = `resp_tool_${index}`;
+      const metaKey = `resp_tool_meta_${index}`;
+      const meta = ctx.streamState.get(metaKey) as { callId?: string; name?: string } | undefined;
+      const callId = typeof chunk.call_id === 'string'
+        ? chunk.call_id
+        : typeof meta?.callId === 'string'
+          ? meta.callId
+          : typeof chunk.item_id === 'string'
+            ? chunk.item_id
+            : `tool_${index}`;
+      const name = typeof chunk.name === 'string'
+        ? chunk.name
+        : typeof meta?.name === 'string'
+          ? meta.name
+          : 'tool';
+
+      if (!ctx.streamState.has(toolKey)) {
+        ctx.streamState.set(toolKey, true);
+        events.push({
+          type: 'content_block_start',
+          index,
+          content_block: {
+            type: 'tool_use',
+            id: callId,
+            name,
+            input: {}
+          }
+        });
+      }
+
+      const partialJson = typeof chunk.delta === 'string' ? chunk.delta : '';
+      if (partialJson) {
+        ctx.streamState.set(`resp_tool_has_delta_${index}`, true);
+        events.push({
+          type: 'content_block_delta',
+          index,
+          delta: {
+            type: 'input_json_delta',
+            partial_json: partialJson
+          }
+        });
+      }
+
+      return this.finalizeResponsesStreamEvents(events, ctx);
+    }
+
+    if (eventType === 'response.completed' || eventType === 'response.incomplete' || eventType === 'response.failed') {
+      const responseId = chunk.response?.id || chunk.response_id;
+
+      if (!ctx.streamState.has('message_started')) {
+        events.push({
+          type: 'message_start',
+          message: {
+            id: chunk.response?.id || chunk.response_id || generateAnthropicMessageId(),
+            type: 'message',
+            role: 'assistant',
+            content: [],
+            model: chunk.response?.model || 'gpt-4',
+            usage: { input_tokens: 0, output_tokens: 0 }
+          }
+        });
+        ctx.streamState.set('message_started', true);
+      }
+
+      if (ctx.streamState.has('text_block_started')) {
+        events.push({
+          type: 'content_block_stop',
+          index: 0
+        });
+      }
+
+      const toolKeys = Array.from(ctx.streamState.keys())
+        .filter((k) => typeof k === 'string' && /^resp_tool_\d+$/.test(k))
+        .sort((a, b) => Number(a.slice(10)) - Number(b.slice(10)));
+
+      for (const toolKey of toolKeys) {
+        const toolIndex = Number(toolKey.slice(10));
+        events.push({
+          type: 'content_block_stop',
+          index: Number.isFinite(toolIndex) ? toolIndex : 1
+        });
+      }
+
+      const usage = chunk.response?.usage && typeof chunk.response.usage === 'object'
+        ? chunk.response.usage
+        : chunk.usage;
+      const normalizedUsage = usage
+        ? {
+            input_tokens: typeof usage.input_tokens === 'number' ? usage.input_tokens : 0,
+            output_tokens: typeof usage.output_tokens === 'number' ? usage.output_tokens : 0
+          }
+        : undefined;
+
+      events.push({
+        type: 'message_delta',
+        delta: {
+          stop_reason: toolKeys.length > 0
+            ? 'tool_use'
+            : eventType === 'response.incomplete'
+              ? 'max_tokens'
+              : 'end_turn'
+        },
+        ...(normalizedUsage && { usage: normalizedUsage })
+      });
+
+      events.push({
+        type: 'message_stop'
+      });
+
+      ctx.streamState.clear();
+      ctx.streamState.set('resp_terminal_emitted', true);
+      if (typeof responseId === 'string' && responseId.length > 0) {
+        ctx.streamState.set('resp_terminal_response_id', responseId);
+      }
+      return this.finalizeResponsesStreamEvents(events, ctx);
+    }
+
+    if (typeof eventType === 'string' && eventType.startsWith('response.')) {
+      ensureMessageStarted();
+      events.push({
+        type: 'ping'
+      });
+      return this.finalizeResponsesStreamEvents(events, ctx);
+    }
+
+    return this.finalizeResponsesStreamEvents(events, ctx);
+  }
+
+  private finalizeResponsesStreamEvents(events: any[], ctx: StreamChunkContext): any[] {
+    const deduped: any[] = [];
+
+    for (const event of events) {
+      if (event?.type === 'content_block_delta' && event.delta?.type === 'input_json_delta') {
+        const index = typeof event.index === 'number' ? event.index : 0;
+        const partialJson = typeof event.delta.partial_json === 'string' ? event.delta.partial_json : '';
+        const lastPartialJsonKey = `resp_tool_last_input_json_${index}`;
+        const previousPartialJson = ctx.streamState.get(lastPartialJsonKey);
+
+        if (partialJson && previousPartialJson === partialJson) {
+          continue;
+        }
+
+        if (partialJson) {
+          ctx.streamState.set(lastPartialJsonKey, partialJson);
+        }
+      }
+
+      deduped.push(event);
+    }
+
+    return deduped;
+  }
+
+  private extractOpenAIStreamUsage(chunk: any): { input_tokens: number; output_tokens: number } | undefined {
+    const usage = chunk?.usage;
+    if (!usage || typeof usage !== 'object') {
+      return undefined;
+    }
+
+    const inputTokens = typeof usage.prompt_tokens === 'number'
+      ? usage.prompt_tokens
+      : typeof usage.input_tokens === 'number'
+        ? usage.input_tokens
+      : 0;
+    const outputTokens = typeof usage.completion_tokens === 'number'
+      ? usage.completion_tokens
+      : typeof usage.output_tokens === 'number'
+        ? usage.output_tokens
+      : 0;
+
+    return {
+      input_tokens: inputTokens,
+      output_tokens: outputTokens
+    };
+  }
+
+  private extractDeltaText(content: unknown): string {
+    if (typeof content === 'string') {
+      return content;
+    }
+
+    if (!Array.isArray(content)) {
+      return '';
+    }
+
+    return content
+      .map((part: any) => {
+        if (typeof part === 'string') return part;
+        if (part?.type === 'text' && typeof part.text === 'string') return part.text;
+        if (typeof part?.text === 'string') return part.text;
+        return '';
+      })
+      .join('');
   }
 }

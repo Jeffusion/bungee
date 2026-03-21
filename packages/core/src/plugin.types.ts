@@ -268,6 +268,7 @@ export type PluginConfigFieldType =
   | 'multiselect' // 多选下拉
   | 'textarea'    // 多行文本
   | 'json'        // JSON 编辑器
+  | 'model_mapping'
   | 'object'      // 对象（嵌套表单）
   | 'array';      // 数组（列表编辑器）
 
@@ -318,6 +319,18 @@ export interface FieldTransform {
    */
   fields?: string[];
 }
+
+export type PluginShowIfCondition =
+  | {
+    field: string;
+    value: PluginConfigValue;
+  }
+  | {
+    all: PluginShowIfCondition[];
+  }
+  | {
+    any: PluginShowIfCondition[];
+  };
 
 /**
  * 插件翻译内容
@@ -404,10 +417,7 @@ export interface PluginConfigField {
   /**
    * 条件显示（依赖其他字段的值）
    */
-  showIf?: {
-    field: string;
-    value: PluginConfigValue;
-  };
+  showIf?: PluginShowIfCondition;
 
   /**
    * 子字段定义（type=object 时使用）

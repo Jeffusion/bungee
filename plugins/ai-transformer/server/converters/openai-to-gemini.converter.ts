@@ -12,9 +12,76 @@
 import type { AIConverter } from './base';
 import type { MutableRequestContext, ResponseContext, StreamChunkContext } from '../../../../packages/core/src/hooks';
 
+interface OpenAIToGeminiRuntimeOptions {
+  anthropicMaxTokens?: number;
+  openAILowToGeminiTokens?: number;
+  openAIMediumToGeminiTokens?: number;
+  openAIHighToGeminiTokens?: number;
+  openAIXHighToGeminiTokens?: number;
+}
+
 export class OpenAIToGeminiConverter implements AIConverter {
   readonly from = 'openai';
   readonly to = 'gemini';
+  private runtimeOptions: OpenAIToGeminiRuntimeOptions = {};
+
+  setRuntimeOptions(options: unknown): void {
+    if (!options || typeof options !== 'object') {
+      this.runtimeOptions = {};
+      return;
+    }
+
+    const value = options as Record<string, unknown>;
+    this.runtimeOptions = {
+      anthropicMaxTokens: this.parseIntegerOption(value.anthropicMaxTokens),
+      openAILowToGeminiTokens: this.parseIntegerOption(value.openAILowToGeminiTokens),
+      openAIMediumToGeminiTokens: this.parseIntegerOption(value.openAIMediumToGeminiTokens),
+      openAIHighToGeminiTokens: this.parseIntegerOption(value.openAIHighToGeminiTokens),
+      openAIXHighToGeminiTokens: this.parseIntegerOption(value.openAIXHighToGeminiTokens)
+    };
+  }
+
+  private parseIntegerOption(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return Math.trunc(value);
+    }
+
+    if (typeof value === 'string' && value.trim().length > 0) {
+      const parsed = parseInt(value, 10);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+
+    return undefined;
+  }
+
+  private resolveAnthropicMaxTokens(): number | undefined {
+    if (this.runtimeOptions.anthropicMaxTokens !== undefined) {
+      return this.runtimeOptions.anthropicMaxTokens;
+    }
+
+    return this.parseIntegerOption(process.env.ANTHROPIC_MAX_TOKENS);
+  }
+
+  private resolveOpenAIToGeminiBudget(effort: string): number | undefined {
+    const normalizedEffort = effort.trim().toLowerCase();
+    if (normalizedEffort === 'low' && this.runtimeOptions.openAILowToGeminiTokens !== undefined) {
+      return this.runtimeOptions.openAILowToGeminiTokens;
+    }
+    if (normalizedEffort === 'medium' && this.runtimeOptions.openAIMediumToGeminiTokens !== undefined) {
+      return this.runtimeOptions.openAIMediumToGeminiTokens;
+    }
+    if (normalizedEffort === 'high' && this.runtimeOptions.openAIHighToGeminiTokens !== undefined) {
+      return this.runtimeOptions.openAIHighToGeminiTokens;
+    }
+    if (normalizedEffort === 'xhigh' && this.runtimeOptions.openAIXHighToGeminiTokens !== undefined) {
+      return this.runtimeOptions.openAIXHighToGeminiTokens;
+    }
+
+    const envKey = `OPENAI_${normalizedEffort.toUpperCase()}_TO_GEMINI_TOKENS`;
+    return this.parseIntegerOption(process.env[envKey]);
+  }
 
   /**
    * Model-specific max output tokens mapping (based on official Gemini API documentation)
@@ -267,12 +334,14 @@ export class OpenAIToGeminiConverter implements AIConverter {
     // max_tokens - 可选，根据模型使用动态默认值
     if (openaiBody.max_tokens) {
       generationConfig.maxOutputTokens = openaiBody.max_tokens;
-    } else if (process.env.ANTHROPIC_MAX_TOKENS) {
-      generationConfig.maxOutputTokens = parseInt(process.env.ANTHROPIC_MAX_TOKENS);
     } else {
-      // 根据模型使用对应的最大 token 数
-      const model = openaiBody.model || 'gemini-pro';
-      generationConfig.maxOutputTokens = this.getDefaultMaxTokens(model);
+      const anthropicMaxTokens = this.resolveAnthropicMaxTokens();
+      if (anthropicMaxTokens !== undefined) {
+        generationConfig.maxOutputTokens = anthropicMaxTokens;
+      } else {
+        const model = openaiBody.model || 'gemini-pro';
+        generationConfig.maxOutputTokens = this.getDefaultMaxTokens(model);
+      }
     }
 
     if (openaiBody.stop) {
@@ -283,14 +352,14 @@ export class OpenAIToGeminiConverter implements AIConverter {
     if (openaiBody.max_completion_tokens) {
       const effort = openaiBody.reasoning_effort || 'medium';
       const envKey = `OPENAI_${effort.toUpperCase()}_TO_GEMINI_TOKENS`;
-      const tokens = process.env[envKey];
+      const tokens = this.resolveOpenAIToGeminiBudget(effort);
 
-      if (!tokens) {
+      if (tokens === undefined) {
         throw new Error(`Environment variable ${envKey} not configured`);
       }
 
       generationConfig.thinkingConfig = {
-        thinkingBudget: parseInt(tokens)
+        thinkingBudget: tokens
       };
     }
 

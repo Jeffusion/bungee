@@ -770,6 +770,53 @@ describe('OpenAI to Gemini - Integration Tests', () => {
     }
   });
 
+  test('should prefer plugin token mapping over environment variable for O2G reasoning budget conversion', async () => {
+    const originalHigh = process.env.OPENAI_HIGH_TO_GEMINI_TOKENS;
+    delete process.env.OPENAI_HIGH_TO_GEMINI_TOKENS;
+
+    const configWithMapping: AppConfig = JSON.parse(JSON.stringify(mockConfig));
+    const firstRoute = configWithMapping.routes?.[0];
+    const firstPlugin = firstRoute && Array.isArray(firstRoute.plugins) ? firstRoute.plugins[0] : undefined;
+    if (!firstRoute || !firstPlugin || typeof firstPlugin === 'string') {
+      throw new Error('Invalid test config for ai-transformer plugin');
+    }
+
+    const nextOptions = typeof firstPlugin.options === 'object' && firstPlugin.options !== null
+      ? { ...firstPlugin.options }
+      : {};
+    nextOptions.openAIHighToGeminiTokens = 7777;
+    firstPlugin.options = nextOptions;
+
+    try {
+      await cleanupPluginRegistry();
+      initializeRuntimeState(configWithMapping);
+      await initializePluginRegistryForTests(configWithMapping);
+
+      const req = new Request('http://localhost/v1/openai-to-gemini/chat/completions', {
+        method: 'POST',
+        body: JSON.stringify({
+          model: 'o1-preview',
+          messages: [{ role: 'user', content: 'plugin mapping priority check' }],
+          max_completion_tokens: 4096,
+          reasoning_effort: 'high'
+        }),
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      await handleRequest(req, configWithMapping);
+
+      const [, fetchOptions] = mockedFetch.mock.calls[0];
+      const forwardedBody = JSON.parse(fetchOptions!.body as string);
+
+      expect(forwardedBody.generationConfig.thinkingConfig).toBeDefined();
+      expect(forwardedBody.generationConfig.thinkingConfig.thinkingBudget).toBe(7777);
+    } finally {
+      if (originalHigh !== undefined) {
+        process.env.OPENAI_HIGH_TO_GEMINI_TOKENS = originalHigh;
+      }
+    }
+  });
+
   test('should convert response_format to response_schema', async () => {
     const openaiRequest = {
       model: 'gpt-4',

@@ -15,6 +15,308 @@ import {
   createSSESerializerStream
 } from '../../stream-executor';
 
+const SSE_IDLE_HEARTBEAT_MS = 4_000;
+
+function getRequestIdFromLog(requestLog: any): string {
+  return typeof requestLog?.requestId === 'string' ? requestLog.requestId : 'unknown';
+}
+
+function createSSEStageTapStream<T>(
+  stage: string,
+  requestLog: any,
+  options?: { includeBytes?: boolean }
+): TransformStream<T, T> {
+  const startAt = Date.now();
+  let chunkCount = 0;
+  let byteCount = 0;
+  let doneCount = 0;
+
+  return new TransformStream<T, T>({
+    transform(chunk, controller) {
+      chunkCount++;
+
+      if ((chunk as any)?.type === '[DONE]') {
+        doneCount++;
+      }
+
+      if (options?.includeBytes && chunk instanceof Uint8Array) {
+        byteCount += chunk.byteLength;
+      }
+
+      if (chunkCount === 1) {
+        logger.debug(
+          {
+            request: requestLog,
+            stream: {
+              stage,
+              firstChunkLatencyMs: Date.now() - startAt,
+              requestId: getRequestIdFromLog(requestLog)
+            }
+          },
+          'SSE stream stage received first chunk'
+        );
+      }
+
+      controller.enqueue(chunk);
+    },
+    flush() {
+      logger.debug(
+        {
+          request: requestLog,
+          stream: {
+            stage,
+            requestId: getRequestIdFromLog(requestLog),
+            chunks: chunkCount,
+            bytes: options?.includeBytes ? byteCount : undefined,
+            doneSignals: doneCount,
+            durationMs: Date.now() - startAt
+          }
+        },
+        'SSE stream stage completed'
+      );
+    }
+  });
+}
+
+function createSSEIdleHeartbeatStream(
+  source: ReadableStream<Uint8Array>,
+  requestLog: any,
+  idleMs: number = SSE_IDLE_HEARTBEAT_MS
+): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  const reader = source.getReader();
+  let closed = false;
+  let heartbeatCount = 0;
+  let lastOutboundAt = Date.now();
+  let sawAnthropicMessageStart = false;
+  let sawAnthropicMessageStop = false;
+  let sawDoneSignal = false;
+  let outboundEventCount = 0;
+  let recentSSEText = '';
+  let timer: ReturnType<typeof setInterval> | null = null;
+
+  const TERMINAL_BUFFER_LIMIT = 4096;
+
+  const updateSSEStateFromChunk = (chunk: Uint8Array): void => {
+    const chunkText = decoder.decode(chunk, { stream: true });
+    if (!chunkText) {
+      return;
+    }
+
+    recentSSEText = `${recentSSEText}${chunkText}`;
+    if (recentSSEText.length > TERMINAL_BUFFER_LIMIT) {
+      recentSSEText = recentSSEText.slice(-TERMINAL_BUFFER_LIMIT);
+    }
+
+    if (recentSSEText.includes('event: message_start')) {
+      sawAnthropicMessageStart = true;
+    }
+    if (recentSSEText.includes('event: message_stop')) {
+      sawAnthropicMessageStop = true;
+    }
+    if (recentSSEText.includes('data: [DONE]')) {
+      sawDoneSignal = true;
+    }
+
+    const eventMatches = chunkText.match(/\nevent:/g);
+    if (eventMatches) {
+      outboundEventCount += eventMatches.length;
+    }
+    if (chunkText.startsWith('event:')) {
+      outboundEventCount += 1;
+    }
+  };
+
+  const emitAnthropicTerminalFallback = (controller: ReadableStreamDefaultController<Uint8Array>): void => {
+    if (!sawAnthropicMessageStart || sawAnthropicMessageStop || sawDoneSignal) {
+      return;
+    }
+
+    const fallbackPayload =
+      'event: message_delta\n' +
+      'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\n' +
+      'event: message_stop\n' +
+      'data: {"type":"message_stop"}\n\n';
+
+    try {
+      controller.enqueue(encoder.encode(fallbackPayload));
+      sawAnthropicMessageStop = true;
+      logger.warn(
+        {
+          request: requestLog,
+          stream: {
+            requestId: getRequestIdFromLog(requestLog),
+            outboundEventCount,
+            heartbeatCount
+          }
+        },
+        'Injected fallback Anthropic terminal SSE events after downstream stream error'
+      );
+    } catch (emitError) {
+      logger.warn(
+        {
+          request: requestLog,
+          error: emitError,
+          stream: {
+            requestId: getRequestIdFromLog(requestLog),
+            outboundEventCount,
+            heartbeatCount
+          }
+        },
+        'Failed to inject fallback Anthropic terminal SSE events'
+      );
+    }
+  };
+
+  const stopTimer = () => {
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+  };
+
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      const tickMs = Math.max(1000, Math.floor(idleMs / 2));
+      timer = setInterval(() => {
+        if (closed) {
+          return;
+        }
+
+        const now = Date.now();
+        if (now - lastOutboundAt < idleMs) {
+          return;
+        }
+
+        try {
+          controller.enqueue(encoder.encode(': keep-alive\n\n'));
+          heartbeatCount++;
+          lastOutboundAt = now;
+
+          if (heartbeatCount === 1 || heartbeatCount % 20 === 0) {
+            logger.debug(
+              {
+                request: requestLog,
+                stream: {
+                  requestId: getRequestIdFromLog(requestLog),
+                  heartbeatCount,
+                  idleMs
+                }
+              },
+              'Sent SSE heartbeat to keep client connection alive'
+            );
+          }
+        } catch (error) {
+          logger.debug(
+            { request: requestLog, error },
+            'Failed to send SSE heartbeat, likely stream already closed'
+          );
+          closed = true;
+          stopTimer();
+        }
+      }, tickMs);
+    },
+    async pull(controller) {
+      if (closed) {
+        controller.close();
+        return;
+      }
+
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          closed = true;
+          stopTimer();
+          controller.close();
+          logger.info(
+            {
+              request: requestLog,
+              stream: {
+                requestId: getRequestIdFromLog(requestLog),
+                heartbeatCount
+              }
+            },
+            'SSE stream closed after heartbeat protection'
+          );
+          return;
+        }
+
+        controller.enqueue(value);
+        updateSSEStateFromChunk(value);
+        lastOutboundAt = Date.now();
+      } catch (error) {
+        closed = true;
+        stopTimer();
+        emitAnthropicTerminalFallback(controller);
+        logger.warn(
+          {
+            request: requestLog,
+            error,
+            stream: {
+              requestId: getRequestIdFromLog(requestLog),
+              sawAnthropicMessageStart,
+              sawAnthropicMessageStop,
+              sawDoneSignal,
+              outboundEventCount,
+              heartbeatCount
+            }
+          },
+          'SSE heartbeat wrapper read failed, closing stream'
+        );
+        controller.close();
+      }
+    },
+    async cancel(reason) {
+      closed = true;
+      stopTimer();
+      try {
+        await reader.cancel(reason);
+      } catch {
+      }
+    }
+  });
+}
+
+function createResilientSSEInputStream(source: ReadableStream<Uint8Array>, requestLog: any): ReadableStream<Uint8Array> {
+  const reader = source.getReader();
+  let closed = false;
+
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (closed) {
+        controller.close();
+        return;
+      }
+
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          closed = true;
+          controller.close();
+          return;
+        }
+
+        controller.enqueue(value);
+      } catch (error) {
+        logger.warn(
+          { request: requestLog, error },
+          'Upstream SSE stream aborted unexpectedly, closing stream gracefully'
+        );
+        closed = true;
+        controller.close();
+      }
+    },
+    async cancel(reason) {
+      closed = true;
+      try {
+        await reader.cancel(reason);
+      } catch {
+      }
+    }
+  });
+}
+
 /**
  * Result type for response preparation
  */
@@ -88,6 +390,7 @@ export async function prepareResponse(
   // ===== Streaming Response (SSE) =====
   if (isStreamingRequest && contentType.includes('text/event-stream') && res.body) {
     logger.info({ request: requestLog }, '--- Applying SSE Stream Transformation ---');
+    headers.delete('content-length');
 
     // Record SSE response headers (不记录 body，因为是流式数据)
     if (reqLogger) {
@@ -99,7 +402,8 @@ export async function prepareResponse(
     }
 
     // For streams, we don't modify content-length here as the final length is unknown.
-    let streamBody: ReadableStream;
+    let streamBody: ReadableStream<Uint8Array>;
+    const upstreamSSEBody = createResilientSSEInputStream(res.body, requestLog);
 
     // Check if there are stream processing hooks registered
     const hasStreamCallbacks = pluginHooks?.onStreamChunk.hasCallbacks() ?? false;
@@ -115,15 +419,25 @@ export async function prepareResponse(
       // 1. SSE 解析器：Uint8Array → JSON objects
       // 2. Plugin 转换器：JSON objects → transformed JSON objects
       // 3. SSE 序列化器：JSON objects → Uint8Array
-      streamBody = res.body
+      streamBody = upstreamSSEBody
+        .pipeThrough(createSSEStageTapStream<Uint8Array>('upstream', requestLog, { includeBytes: true }))
         .pipeThrough(createSSEParserStream())
+        .pipeThrough(createSSEStageTapStream<any>('parser', requestLog))
         .pipeThrough(createPluginTransformStream(pluginHooks, streamRequestContext))
-        .pipeThrough(createSSESerializerStream());
+        .pipeThrough(createSSEStageTapStream<any>('transform', requestLog))
+        .pipeThrough(createSSESerializerStream())
+        .pipeThrough(createSSEStageTapStream<Uint8Array>('serializer', requestLog, { includeBytes: true }));
     } else {
       // No stream plugins - pass through unchanged
       logger.debug({ request: requestLog }, 'No stream plugins found, passing through unchanged');
-      streamBody = res.body;
+      streamBody = upstreamSSEBody.pipeThrough(
+        createSSEStageTapStream<Uint8Array>('upstream-pass-through', requestLog, { includeBytes: true })
+      );
     }
+
+    streamBody = createResilientSSEInputStream(streamBody, requestLog);
+
+    streamBody = createSSEIdleHeartbeatStream(streamBody, requestLog);
 
     return {
       headers,

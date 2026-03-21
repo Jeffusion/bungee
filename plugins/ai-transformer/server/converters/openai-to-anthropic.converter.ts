@@ -14,9 +14,76 @@ import type { AIConverter } from './base';
 import type { MutableRequestContext, ResponseContext, StreamChunkContext } from '../../../../packages/core/src/hooks';
 import { parseThinkingTags } from './utils';
 
+interface OpenAIToAnthropicRuntimeOptions {
+  anthropicMaxTokens?: number;
+  openAILowToAnthropicTokens?: number;
+  openAIMediumToAnthropicTokens?: number;
+  openAIHighToAnthropicTokens?: number;
+  openAIXHighToAnthropicTokens?: number;
+}
+
 export class OpenAIToAnthropicConverter implements AIConverter {
   readonly from = 'openai';
   readonly to = 'anthropic';
+  private runtimeOptions: OpenAIToAnthropicRuntimeOptions = {};
+
+  setRuntimeOptions(options: unknown): void {
+    if (!options || typeof options !== 'object') {
+      this.runtimeOptions = {};
+      return;
+    }
+
+    const value = options as Record<string, unknown>;
+    this.runtimeOptions = {
+      anthropicMaxTokens: this.parseIntegerOption(value.anthropicMaxTokens),
+      openAILowToAnthropicTokens: this.parseIntegerOption(value.openAILowToAnthropicTokens),
+      openAIMediumToAnthropicTokens: this.parseIntegerOption(value.openAIMediumToAnthropicTokens),
+      openAIHighToAnthropicTokens: this.parseIntegerOption(value.openAIHighToAnthropicTokens),
+      openAIXHighToAnthropicTokens: this.parseIntegerOption(value.openAIXHighToAnthropicTokens)
+    };
+  }
+
+  private parseIntegerOption(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return Math.trunc(value);
+    }
+
+    if (typeof value === 'string' && value.trim().length > 0) {
+      const parsed = parseInt(value, 10);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+
+    return undefined;
+  }
+
+  private resolveAnthropicMaxTokens(): number | undefined {
+    if (this.runtimeOptions.anthropicMaxTokens !== undefined) {
+      return this.runtimeOptions.anthropicMaxTokens;
+    }
+
+    return this.parseIntegerOption(process.env.ANTHROPIC_MAX_TOKENS);
+  }
+
+  private resolveOpenAIToAnthropicBudget(effort: string): number | undefined {
+    const normalizedEffort = effort.trim().toLowerCase();
+    if (normalizedEffort === 'low' && this.runtimeOptions.openAILowToAnthropicTokens !== undefined) {
+      return this.runtimeOptions.openAILowToAnthropicTokens;
+    }
+    if (normalizedEffort === 'medium' && this.runtimeOptions.openAIMediumToAnthropicTokens !== undefined) {
+      return this.runtimeOptions.openAIMediumToAnthropicTokens;
+    }
+    if (normalizedEffort === 'high' && this.runtimeOptions.openAIHighToAnthropicTokens !== undefined) {
+      return this.runtimeOptions.openAIHighToAnthropicTokens;
+    }
+    if (normalizedEffort === 'xhigh' && this.runtimeOptions.openAIXHighToAnthropicTokens !== undefined) {
+      return this.runtimeOptions.openAIXHighToAnthropicTokens;
+    }
+
+    const envKey = `OPENAI_${normalizedEffort.toUpperCase()}_TO_ANTHROPIC_TOKENS`;
+    return this.parseIntegerOption(process.env[envKey]);
+  }
 
   async onBeforeRequest(ctx: MutableRequestContext): Promise<void> {
     const body = ctx.body as any;
@@ -64,10 +131,13 @@ export class OpenAIToAnthropicConverter implements AIConverter {
     // Max tokens
     if (normalizedBody.max_tokens) {
       anthropicBody.max_tokens = normalizedBody.max_tokens;
-    } else if (process.env.ANTHROPIC_MAX_TOKENS) {
-      anthropicBody.max_tokens = parseInt(process.env.ANTHROPIC_MAX_TOKENS);
-    } else if (!normalizedBody.max_completion_tokens) {
-      throw new Error('max_tokens is required. Provide it in request or set ANTHROPIC_MAX_TOKENS environment variable');
+    } else {
+      const anthropicMaxTokens = this.resolveAnthropicMaxTokens();
+      if (anthropicMaxTokens !== undefined) {
+        anthropicBody.max_tokens = anthropicMaxTokens;
+      } else if (!normalizedBody.max_completion_tokens) {
+        throw new Error('max_tokens is required. Provide it in request or set ANTHROPIC_MAX_TOKENS environment variable');
+      }
     }
 
     // Other parameters
@@ -94,19 +164,22 @@ export class OpenAIToAnthropicConverter implements AIConverter {
       anthropicBody.tools = this.convertTools(normalizedBody.tools);
     }
 
+    const anthropicToolChoice = this.mapOpenAIToolChoiceToAnthropic(normalizedBody.tool_choice);
+    if (anthropicToolChoice !== undefined) {
+      anthropicBody.tool_choice = anthropicToolChoice;
+      if (anthropicToolChoice === 'none') {
+        delete anthropicBody.tools;
+      }
+    }
+
     // Thinking budget conversion for reasoning models
     if (normalizedBody.max_completion_tokens) {
       const effort = normalizedBody.reasoning_effort || 'medium';
       const envKey = `OPENAI_${effort.toUpperCase()}_TO_ANTHROPIC_TOKENS`;
-      const tokens = process.env[envKey];
+      const thinkingBudget = this.resolveOpenAIToAnthropicBudget(effort);
 
-      if (!tokens) {
+      if (thinkingBudget === undefined) {
         throw new Error(`Environment variable ${envKey} not configured for reasoning_effort conversion`);
-      }
-
-      const thinkingBudget = parseInt(tokens);
-      if (isNaN(thinkingBudget)) {
-        throw new Error(`Invalid ${envKey} value: must be integer`);
       }
 
       anthropicBody.thinking = {
@@ -311,6 +384,61 @@ export class OpenAIToAnthropicConverter implements AIConverter {
         };
       })
       .filter((t: any) => t.name);
+  }
+
+  private mapOpenAIToolChoiceToAnthropic(toolChoice: unknown): any {
+    if (toolChoice === undefined || toolChoice === null) {
+      return undefined;
+    }
+
+    if (typeof toolChoice === 'string') {
+      const normalized = toolChoice.trim().toLowerCase();
+      if (normalized === 'none') {
+        return 'none';
+      }
+      if (normalized === 'required') {
+        return { type: 'any' };
+      }
+      if (normalized === 'auto') {
+        return { type: 'auto' };
+      }
+      return undefined;
+    }
+
+    if (typeof toolChoice !== 'object' || Array.isArray(toolChoice)) {
+      return undefined;
+    }
+
+    const choice = toolChoice as Record<string, any>;
+    const type = typeof choice.type === 'string' ? choice.type.trim().toLowerCase() : '';
+
+    if (type === 'function') {
+      const name = typeof choice.function?.name === 'string'
+        ? choice.function.name.trim()
+        : '';
+      if (!name) {
+        return undefined;
+      }
+
+      return {
+        type: 'tool',
+        name
+      };
+    }
+
+    if (type === 'none') {
+      return 'none';
+    }
+
+    if (type === 'required' || type === 'any') {
+      return { type: 'any' };
+    }
+
+    if (type === 'auto') {
+      return { type: 'auto' };
+    }
+
+    return undefined;
   }
 
   private extractInstructionText(content: any): string {
@@ -757,6 +885,19 @@ export class OpenAIToAnthropicConverter implements AIConverter {
     const streamId = ctx.streamState.get('streamId') as string;
 
     if (eventType === 'message_start') {
+      const startInputTokens = chunk.message?.usage?.input_tokens;
+      const startOutputTokens = chunk.message?.usage?.output_tokens;
+      const promptTokens = typeof startInputTokens === 'number' ? startInputTokens : 0;
+      const completionTokens = typeof startOutputTokens === 'number' ? startOutputTokens : 0;
+
+      if (promptTokens > 0) {
+        ctx.streamState.set('anthropic_input_tokens', promptTokens);
+      }
+
+      if (completionTokens > 0) {
+        ctx.streamState.set('anthropic_output_tokens', completionTokens);
+      }
+
       return [{
         id: `chatcmpl-${streamId}`,
         object: 'chat.completion.chunk',
@@ -766,7 +907,12 @@ export class OpenAIToAnthropicConverter implements AIConverter {
           index: 0,
           delta: { role: 'assistant' },
           finish_reason: null
-        }]
+        }],
+        usage: {
+          prompt_tokens: promptTokens,
+          completion_tokens: completionTokens,
+          total_tokens: promptTokens + completionTokens
+        }
       }];
     }
 
@@ -838,12 +984,37 @@ export class OpenAIToAnthropicConverter implements AIConverter {
       else if (stopReason === 'max_tokens') finishReason = 'length';
       else if (stopReason === 'stop_sequence') finishReason = 'stop';
 
-      // Anthropic message_delta 的 usage 在顶层，包含 input_tokens 和 output_tokens
-      const usage = chunk.usage ? {
-        prompt_tokens: chunk.usage.input_tokens || 0,
-        completion_tokens: chunk.usage.output_tokens || 0,
-        total_tokens: (chunk.usage.input_tokens || 0) + (chunk.usage.output_tokens || 0)
-      } : undefined;
+      const topLevelUsage = chunk.usage && typeof chunk.usage === 'object'
+        ? chunk.usage
+        : undefined;
+      const deltaUsage = chunk.delta?.usage && typeof chunk.delta.usage === 'object'
+        ? chunk.delta.usage
+        : undefined;
+
+      const latestInputFromEvent = typeof topLevelUsage?.input_tokens === 'number'
+        ? topLevelUsage.input_tokens
+        : undefined;
+      const latestOutputFromEvent = typeof topLevelUsage?.output_tokens === 'number'
+        ? topLevelUsage.output_tokens
+        : typeof deltaUsage?.output_tokens === 'number'
+          ? deltaUsage.output_tokens
+          : undefined;
+
+      const promptTokens = latestInputFromEvent ?? (ctx.streamState.get('anthropic_input_tokens') as number | undefined) ?? 0;
+      const completionTokens = latestOutputFromEvent ?? (ctx.streamState.get('anthropic_output_tokens') as number | undefined) ?? 0;
+
+      if (promptTokens > 0) {
+        ctx.streamState.set('anthropic_input_tokens', promptTokens);
+      }
+      if (completionTokens > 0) {
+        ctx.streamState.set('anthropic_output_tokens', completionTokens);
+      }
+
+      const usage = {
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+        total_tokens: promptTokens + completionTokens
+      };
 
       return [{
         id: `chatcmpl-${streamId}`,
@@ -855,7 +1026,7 @@ export class OpenAIToAnthropicConverter implements AIConverter {
           delta: {},
           finish_reason: finishReason
         }],
-        ...(usage && { usage })
+        usage
       }];
     }
 

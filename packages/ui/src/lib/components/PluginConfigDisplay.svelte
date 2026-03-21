@@ -38,6 +38,7 @@
     const items: DisplayItem[] = [];
     const processedFields = new Set<string>();
     const schemaFieldNames = collectSchemaFieldNames(schema);
+    const showIfContext = buildShowIfContext(schema, config);
 
     for (const field of schema) {
       // 虚拟字段：使用 formatter 将实际字段值转换回虚拟字段显示格式
@@ -62,7 +63,7 @@
         }
       }
       // 普通字段
-      else if (hasDisplayValue(config[field.name]) && !processedFields.has(field.name) && shouldShowField(field, config)) {
+      else if (hasDisplayValue(config[field.name]) && !processedFields.has(field.name) && shouldShowField(field, showIfContext)) {
         const displayValue = formatFieldValue(field, config[field.name]);
         items.push({
           label: $_(field.label),
@@ -83,6 +84,24 @@
     }
 
     return items;
+  }
+
+  function buildShowIfContext(schema: any[], config: Record<string, any>): Record<string, any> {
+    const context: Record<string, any> = { ...config };
+
+    for (const field of schema) {
+      if (!isVirtualField(field) || !field.fieldTransform) continue;
+
+      const formatter = createFormatter(field.fieldTransform);
+      if (!formatter) continue;
+
+      const virtualValue = formatter(null, config);
+      if (virtualValue !== undefined && virtualValue !== null && virtualValue !== '') {
+        context[field.name] = virtualValue;
+      }
+    }
+
+    return context;
   }
 
   /**
@@ -112,6 +131,20 @@
     // json: 格式化 JSON
     if (field.type === 'json' && typeof value === 'object') {
       return JSON.stringify(value, null, 2);
+    }
+
+    if (field.type === 'model_mapping' && Array.isArray(value)) {
+      return value
+        .filter((item: unknown) => {
+          if (!item || typeof item !== 'object') return false;
+          const mapping = item as { source?: unknown; target?: unknown };
+          return typeof mapping.source === 'string' && typeof mapping.target === 'string';
+        })
+        .map((item) => {
+          const mapping = item as { source: string; target: string };
+          return `${mapping.source} → ${mapping.target}`;
+        })
+        .join(', ');
     }
 
     // 其他类型：直接转字符串

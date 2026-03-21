@@ -8,6 +8,37 @@ import { logger } from './logger';
 export function createSSEParserStream(): TransformStream<Uint8Array, any> {
   let buffer = '';
   const decoder = new TextDecoder();
+  let currentEvent: string | null = null;
+  let currentDataLines: string[] = [];
+
+  const resetCurrent = () => {
+    currentEvent = null;
+    currentDataLines = [];
+  };
+
+  const enqueueCurrent = (controller: TransformStreamDefaultController<any>) => {
+    if (currentDataLines.length === 0) {
+      resetCurrent();
+      return;
+    }
+
+    const currentData = currentDataLines.join('\n');
+    try {
+      if (currentData.trim() === '[DONE]') {
+        controller.enqueue({ type: '[DONE]', event: currentEvent });
+      } else {
+        const parsed = JSON.parse(currentData);
+        if (currentEvent) {
+          parsed._event = currentEvent;
+        }
+        controller.enqueue(parsed);
+      }
+    } catch (e) {
+      logger.warn({ data: currentData, error: e }, 'Failed to parse SSE data');
+    }
+
+    resetCurrent();
+  };
 
   return new TransformStream({
     transform(chunk, controller) {
@@ -16,53 +47,32 @@ export function createSSEParserStream(): TransformStream<Uint8Array, any> {
       const lines = buffer.split('\n');
       buffer = lines.pop() || ''; // 保留最后一个不完整的行
 
-      let currentEvent: string | null = null;
-      let currentData = '';
-
       for (const line of lines) {
-        if (line.startsWith('event: ')) {
-          currentEvent = line.substring(7).trim();
-        } else if (line.startsWith('data: ')) {
-          currentData = line.substring(6);
-        } else if (line === '') {
-          // 空行表示事件结束
-          if (currentData) {
-            try {
-              // 处理 [DONE] 信号
-              if (currentData.trim() === '[DONE]') {
-                controller.enqueue({ type: '[DONE]', event: currentEvent });
-              } else {
-                const parsed = JSON.parse(currentData);
-                // 添加 event 字段（如果有）
-                if (currentEvent) {
-                  parsed._event = currentEvent;
-                }
-                controller.enqueue(parsed);
-              }
-            } catch (e) {
-              logger.warn({ data: currentData, error: e }, 'Failed to parse SSE data');
-            }
-            currentData = '';
-            currentEvent = null;
-          }
+        const normalizedLine = line.endsWith('\r') ? line.slice(0, -1) : line;
+
+        if (normalizedLine.startsWith('event:')) {
+          currentEvent = normalizedLine.slice(6).trim();
+        } else if (normalizedLine.startsWith('data:')) {
+          currentDataLines.push(normalizedLine.slice(5).trimStart());
+        } else if (normalizedLine === '') {
+          enqueueCurrent(controller);
         }
       }
     },
 
     flush(controller) {
-      // 处理缓冲区中剩余的数据
-      if (buffer.trim()) {
-        try {
-          if (buffer.trim() === '[DONE]') {
-            controller.enqueue({ type: '[DONE]' });
-          } else if (buffer.startsWith('data: ')) {
-            const data = buffer.substring(6);
-            const parsed = JSON.parse(data);
-            controller.enqueue(parsed);
-          }
-        } catch (e) {
-          logger.warn({ buffer, error: e }, 'Failed to parse remaining SSE data');
+      if (buffer.length > 0) {
+        const normalizedLine = buffer.endsWith('\r') ? buffer.slice(0, -1) : buffer;
+        if (normalizedLine.startsWith('event:')) {
+          currentEvent = normalizedLine.slice(6).trim();
+        } else if (normalizedLine.startsWith('data:')) {
+          currentDataLines.push(normalizedLine.slice(5).trimStart());
         }
+      }
+
+      // 处理缓冲区中剩余的数据
+      if (currentDataLines.length > 0) {
+        enqueueCurrent(controller);
       }
     }
   });

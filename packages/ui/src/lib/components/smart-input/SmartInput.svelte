@@ -1,5 +1,13 @@
+<script lang="ts" context="module">
+  import { writable } from 'svelte/store';
+
+  export const activeSmartInputIdStore = writable<string | null>(null);
+</script>
+
 <script lang="ts">
-  import { createEventDispatcher, onMount } from 'svelte';
+  import { createEventDispatcher } from 'svelte';
+  import { onMount } from 'svelte';
+  import type { Unsubscriber } from 'svelte/store';
   import { fade, fly } from 'svelte/transition';
   import { debounce } from 'lodash-es';
   import { _ } from 'svelte-i18n';
@@ -20,12 +28,14 @@
   export let id: string = uuidv4();
 
   const dispatch = createEventDispatcher();
+  const MAX_SUGGESTIONS = 200;
   
+  let rootEl: HTMLDivElement | null = null;
   let error: string | null = null;
-  let focused: boolean = false;
-  let inputElement: HTMLInputElement;
   let activeSuggestionIndex: number = -1;
   let filteredSuggestions: Array<{ value: string; label?: string; description?: string }> = [];
+  let pointerDownInside = false;
+  let activeSmartInputId: string | null = null;
 
   // Debounced validation
   const debouncedValidate = debounce((val: any) => {
@@ -53,42 +63,61 @@
     filteredSuggestions = suggestions.filter(s => 
       String(s.value).toLowerCase().includes(strVal) || 
       (s.label && s.label.toLowerCase().includes(strVal))
-    ).slice(0, 10); // Limit to 10 suggestions
+    ).slice(0, MAX_SUGGESTIONS);
   }
 
   function handleInput(event: Event) {
     const target = event.target as HTMLInputElement;
     value = target.value;
     updateFilteredSuggestions(value);
+    const shouldOpen = !showSuggestions;
     showSuggestions = true;
+    if (shouldOpen) {
+      activeSmartInputIdStore.set(id);
+    }
     activeSuggestionIndex = -1;
     dispatch('change', value);
   }
 
   function handleFocus() {
-    focused = true;
+    const shouldOpen = !showSuggestions;
     showSuggestions = true;
+    if (shouldOpen) {
+      activeSmartInputIdStore.set(id);
+    }
     updateFilteredSuggestions(value);
     dispatch('focus');
   }
 
-  function handleBlur() {
-    // Delay hiding suggestions to allow clicking on them
+  function handleBlur(event: FocusEvent) {
+    const nextTarget = event.relatedTarget;
+    if (nextTarget instanceof Node && rootEl?.contains(nextTarget)) {
+      return;
+    }
+
     setTimeout(() => {
-      focused = false;
+      if (pointerDownInside) {
+        return;
+      }
       showSuggestions = false;
-      // Immediate validation on blur
+      if (activeSmartInputId === id) {
+        activeSmartInputIdStore.set(null);
+      }
+      pointerDownInside = false;
       if (validate) {
         error = validate(value);
         dispatch('validate', error ? [error] : []);
       }
       dispatch('blur');
-    }, 200);
+    }, 100);
   }
 
   function selectSuggestion(suggestion: { value: string; label?: string }) {
     value = suggestion.value;
     showSuggestions = false;
+    if (activeSmartInputId === id) {
+      activeSmartInputIdStore.set(null);
+    }
     error = null; // Clear error on valid selection
     dispatch('change', value);
     dispatch('select', suggestion);
@@ -113,8 +142,60 @@
       }
     } else if (event.key === 'Escape') {
       showSuggestions = false;
+      if (activeSmartInputId === id) {
+        activeSmartInputIdStore.set(null);
+      }
     }
   }
+
+  onMount(() => {
+    let unsubscribeActiveId: Unsubscriber | null = null;
+
+    unsubscribeActiveId = activeSmartInputIdStore.subscribe((nextId) => {
+      activeSmartInputId = nextId;
+      if (showSuggestions && nextId && nextId !== id) {
+        showSuggestions = false;
+      }
+    });
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      pointerDownInside = target instanceof Node && !!rootEl?.contains(target);
+    };
+
+    const handlePointerUp = () => {
+      setTimeout(() => {
+        pointerDownInside = false;
+      }, 0);
+    };
+
+    const clearPointerState = () => {
+      pointerDownInside = false;
+    };
+
+    const handleVisibilityChange = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+        pointerDownInside = false;
+      }
+    };
+
+    window.addEventListener('pointerdown', handlePointerDown, true);
+    window.addEventListener('pointerup', handlePointerUp, true);
+    window.addEventListener('pointercancel', clearPointerState, true);
+    window.addEventListener('blur', clearPointerState, true);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown, true);
+      window.removeEventListener('pointerup', handlePointerUp, true);
+      window.removeEventListener('pointercancel', clearPointerState, true);
+      window.removeEventListener('blur', clearPointerState, true);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      unsubscribeActiveId?.();
+      if (activeSmartInputId === id) {
+        activeSmartInputIdStore.set(null);
+      }
+    };
+  });
 
   // Ensure scroll into view for active suggestion
   $: if (activeSuggestionIndex >= 0 && typeof document !== 'undefined') {
@@ -125,7 +206,7 @@
   }
 </script>
 
-<div class="form-control w-full relative">
+<div class="form-control w-full relative" bind:this={rootEl}>
   {#if label}
     <label class="label" for={id}>
       <span class="label-text">{label}</span>
@@ -135,7 +216,6 @@
   <div class="relative w-full">
     <input
       {id}
-      bind:this={inputElement}
       {type}
       {value}
       {placeholder}
@@ -147,6 +227,9 @@
       on:blur={handleBlur}
       on:keydown={handleKeydown}
       {...$$restProps}
+      aria-expanded={showSuggestions && filteredSuggestions.length > 0}
+      aria-haspopup="listbox"
+      aria-controls={`${id}-suggestions`}
       class="input input-bordered w-full {inputClass} 
         {size === 'xs' ? 'input-xs' : ''} 
         {size === 'sm' ? 'input-sm' : ''} 
@@ -158,21 +241,24 @@
 
     {#if showSuggestions && filteredSuggestions.length > 0}
       <ul 
-        class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-full absolute z-50 mt-1 max-h-60 overflow-y-auto"
+        id={`${id}-suggestions`}
+        role="listbox"
+        class="absolute left-0 z-50 mt-1 w-full rounded-box border border-base-300 bg-base-100 p-2 shadow max-h-60 overflow-y-auto overflow-x-hidden overscroll-contain"
         transition:fly={{ y: -5, duration: 150 }}
       >
         {#each filteredSuggestions as suggestion, index}
-          <li>
+          <li class="w-full">
             <button 
               type="button"
               id="suggestion-{index}"
-              class:active={index === activeSuggestionIndex}
+              class="w-full rounded-lg px-3 py-2 text-left transition-colors hover:bg-base-200"
+              class:bg-base-200={index === activeSuggestionIndex}
               on:click={() => selectSuggestion(suggestion)}
             >
-              <div class="flex flex-col items-start">
-                <span class="font-medium">{suggestion.label || suggestion.value}</span>
+              <div class="flex flex-col items-start w-full min-w-0">
+                <span class="font-medium whitespace-normal break-words w-full">{suggestion.label || suggestion.value}</span>
                 {#if suggestion.description}
-                  <span class="text-xs opacity-70">{suggestion.description}</span>
+                  <span class="text-xs opacity-70 whitespace-normal break-words w-full">{suggestion.description}</span>
                 {/if}
               </div>
             </button>

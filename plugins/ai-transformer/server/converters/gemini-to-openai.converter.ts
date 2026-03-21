@@ -12,9 +12,61 @@
 import type { AIConverter } from './base';
 import type { MutableRequestContext, ResponseContext, StreamChunkContext } from '../../../../packages/core/src/hooks';
 
+interface GeminiToOpenAIRuntimeOptions {
+  geminiToOpenAILowReasoningThreshold?: number;
+  geminiToOpenAIHighReasoningThreshold?: number;
+}
+
 export class GeminiToOpenAIConverter implements AIConverter {
   readonly from = 'gemini';
   readonly to = 'openai';
+  private runtimeOptions: GeminiToOpenAIRuntimeOptions = {};
+
+  setRuntimeOptions(options: unknown): void {
+    if (!options || typeof options !== 'object') {
+      this.runtimeOptions = {};
+      return;
+    }
+
+    const value = options as Record<string, unknown>;
+    this.runtimeOptions = {
+      geminiToOpenAILowReasoningThreshold: this.parseIntegerOption(value.geminiToOpenAILowReasoningThreshold),
+      geminiToOpenAIHighReasoningThreshold: this.parseIntegerOption(value.geminiToOpenAIHighReasoningThreshold)
+    };
+  }
+
+  private parseIntegerOption(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return Math.trunc(value);
+    }
+
+    if (typeof value === 'string' && value.trim().length > 0) {
+      const parsed = parseInt(value, 10);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+
+    return undefined;
+  }
+
+  private resolveLowReasoningThreshold(): number {
+    if (this.runtimeOptions.geminiToOpenAILowReasoningThreshold !== undefined) {
+      return this.runtimeOptions.geminiToOpenAILowReasoningThreshold;
+    }
+
+    const envValue = this.parseIntegerOption(process.env.GEMINI_TO_OPENAI_LOW_REASONING_THRESHOLD);
+    return envValue ?? 0;
+  }
+
+  private resolveHighReasoningThreshold(): number {
+    if (this.runtimeOptions.geminiToOpenAIHighReasoningThreshold !== undefined) {
+      return this.runtimeOptions.geminiToOpenAIHighReasoningThreshold;
+    }
+
+    const envValue = this.parseIntegerOption(process.env.GEMINI_TO_OPENAI_HIGH_REASONING_THRESHOLD);
+    return envValue ?? 0;
+  }
 
   async onBeforeRequest(ctx: MutableRequestContext): Promise<void> {
     const body = ctx.body as any;
@@ -182,8 +234,8 @@ export class GeminiToOpenAIConverter implements AIConverter {
 
         if (thinkingBudget > 0) {
           // 读取阈值环境变量
-          const lowThreshold = parseInt(process.env.GEMINI_TO_OPENAI_LOW_REASONING_THRESHOLD || '0');
-          const highThreshold = parseInt(process.env.GEMINI_TO_OPENAI_HIGH_REASONING_THRESHOLD || '0');
+          const lowThreshold = this.resolveLowReasoningThreshold();
+          const highThreshold = this.resolveHighReasoningThreshold();
 
           // 推断 reasoning_effort
           let effort = 'medium';
@@ -195,14 +247,12 @@ export class GeminiToOpenAIConverter implements AIConverter {
 
           openaiBody.reasoning_effort = effort;
 
-          // max_completion_tokens - 优先 maxOutputTokens，fallback OPENAI_REASONING_MAX_TOKENS
-          const maxCompletionTokens = genConfig.maxOutputTokens || process.env.OPENAI_REASONING_MAX_TOKENS;
-          if (!maxCompletionTokens) {
-            throw new Error('maxOutputTokens or OPENAI_REASONING_MAX_TOKENS required for reasoning mode');
+          if (genConfig.maxOutputTokens !== undefined) {
+            openaiBody.max_completion_tokens = typeof genConfig.maxOutputTokens === 'string'
+              ? parseInt(genConfig.maxOutputTokens)
+              : genConfig.maxOutputTokens;
+            delete openaiBody.max_tokens;
           }
-          openaiBody.max_completion_tokens = typeof maxCompletionTokens === 'string'
-            ? parseInt(maxCompletionTokens)
-            : maxCompletionTokens;
         }
       }
     }

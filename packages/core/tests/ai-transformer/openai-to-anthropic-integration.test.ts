@@ -200,6 +200,55 @@ describe('OpenAI to Anthropic - Enhanced Integration Tests', () => {
     expect(forwardedBody.temperature).toBe(0.7);
   });
 
+  test('should apply configured model mapping before conversion', async () => {
+    const mappedConfig: AppConfig = {
+      routes: [
+        {
+          path: '/v1/openai-to-anthropic-mapped',
+          pathRewrite: { '^/v1/openai-to-anthropic-mapped': '/v1' },
+          plugins: [
+            {
+              name: 'ai-transformer',
+              options: {
+                from: 'openai',
+                to: 'anthropic',
+                modelMappings: [
+                  {
+                    source: 'gpt-4o-mini',
+                    target: 'claude-3-5-sonnet-20241022'
+                  }
+                ]
+              }
+            }
+          ],
+          upstreams: [{ target: 'http://mock-anthropic.com', weight: 100, priority: 1 }]
+        }
+      ]
+    };
+
+    await cleanupPluginRegistry();
+    initializeRuntimeState(mappedConfig);
+    await initializePluginRegistryForTests(mappedConfig);
+
+    const openaiRequest = {
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: 'Hello mapped model' }],
+      max_tokens: 64
+    };
+
+    const req = new Request('http://localhost/v1/openai-to-anthropic-mapped/chat/completions', {
+      method: 'POST',
+      body: JSON.stringify(openaiRequest),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    await handleRequest(req, mappedConfig);
+
+    const [, fetchOptions] = mockedFetch.mock.calls[0];
+    const forwardedBody = JSON.parse(fetchOptions!.body as string);
+    expect(forwardedBody.model).toBe('claude-3-5-sonnet-20241022');
+  });
+
   test('should handle system messages correctly', async () => {
     const openaiRequest = {
       model: 'claude-3-opus-20240229',
@@ -818,6 +867,20 @@ describe('OpenAI to Anthropic - Enhanced Integration Tests', () => {
     expectOpenAIStreamingChunkContract(events);
     expect(events[0].object).toBe(goldenStreamingExpectations.openaiChunkObject);
     expect(events[0].choices[0].delta.role).toBe(goldenStreamingExpectations.firstRole);
+
+    expect(events[0].usage).toEqual({
+      prompt_tokens: 10,
+      completion_tokens: 0,
+      total_tokens: 10
+    });
+
+    const finalChunk = events[events.length - 1];
+    expect(finalChunk.choices[0].finish_reason).toBe('stop');
+    expect(finalChunk.usage).toEqual({
+      prompt_tokens: 10,
+      completion_tokens: 3,
+      total_tokens: 13
+    });
   });
 
   test('should handle reasoning effort to thinking budget conversion', async () => {
@@ -843,6 +906,52 @@ describe('OpenAI to Anthropic - Enhanced Integration Tests', () => {
     expect(forwardedBody.thinking).toBeDefined();
     expect(forwardedBody.thinking.type).toBe('enabled');
     expect(forwardedBody.thinking.budget_tokens).toBe(16384);
+  });
+
+  test('should prefer plugin token mapping over environment variable for O2A reasoning budget conversion', async () => {
+    const originalHigh = process.env.OPENAI_HIGH_TO_ANTHROPIC_TOKENS;
+    delete process.env.OPENAI_HIGH_TO_ANTHROPIC_TOKENS;
+
+    const configWithMapping: AppConfig = JSON.parse(JSON.stringify(mockConfig));
+    const firstRoute = configWithMapping.routes?.[0];
+    const firstPlugin = firstRoute && Array.isArray(firstRoute.plugins) ? firstRoute.plugins[0] : undefined;
+    if (!firstRoute || !firstPlugin || typeof firstPlugin === 'string') {
+      throw new Error('Invalid test config for ai-transformer plugin');
+    }
+
+    const nextOptions = typeof firstPlugin.options === 'object' && firstPlugin.options !== null
+      ? { ...firstPlugin.options }
+      : {};
+    nextOptions.openAIHighToAnthropicTokens = 7777;
+    firstPlugin.options = nextOptions;
+
+    try {
+      await cleanupPluginRegistry();
+      initializeRuntimeState(configWithMapping);
+      await initializePluginRegistryForTests(configWithMapping);
+
+      const req = new Request('http://localhost/v1/openai-to-anthropic/chat/completions', {
+        method: 'POST',
+        body: JSON.stringify({
+          model: 'claude-3-opus-20240229',
+          messages: [{ role: 'user', content: 'plugin mapping priority check' }],
+          max_completion_tokens: 4096,
+          reasoning_effort: 'high'
+        }),
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      await handleRequest(req, configWithMapping);
+
+      const [, fetchOptions] = mockedFetch.mock.calls[0];
+      const forwardedBody = JSON.parse(fetchOptions!.body as string);
+      expect(forwardedBody.thinking).toBeDefined();
+      expect(forwardedBody.thinking.budget_tokens).toBe(7777);
+    } finally {
+      if (originalHigh !== undefined) {
+        process.env.OPENAI_HIGH_TO_ANTHROPIC_TOKENS = originalHigh;
+      }
+    }
   });
 
   test('should validate and remove tool_calls without corresponding tool results', async () => {
@@ -1073,6 +1182,89 @@ describe('OpenAI to Anthropic - Enhanced Integration Tests', () => {
 
     expect(forwardedBody.messages[2].content[2].type).toBe('tool_result');
     expect(forwardedBody.messages[2].content[2].tool_use_id).toBe('call_forecast');
+  });
+
+  test('should map OpenAI tool_choice function to Anthropic tool_choice tool', async () => {
+    const openaiRequest = {
+      model: 'claude-3-opus-20240229',
+      messages: [{ role: 'user', content: 'Get weather with fixed tool' }],
+      max_tokens: 100,
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'get_weather',
+            description: 'Get weather by city',
+            parameters: {
+              type: 'object',
+              properties: {
+                city: { type: 'string' }
+              }
+            }
+          }
+        }
+      ],
+      tool_choice: {
+        type: 'function',
+        function: {
+          name: 'get_weather'
+        }
+      }
+    };
+
+    const req = new Request('http://localhost/v1/openai-to-anthropic/chat/completions', {
+      method: 'POST',
+      body: JSON.stringify(openaiRequest),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    await handleRequest(req, mockConfig);
+
+    const [, fetchOptions] = mockedFetch.mock.calls[0];
+    const forwardedBody = JSON.parse(fetchOptions!.body as string);
+
+    expect(forwardedBody.tool_choice).toEqual({
+      type: 'tool',
+      name: 'get_weather'
+    });
+  });
+
+  test('should drop anthropic tools when OpenAI tool_choice is none', async () => {
+    const openaiRequest = {
+      model: 'claude-3-opus-20240229',
+      messages: [{ role: 'user', content: 'No tools allowed' }],
+      max_tokens: 64,
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'get_weather',
+            description: 'Get weather by city',
+            parameters: {
+              type: 'object',
+              properties: {
+                city: { type: 'string' }
+              }
+            }
+          }
+        }
+      ],
+      tool_choice: 'none'
+    };
+
+    const req = new Request('http://localhost/v1/openai-to-anthropic/chat/completions', {
+      method: 'POST',
+      body: JSON.stringify(openaiRequest),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    await handleRequest(req, mockConfig);
+
+    const [, fetchOptions] = mockedFetch.mock.calls[0];
+    const forwardedBody = JSON.parse(fetchOptions!.body as string);
+
+    expect(forwardedBody.tool_choice).toBe('none');
+    expect(forwardedBody.tools).toBeUndefined();
   });
 });
 

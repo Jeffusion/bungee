@@ -93,7 +93,7 @@
         if (isVirtualField(field)) {
           if (field.fieldTransform?.fields) {
             const missingFields = field.fieldTransform.fields.filter(
-              realField => !pluginConfig[realField]
+              (realField: string) => !pluginConfig[realField]
             );
             if (missingFields.length > 0) {
               configErrors = {
@@ -244,7 +244,7 @@
           </option>
           {#each availablePlugins as p}
             <option value={p.name}>
-              {$_(p.metadata?.name) || p.name} {p.version ? `(v${p.version})` : ''}
+              {$_(p.metadata?.name ?? p.name)} {p.version ? `(v${p.version})` : ''}
             </option>
           {/each}
         </select>

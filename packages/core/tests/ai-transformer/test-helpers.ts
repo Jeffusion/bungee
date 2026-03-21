@@ -398,9 +398,6 @@ export const mockEnvVars = {
   // Anthropic max_tokens
   ANTHROPIC_MAX_TOKENS: '32000',
 
-  // OpenAI reasoning max_tokens
-  OPENAI_REASONING_MAX_TOKENS: '32000',
-
   // OpenAI to Anthropic thinking budget mappings
   OPENAI_LOW_TO_ANTHROPIC_TOKENS: '2048',
   OPENAI_MEDIUM_TO_ANTHROPIC_TOKENS: '8192',
@@ -410,10 +407,6 @@ export const mockEnvVars = {
   OPENAI_LOW_TO_GEMINI_TOKENS: '2048',
   OPENAI_MEDIUM_TO_GEMINI_TOKENS: '8192',
   OPENAI_HIGH_TO_GEMINI_TOKENS: '16384',
-
-  // Anthropic to OpenAI reasoning effort thresholds
-  ANTHROPIC_TO_OPENAI_LOW_REASONING_THRESHOLD: '2048',
-  ANTHROPIC_TO_OPENAI_HIGH_REASONING_THRESHOLD: '16384',
 
   // Gemini to OpenAI reasoning effort thresholds
   GEMINI_TO_OPENAI_LOW_REASONING_THRESHOLD: '2048',

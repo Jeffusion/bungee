@@ -2,6 +2,7 @@
   import { createEventDispatcher } from 'svelte';
   import { _ } from '../i18n';
   import { createParser, createFormatter, isVirtualField } from '../utils/field-transform';
+  import ModelMappingEditor from './ModelMappingEditor.svelte';
 
   export let schema: any[] = [];
   export let value: Record<string, any> = {};
@@ -42,8 +43,9 @@
 
         if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
           // parse 返回对象 → 虚拟字段，展开为多个实际字段
-          value = { ...value, ...parsed };
-          delete value[fieldName];  // 删除虚拟字段本身
+          const nextValue = { ...value, ...parsed };
+          delete nextValue[fieldName];  // 删除虚拟字段本身
+          value = nextValue;
         } else {
           // parse 返回单值 → 普通字段转换
           value = { ...value, [fieldName]: parsed };
@@ -57,13 +59,69 @@
       value = { ...value, [fieldName]: newValue };
     }
 
+    dispatch('value', value);
     dispatch('change', value);
   }
 
-  function shouldShow(field: any): boolean {
-    if (!field.showIf) return true;
-    return value[field.showIf.field] === field.showIf.value;
+  function buildShowIfContext(currentValue: Record<string, any>): Record<string, any> {
+    const context: Record<string, any> = { ...currentValue };
+
+    for (const field of schema) {
+      if (!field?.fieldTransform) continue;
+
+      const parser = createParser(field.fieldTransform);
+      const rawVirtualValue = currentValue[field.name];
+      if (parser && typeof rawVirtualValue === 'string' && rawVirtualValue.length > 0) {
+        const parsed = parser(rawVirtualValue, currentValue);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          Object.assign(context, parsed);
+        }
+      }
+
+      const formatter = createFormatter(field.fieldTransform);
+      if (!formatter) continue;
+
+      const virtualValue = formatter(context[field.name], context);
+      if (virtualValue !== undefined && virtualValue !== null && virtualValue !== '') {
+        context[field.name] = virtualValue;
+      }
+    }
+
+    return context;
   }
+
+  function matchesShowCondition(condition: any, context: Record<string, any>): boolean {
+    if (!condition || typeof condition !== 'object') return true;
+
+    if (Array.isArray(condition.all)) {
+      return condition.all.every((item: any) => matchesShowCondition(item, context));
+    }
+
+    if (Array.isArray(condition.any)) {
+      return condition.any.some((item: any) => matchesShowCondition(item, context));
+    }
+
+    if (typeof condition.field === 'string') {
+      const fieldValue = context[condition.field];
+      return fieldValue === condition.value;
+    }
+
+    return true;
+  }
+
+  function shouldShow(field: any, context: Record<string, any>): boolean {
+    if (!field.showIf) return true;
+    return matchesShowCondition(field.showIf, context);
+  }
+
+  $: showIfContext = buildShowIfContext(value);
+
+  $: visibleFieldNames = new Set(
+    schema
+      .filter((field) => shouldShow(field, showIfContext))
+      .map((field) => field?.name)
+      .filter((name): name is string => typeof name === 'string' && name.length > 0)
+  );
 
   function validateField(field: any, val: any): string | null {
     // 🔑 虚拟字段：验证其对应的实际字段
@@ -80,7 +138,8 @@
     }
 
     // 普通字段：原有验证逻辑
-    if (field.required && (val === undefined || val === null || val === '')) {
+    const isEmptyArray = Array.isArray(val) && val.length === 0;
+    if (field.required && (val === undefined || val === null || val === '' || isEmptyArray)) {
       return `${field.label} is required`;
     }
 
@@ -120,13 +179,14 @@
       const { [field.name]: _, ...rest } = errors;
       errors = rest;
     }
+    dispatch('errors', errors);
     dispatch('validate', errors);
   }
 </script>
 
 <div class="space-y-4">
-  {#each schema as field}
-    {#if shouldShow(field)}
+  {#each schema as field (field.name)}
+    {#if typeof field?.name === 'string' ? visibleFieldNames.has(field.name) : true}
       <div class="form-control">
         <label class="label" for={field.name}>
           <span class="label-text font-semibold">
@@ -233,6 +293,17 @@
             }}
             on:blur={() => handleBlur(field)}
           ></textarea>
+
+        {:else if field.type === 'model_mapping'}
+          <ModelMappingEditor
+            value={Array.isArray(formattedValues[field.name]) ? formattedValues[field.name] : []}
+            fromProvider={typeof value.from === 'string' ? value.from : ''}
+            toProvider={typeof value.to === 'string' ? value.to : ''}
+            on:change={(event) => {
+              handleChange(field.name, event.detail);
+              handleBlur(field);
+            }}
+          />
         {/if}
 
         {#if field.description}

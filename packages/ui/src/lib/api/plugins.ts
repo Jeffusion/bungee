@@ -67,6 +67,12 @@ export interface PluginSchema {
   configSchema: any[];
 }
 
+export interface PluginModelCatalogResponse {
+  provider: string;
+  models: Array<{ value: string; label?: string; description?: string }>;
+  source?: 'fresh' | 'static';
+}
+
 export const PluginsAPI = {
   list: () => api.get<Plugin[]>('/plugins'),
 
@@ -79,6 +85,9 @@ export const PluginsAPI = {
    * 获取已启用插件的配置 schema（用于路由/上游编辑）
    */
   getEnabledSchemas: () => api.get<Record<string, PluginSchema>>('/plugins/schemas?enabledOnly=true'),
+
+  getAITransformerModels: (provider: string) =>
+    api.get<PluginModelCatalogResponse>(`/plugins/ai-transformer/models?provider=${encodeURIComponent(provider)}`),
 
   enable: (name: string) => api.post(`/plugins/${name}/enable`, {}),
   disable: (name: string) => api.post(`/plugins/${name}/disable`, {}),

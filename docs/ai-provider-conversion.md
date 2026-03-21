@@ -101,8 +101,9 @@
   - 在写入完成后执行一次校验，移除没有收到 Tool 回复的 `tool_call`，避免 OpenAI API 拒绝。
 - **参数映射**：`max_tokens`、`temperature`、`top_p` 原样；`stop_sequences` → `stop`（数组）；`tools` 转换为 OpenAI function 工具集合。
 - **思考模式**：
-  - 当请求携带 `thinking.type = enabled` 时，读取 `budget_tokens` 并根据 `ANTHROPIC_TO_OPENAI_LOW/HIGH_REASONING_THRESHOLD` 推断 `reasoning_effort`（low/medium/high）。
-  - `max_completion_tokens` 优先取客户端 `max_tokens`，否则读取 `OPENAI_REASONING_MAX_TOKENS`。若两者皆缺失则报错。
+  - 显式 `thinking.effort` 或 `output_config.effort` 会映射为 OpenAI `reasoning_effort`（chat）/`reasoning.effort`（responses）。
+  - 仅携带旧格式 `thinking.budget_tokens` 时不再反推 `reasoning_effort`，转换器仅在请求显式提供 `max_tokens` 时映射为 `max_completion_tokens`。
+  - 若请求缺少显式输出上限，不做兜底注入，也不报错修复。
 
 #### → Gemini
 - **系统消息**：放入 `system_instruction`.
@@ -156,7 +157,7 @@
   - `user` 和 `tool` 角色中的 `functionResponse` 通过对话历史映射恢复原始 `tool_call_id`，再写入 OpenAI `role = tool` 消息。
   - 其它多模态内容转换为 OpenAI 熟悉的文本、图片结构。
 - `generationConfig` 字段映射：`temperature`/`topP`/`topK`/`maxOutputTokens`/`stopSequences`。
-- **思考模式**：`thinkingConfig.thinkingBudget` 经 `GEMINI_TO_OPENAI_{LOW|HIGH}_REASONING_THRESHOLD` 推算 `reasoning_effort`。`max_completion_tokens` 优先取 `maxOutputTokens`，否则依赖 `OPENAI_REASONING_MAX_TOKENS`。
+- **思考模式**：`thinkingConfig.thinkingBudget` 经 `GEMINI_TO_OPENAI_{LOW|HIGH}_REASONING_THRESHOLD` 推算 `reasoning_effort`。`max_completion_tokens` 仅在请求显式提供 `maxOutputTokens` 时设置。
 - `stream` 标记保留下发，以便上层区分流式与否。
 
 #### → Anthropic
@@ -208,9 +209,7 @@
 | `ANTHROPIC_MAX_TOKENS` | Anthropic 请求的 `max_tokens` 兜底值，同时作为 OpenAI→Gemini 时 `maxOutputTokens` 的默认来源。 |
 | `OPENAI_LOW_TO_ANTHROPIC_TOKENS`, `OPENAI_MEDIUM_TO_ANTHROPIC_TOKENS`, `OPENAI_HIGH_TO_ANTHROPIC_TOKENS` | 将 OpenAI `reasoning_effort` 映射到 Anthropic `thinking.budget_tokens`。 |
 | `OPENAI_LOW_TO_GEMINI_TOKENS`, `OPENAI_MEDIUM_TO_GEMINI_TOKENS`, `OPENAI_HIGH_TO_GEMINI_TOKENS` | 将 OpenAI `reasoning_effort` 映射到 Gemini `thinkingBudget`。 |
-| `ANTHROPIC_TO_OPENAI_LOW_REASONING_THRESHOLD`, `ANTHROPIC_TO_OPENAI_HIGH_REASONING_THRESHOLD` | 将 Anthropic `budget_tokens` 反推 OpenAI `reasoning_effort` 等级。 |
 | `GEMINI_TO_OPENAI_LOW_REASONING_THRESHOLD`, `GEMINI_TO_OPENAI_HIGH_REASONING_THRESHOLD` | 将 Gemini `thinkingBudget` 反推 OpenAI `reasoning_effort` 等级。 |
-| `OPENAI_REASONING_MAX_TOKENS` | 当上游未提供 `max_completion_tokens` / `maxOutputTokens` 时，为 OpenAI reasoning 模型提供兜底的最大输出 token。 |
 
 所有转换器在读取上述环境变量时都要求取值为有效整数，缺失或格式错误应尽早抛出异常而非静默忽略。
 

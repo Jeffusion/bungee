@@ -23,6 +23,8 @@ export interface AIConverter {
    */
   readonly to: string;
 
+  setRuntimeOptions?(options: unknown): void;
+
   /**
    * 在请求发送到上游之前转换请求格式
    *

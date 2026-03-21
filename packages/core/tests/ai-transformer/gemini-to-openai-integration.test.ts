@@ -572,7 +572,7 @@ describe('Gemini to OpenAI - Integration Tests', () => {
     expect(forwardedBody.messages[0].content[1].image_url.url).toBe('data:image/jpeg;base64,/9j/4AAQSkZJRg==');
   });
 
-  test('should convert thinkingConfig to reasoning parameters', async () => {
+  test('should convert thinkingConfig to reasoning effort and keep max_completion_tokens request-driven', async () => {
     const originalEnv = process.env.GEMINI_TO_OPENAI_HIGH_REASONING_THRESHOLD;
     process.env.GEMINI_TO_OPENAI_HIGH_REASONING_THRESHOLD = '12000';
 
@@ -596,12 +596,88 @@ describe('Gemini to OpenAI - Integration Tests', () => {
       const forwardedBody = JSON.parse(fetchOptions!.body as string);
 
       expect(forwardedBody.reasoning_effort).toBe('high');
-      expect(forwardedBody.max_completion_tokens).toBeDefined();
+      expect(forwardedBody.max_completion_tokens).toBeUndefined();
     } finally {
       if (originalEnv !== undefined) {
         process.env.GEMINI_TO_OPENAI_HIGH_REASONING_THRESHOLD = originalEnv;
       } else {
         delete process.env.GEMINI_TO_OPENAI_HIGH_REASONING_THRESHOLD;
+      }
+    }
+  });
+
+  test('should map maxOutputTokens to max_completion_tokens when thinking is enabled', async () => {
+    const geminiRequest = {
+      contents: [{ role: 'user', parts: [{ text: 'Complex problem with explicit output limit' }] }],
+      generationConfig: {
+        maxOutputTokens: 2048,
+        thinkingConfig: { thinkingBudget: 16000 }
+      }
+    };
+
+    const req = new Request('http://localhost/v1/gemini-to-openai/generateContent', {
+      method: 'POST',
+      body: JSON.stringify(geminiRequest),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    await handleRequest(req, mockConfig);
+
+    const [, fetchOptions] = mockedFetch.mock.calls[0];
+    const forwardedBody = JSON.parse(fetchOptions!.body as string);
+    expect(forwardedBody.reasoning_effort).toBeDefined();
+    expect(forwardedBody.max_completion_tokens).toBe(2048);
+    expect(forwardedBody.max_tokens).toBeUndefined();
+  });
+
+  test('should prefer plugin thresholds over environment variables for G2O reasoning conversion', async () => {
+    const originalLow = process.env.GEMINI_TO_OPENAI_LOW_REASONING_THRESHOLD;
+    const originalHigh = process.env.GEMINI_TO_OPENAI_HIGH_REASONING_THRESHOLD;
+    delete process.env.GEMINI_TO_OPENAI_LOW_REASONING_THRESHOLD;
+    delete process.env.GEMINI_TO_OPENAI_HIGH_REASONING_THRESHOLD;
+
+    const configWithOptions: AppConfig = JSON.parse(JSON.stringify(mockConfig));
+    const firstRoute = configWithOptions.routes?.[0];
+    const firstPlugin = firstRoute && Array.isArray(firstRoute.plugins) ? firstRoute.plugins[0] : undefined;
+    if (!firstRoute || !firstPlugin || typeof firstPlugin === 'string') {
+      throw new Error('Invalid test config for ai-transformer plugin');
+    }
+
+    const nextOptions = typeof firstPlugin.options === 'object' && firstPlugin.options !== null
+      ? { ...firstPlugin.options }
+      : {};
+    nextOptions.geminiToOpenAILowReasoningThreshold = 1000;
+    nextOptions.geminiToOpenAIHighReasoningThreshold = 5000;
+    firstPlugin.options = nextOptions;
+
+    try {
+      await cleanupPluginRegistry();
+      initializeRuntimeState(configWithOptions);
+      await initializePluginRegistryForTests(configWithOptions);
+
+      const req = new Request('http://localhost/v1/gemini-to-openai/generateContent', {
+        method: 'POST',
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: 'plugin threshold check' }] }],
+          generationConfig: {
+            thinkingConfig: { thinkingBudget: 2500 }
+          }
+        }),
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      await handleRequest(req, configWithOptions);
+
+      const [, fetchOptions] = mockedFetch.mock.calls[0];
+      const forwardedBody = JSON.parse(fetchOptions!.body as string);
+      expect(forwardedBody.reasoning_effort).toBe('medium');
+      expect(forwardedBody.max_completion_tokens).toBeUndefined();
+    } finally {
+      if (originalLow !== undefined) {
+        process.env.GEMINI_TO_OPENAI_LOW_REASONING_THRESHOLD = originalLow;
+      }
+      if (originalHigh !== undefined) {
+        process.env.GEMINI_TO_OPENAI_HIGH_REASONING_THRESHOLD = originalHigh;
       }
     }
   });

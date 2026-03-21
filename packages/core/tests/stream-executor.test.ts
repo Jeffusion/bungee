@@ -1,6 +1,64 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
-import { StreamExecutor, createPluginTransformStream } from '../src/stream-executor';
+import { StreamExecutor, createPluginTransformStream, createSSEParserStream } from '../src/stream-executor';
 import { createPluginHooks, type PluginHooks, type StreamChunkContext, type RequestContext } from '../src/hooks';
+
+async function parseSSEChunks(chunks: string[]): Promise<any[]> {
+  const parser = createSSEParserStream();
+  const input = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const encoder = new TextEncoder();
+      for (const chunk of chunks) {
+        controller.enqueue(encoder.encode(chunk));
+      }
+      controller.close();
+    }
+  });
+
+  const output = input.pipeThrough(parser);
+  const reader = output.getReader();
+  const parsed: any[] = [];
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    parsed.push(value);
+  }
+
+  return parsed;
+}
+
+describe('createSSEParserStream', () => {
+  test('should preserve event/data state across chunk boundaries', async () => {
+    const result = await parseSSEChunks([
+      'event: response.output_text.delta\n',
+      'data: {"type":"response.output_text.delta","delta":"hello"}\n',
+      '\n'
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({
+      type: 'response.output_text.delta',
+      delta: 'hello',
+      _event: 'response.output_text.delta'
+    });
+  });
+
+  test('should merge multi-line data fields into one payload', async () => {
+    const result = await parseSSEChunks([
+      'event: response.tool\n',
+      'data: {"type":"response.tool",\n',
+      'data: "text":"line1\\nline2"}\n',
+      '\n'
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({
+      type: 'response.tool',
+      text: 'line1\nline2',
+      _event: 'response.tool'
+    });
+  });
+});
 
 // 辅助函数：创建 RequestContext
 function createRequestContext(overrides?: Partial<RequestContext>): RequestContext {
