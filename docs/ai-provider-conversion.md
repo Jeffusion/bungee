@@ -102,6 +102,7 @@
 - **参数映射**：`max_tokens`、`temperature`、`top_p` 原样；`stop_sequences` → `stop`（数组）；`tools` 转换为 OpenAI function 工具集合。
 - **思考模式**：
   - 显式 `thinking.effort` 或 `output_config.effort` 会映射为 OpenAI `reasoning_effort`（chat）/`reasoning.effort`（responses）。
+  - 在 Responses 模式下，若启用 reasoning，会额外请求 `reasoning.summary = "auto"`，以便把可见的推理摘要回写给 Anthropic 客户端。
   - 仅携带旧格式 `thinking.budget_tokens` 时不再反推 `reasoning_effort`，转换器仅在请求显式提供 `max_tokens` 时映射为 `max_completion_tokens`。
   - 若请求缺少显式输出上限，不做兜底注入，也不报错修复。
 
@@ -119,6 +120,8 @@
 #### OpenAI → Anthropic
 - `tool_calls` → `tool_use`。
 - 文本与 `<thinking>` 标签拆分为 `text` 与 `thinking` 内容块，保留原顺序。
+- Chat Completions 返回中的 `reasoning_content` / `reasoning` / `reasoning_details`（若上游提供）会映射为 Anthropic `thinking` 内容块。
+- Responses API 的 `output[].type = "reasoning"` 会提取 `summary` 文本并映射为 Anthropic `thinking` 内容块。
 - `finish_reason` 映射（stop→end_turn，length→max_tokens，content_filter→stop_sequence，tool_calls→tool_use）。
 - `usage` 以 `input_tokens` / `output_tokens` 表达。
 
@@ -131,6 +134,8 @@
 - **OpenAI chunk → Anthropic SSE**
   - 首次接收非空 delta 时发送 `event: message_start`。
   - 文本增量生成 `event: content_block_delta` JSON，类型 `text_delta`。
+  - Chat Completions 中的 reasoning 增量（如 `delta.reasoning_content`）会映射为 `content_block_delta(thinking_delta)`，并生成 `thinking` 内容块。
+  - Responses reasoning 相关流事件（例如 `response.reasoning_summary_text.delta`）会映射为 `content_block_delta(thinking_delta)`，并生成 `thinking` 内容块。
   0 工具调用 JSON 片段逐步追加到缓存，同时发送 `input_json_delta`。
   - 完成时发送 `content_block_stop`、`message_delta`（附带 token usage 与 `stop_reason`），最后是 `message_stop`。
 - **Gemini chunk → Anthropic SSE**

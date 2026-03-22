@@ -963,6 +963,88 @@ describe('Anthropic to OpenAI - Integration Tests', () => {
     expect(responseBody.content.some((c: any) => c.type === 'text')).toBe(true);
   });
 
+  test('should map chat completions reasoning fields to anthropic thinking blocks', async () => {
+    mockedFetch.mockImplementationOnce(async () => {
+      return new Response(JSON.stringify({
+        id: 'chatcmpl-reasoning-123',
+        object: 'chat.completion',
+        created: 1234567890,
+        model: 'gpt-5.4',
+        choices: [{
+          index: 0,
+          message: {
+            role: 'assistant',
+            reasoning_content: 'Need to compare implementations first.',
+            content: 'Final answer from chat completions.'
+          },
+          finish_reason: 'stop'
+        }],
+        usage: { prompt_tokens: 11, completion_tokens: 9, total_tokens: 20 }
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+
+    const req = new Request('http://localhost/v1/anthropic-to-openai/messages', {
+      method: 'POST',
+      body: JSON.stringify({
+        model: 'gpt-5.4',
+        messages: [{ role: 'user', content: 'Need reasoning output in chat mode' }],
+        max_tokens: 128
+      }),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    const response = await handleRequest(req, mockConfig);
+    expect(response.status).toBe(200);
+
+    const responseBody = await response.json();
+    expect(responseBody.content.some((c: any) => c.type === 'thinking' && c.thinking.includes('Need to compare implementations first.'))).toBe(true);
+    expect(responseBody.content.some((c: any) => c.type === 'text' && c.text.includes('Final answer from chat completions.'))).toBe(true);
+  });
+
+  test('should map chat completions reasoning_details variants to anthropic thinking blocks', async () => {
+    mockedFetch.mockImplementationOnce(async () => {
+      return new Response(JSON.stringify({
+        id: 'chatcmpl-reasoning-details-123',
+        object: 'chat.completion',
+        created: 1234567890,
+        model: 'gpt-5.4',
+        choices: [{
+          index: 0,
+          message: {
+            role: 'assistant',
+            reasoning_details: [
+              { type: 'summary', text: 'First evaluate constraints.' },
+              { summary: [{ text: 'Then compare trade-offs.' }] },
+              { summary: 'Finally select the safest path.' }
+            ],
+            content: 'Final answer after structured reasoning.'
+          },
+          finish_reason: 'stop'
+        }],
+        usage: { prompt_tokens: 13, completion_tokens: 10, total_tokens: 23 }
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+
+    const req = new Request('http://localhost/v1/anthropic-to-openai/messages', {
+      method: 'POST',
+      body: JSON.stringify({
+        model: 'gpt-5.4',
+        messages: [{ role: 'user', content: 'Need reasoning_details compatibility in chat mode' }],
+        max_tokens: 128
+      }),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    const response = await handleRequest(req, mockConfig);
+    expect(response.status).toBe(200);
+
+    const responseBody = await response.json();
+    expect(responseBody.content.some((c: any) => c.type === 'thinking' && c.thinking.includes('First evaluate constraints.'))).toBe(true);
+    expect(responseBody.content.some((c: any) => c.type === 'thinking' && c.thinking.includes('Then compare trade-offs.'))).toBe(true);
+    expect(responseBody.content.some((c: any) => c.type === 'thinking' && c.thinking.includes('Finally select the safest path.'))).toBe(true);
+    expect(responseBody.content.some((c: any) => c.type === 'text' && c.text.includes('Final answer after structured reasoning.'))).toBe(true);
+  });
+
   test('should keep old thinking budget format without inferring reasoning_effort', async () => {
     const anthropicRequest = {
       model: 'o3-mini',
@@ -1109,7 +1191,7 @@ describe('Anthropic to OpenAI - Integration Tests', () => {
     const [fetchUrl, fetchOptions] = mockedFetch.mock.calls[0];
     expect(fetchUrl).toContain('/v1/responses');
     const forwardedBody = JSON.parse(fetchOptions!.body as string);
-    expect(forwardedBody.reasoning).toEqual({ effort: 'high' });
+    expect(forwardedBody.reasoning).toEqual({ effort: 'high', summary: 'auto' });
     expect(forwardedBody.max_output_tokens).toBeUndefined();
   });
 
@@ -1371,6 +1453,122 @@ describe('Anthropic to OpenAI - Integration Tests', () => {
     const [, fetchOptions] = mockedFetch.mock.calls[0];
     const forwardedBody = JSON.parse(fetchOptions!.body as string);
     expect(forwardedBody.stream_options).toEqual({ include_usage: true });
+  });
+
+  test('should convert chat completions reasoning deltas into anthropic thinking deltas', async () => {
+    mockedFetch.mockImplementationOnce(async () => {
+      const streamContent = [
+        'data: {"id":"chatcmpl-reasoning-stream","object":"chat.completion.chunk","created":1234567890,"model":"gpt-5.4","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}\n\n',
+        'data: {"id":"chatcmpl-reasoning-stream","object":"chat.completion.chunk","created":1234567890,"model":"gpt-5.4","choices":[{"index":0,"delta":{"reasoning_content":"Need to inspect "},"finish_reason":null}]}\n\n',
+        'data: {"id":"chatcmpl-reasoning-stream","object":"chat.completion.chunk","created":1234567890,"model":"gpt-5.4","choices":[{"index":0,"delta":{"reasoning_content":"constraints."},"finish_reason":null}]}\n\n',
+        'data: {"id":"chatcmpl-reasoning-stream","object":"chat.completion.chunk","created":1234567890,"model":"gpt-5.4","choices":[{"index":0,"delta":{"content":"Final answer."},"finish_reason":null}]}\n\n',
+        'data: {"id":"chatcmpl-reasoning-stream","object":"chat.completion.chunk","created":1234567890,"model":"gpt-5.4","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":4,"total_tokens":16}}\n\n',
+        'data: [DONE]\n\n'
+      ].join('');
+
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(streamContent));
+          controller.close();
+        }
+      });
+
+      return new Response(stream, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' }
+      });
+    });
+
+    const req = new Request('http://localhost/v1/anthropic-to-openai/messages', {
+      method: 'POST',
+      body: JSON.stringify({
+        model: 'gpt-5.4',
+        messages: [{ role: 'user', content: 'stream reasoning in chat mode' }],
+        max_tokens: 128,
+        stream: true
+      }),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    const response = await handleRequest(req, mockConfig);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/event-stream');
+
+    const reader = response.body?.getReader();
+    const decoder = new TextDecoder();
+    let allData = '';
+    if (reader) {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        allData += decoder.decode(value);
+      }
+    }
+
+    expect(allData).toContain('"type":"thinking"');
+    expect(allData).toContain('"type":"thinking_delta"');
+    expect(allData).toContain('"thinking":"Need to inspect "');
+    expect(allData).toContain('"thinking":"constraints."');
+    expect(allData).toContain('"type":"text_delta"');
+    expect(allData).toContain('"text":"Final answer."');
+  });
+
+  test('should convert chat stream reasoning_details deltas in content parts into anthropic thinking deltas', async () => {
+    mockedFetch.mockImplementationOnce(async () => {
+      const streamContent = [
+        'data: {"id":"chatcmpl-reasoning-details-stream","object":"chat.completion.chunk","created":1234567890,"model":"gpt-5.4","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}\n\n',
+        'data: {"id":"chatcmpl-reasoning-details-stream","object":"chat.completion.chunk","created":1234567890,"model":"gpt-5.4","choices":[{"index":0,"delta":{"content":[{"type":"reasoning","text":"Need to inspect "}]},"finish_reason":null}]}\n\n',
+        'data: {"id":"chatcmpl-reasoning-details-stream","object":"chat.completion.chunk","created":1234567890,"model":"gpt-5.4","choices":[{"index":0,"delta":{"content":[{"type":"reasoning","delta":"constraints."}]},"finish_reason":null}]}\n\n',
+        'data: {"id":"chatcmpl-reasoning-details-stream","object":"chat.completion.chunk","created":1234567890,"model":"gpt-5.4","choices":[{"index":0,"delta":{"content":"Final answer."},"finish_reason":null}]}\n\n',
+        'data: {"id":"chatcmpl-reasoning-details-stream","object":"chat.completion.chunk","created":1234567890,"model":"gpt-5.4","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":4,"total_tokens":16}}\n\n',
+        'data: [DONE]\n\n'
+      ].join('');
+
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(streamContent));
+          controller.close();
+        }
+      });
+
+      return new Response(stream, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' }
+      });
+    });
+
+    const req = new Request('http://localhost/v1/anthropic-to-openai/messages', {
+      method: 'POST',
+      body: JSON.stringify({
+        model: 'gpt-5.4',
+        messages: [{ role: 'user', content: 'stream reasoning_details content parts in chat mode' }],
+        max_tokens: 128,
+        stream: true
+      }),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    const response = await handleRequest(req, mockConfig);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/event-stream');
+
+    const reader = response.body?.getReader();
+    const decoder = new TextDecoder();
+    let allData = '';
+    if (reader) {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        allData += decoder.decode(value);
+      }
+    }
+
+    expect(allData).toContain('"type":"thinking"');
+    expect(allData).toContain('"type":"thinking_delta"');
+    expect(allData).toContain('"thinking":"Need to inspect"');
+    expect(allData).toContain('"thinking":"constraints."');
+    expect(allData).toContain('"type":"text_delta"');
+    expect(allData).toContain('"text":"Final answer."');
   });
 
   test('should remove content-length header for transformed SSE responses', async () => {
@@ -1834,6 +2032,159 @@ describe('Anthropic to OpenAI - Integration Tests', () => {
     }
   });
 
+  test('should convert responses reasoning summary items to anthropic thinking blocks', async () => {
+    const originalApiMode = process.env.ANTHROPIC_TO_OPENAI_API_MODE;
+    process.env.ANTHROPIC_TO_OPENAI_API_MODE = 'responses';
+
+    mockedFetch.mockImplementationOnce(async () => {
+      return new Response(JSON.stringify({
+        id: 'resp_reasoning_summary_1',
+        object: 'response',
+        status: 'completed',
+        model: 'gpt-5.4',
+        output: [
+          {
+            type: 'reasoning',
+            id: 'rs_1',
+            summary: [
+              {
+                type: 'summary_text',
+                text: 'Need to compare options first.'
+              }
+            ]
+          },
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'Final answer from responses.' }]
+          }
+        ],
+        usage: {
+          input_tokens: 14,
+          output_tokens: 9
+        }
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    });
+
+    try {
+      const req = new Request('http://localhost/v1/anthropic-to-openai/messages', {
+        method: 'POST',
+        body: JSON.stringify({
+          model: 'gpt-5.4',
+          messages: [{ role: 'user', content: 'show reasoning summary please' }],
+          max_tokens: 128,
+          output_config: {
+            effort: 'max'
+          }
+        }),
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      const response = await handleRequest(req, mockConfig);
+      expect(response.status).toBe(200);
+
+      const responseBody = await response.json();
+      expect(responseBody.content.some((block: any) => block.type === 'thinking' && block.thinking.includes('Need to compare options first.'))).toBe(true);
+      expect(responseBody.content.some((block: any) => block.type === 'text' && block.text.includes('Final answer from responses.'))).toBe(true);
+
+      const [, fetchOptions] = mockedFetch.mock.calls[0];
+      const forwardedBody = JSON.parse(fetchOptions!.body as string);
+      expect(forwardedBody.reasoning).toEqual({ effort: 'xhigh', summary: 'auto' });
+    } finally {
+      if (originalApiMode !== undefined) {
+        process.env.ANTHROPIC_TO_OPENAI_API_MODE = originalApiMode;
+      } else {
+        delete process.env.ANTHROPIC_TO_OPENAI_API_MODE;
+      }
+    }
+  });
+
+  test('should convert responses reasoning stream events into anthropic thinking deltas', async () => {
+    const originalApiMode = process.env.ANTHROPIC_TO_OPENAI_API_MODE;
+    process.env.ANTHROPIC_TO_OPENAI_API_MODE = 'responses';
+
+    try {
+      mockedFetch.mockImplementationOnce(async () => {
+        const streamContent = [
+          'event: response.output_item.added\n',
+          'data: {"type":"response.output_item.added","response_id":"resp_reasoning_stream_1","output_index":0,"item":{"type":"reasoning","id":"rs_stream_1","summary":[]}}\n\n',
+          'event: response.reasoning_summary_text.delta\n',
+          'data: {"type":"response.reasoning_summary_text.delta","response_id":"resp_reasoning_stream_1","output_index":0,"item_id":"rs_stream_1","delta":"Need to inspect "}\n\n',
+          'event: response.reasoning_summary_text.delta\n',
+          'data: {"type":"response.reasoning_summary_text.delta","response_id":"resp_reasoning_stream_1","output_index":0,"item_id":"rs_stream_1","delta":"constraints."}\n\n',
+          'event: response.output_text.delta\n',
+          'data: {"type":"response.output_text.delta","response_id":"resp_reasoning_stream_1","output_index":1,"delta":"Final answer."}\n\n',
+          'event: response.completed\n',
+          'data: {"type":"response.completed","response":{"id":"resp_reasoning_stream_1","model":"gpt-5.4","usage":{"input_tokens":17,"output_tokens":5}}}\n\n'
+        ].join('');
+
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(streamContent));
+            controller.close();
+          }
+        });
+
+        return new Response(stream, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' }
+        });
+      });
+
+      const req = new Request('http://localhost/v1/anthropic-to-openai/messages', {
+        method: 'POST',
+        body: JSON.stringify({
+          model: 'gpt-5.4',
+          messages: [{ role: 'user', content: 'stream reasoning summary please' }],
+          max_tokens: 128,
+          stream: true,
+          output_config: {
+            effort: 'max'
+          }
+        }),
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      const response = await handleRequest(req, mockConfig);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toContain('text/event-stream');
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let allData = '';
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          allData += decoder.decode(value);
+        }
+      }
+
+      expect(allData).toContain('"type":"thinking"');
+      expect(allData).toContain('"type":"thinking_delta"');
+      expect(allData).toContain('"thinking":"Need to inspect "');
+      expect(allData).toContain('"thinking":"constraints."');
+      expect(allData).toContain('"type":"text_delta"');
+      expect(allData).toContain('"text":"Final answer."');
+      expect(allData).toContain('"input_tokens":17');
+      expect(allData).toContain('"output_tokens":5');
+
+      const [fetchUrl, fetchOptions] = mockedFetch.mock.calls[0];
+      expect(fetchUrl).toContain('/v1/responses');
+      const forwardedBody = JSON.parse(fetchOptions!.body as string);
+      expect(forwardedBody.reasoning).toEqual({ effort: 'xhigh', summary: 'auto' });
+    } finally {
+      if (originalApiMode !== undefined) {
+        process.env.ANTHROPIC_TO_OPENAI_API_MODE = originalApiMode;
+      } else {
+        delete process.env.ANTHROPIC_TO_OPENAI_API_MODE;
+      }
+    }
+  });
+
   test('should prefer plugin api mode setting over environment variable for A2O routing', async () => {
     setMockEnv();
     process.env.ANTHROPIC_TO_OPENAI_API_MODE = 'chat_completions';
@@ -2021,7 +2372,7 @@ describe('Anthropic to OpenAI - Integration Tests', () => {
 
       const forwardedBody = JSON.parse(fetchOptions!.body as string);
       expect(forwardedBody.stream).toBe(true);
-      expect(forwardedBody.reasoning).toEqual({ effort: 'xhigh' });
+      expect(forwardedBody.reasoning).toEqual({ effort: 'xhigh', summary: 'auto' });
       expect(forwardedBody.max_output_tokens).toBe(128);
       expect(forwardedBody.max_tokens).toBeUndefined();
     } finally {
@@ -2059,7 +2410,7 @@ describe('Anthropic to OpenAI - Integration Tests', () => {
       expect(fetchUrl).toContain('/v1/responses');
 
       const forwardedBody = JSON.parse(fetchOptions!.body as string);
-      expect(forwardedBody.reasoning).toEqual({ effort: 'xhigh' });
+      expect(forwardedBody.reasoning).toEqual({ effort: 'xhigh', summary: 'auto' });
       expect(forwardedBody.max_output_tokens).toBe(128);
     } finally {
       if (originalApiMode !== undefined) {
@@ -2623,7 +2974,7 @@ describe('Anthropic to OpenAI - Integration Tests', () => {
 
       const [, fetchOptions] = mockedFetch.mock.calls[0];
       const forwardedBody = JSON.parse(fetchOptions!.body as string);
-      expect(forwardedBody.reasoning).toEqual({ effort: 'xhigh' });
+      expect(forwardedBody.reasoning).toEqual({ effort: 'xhigh', summary: 'auto' });
       expect(forwardedBody.max_output_tokens).toBe(128);
       expect(forwardedBody.tools?.[0]?.name).toBe('run_check');
 
@@ -2752,7 +3103,7 @@ describe('Anthropic to OpenAI - Integration Tests', () => {
 
       const [, fetchOptions] = mockedFetch.mock.calls[0];
       const forwardedBody = JSON.parse(fetchOptions!.body as string);
-      expect(forwardedBody.reasoning).toEqual({ effort: 'high' });
+      expect(forwardedBody.reasoning).toEqual({ effort: 'high', summary: 'auto' });
       expect(forwardedBody.max_output_tokens).toBe(512);
     } finally {
       if (originalApiMode !== undefined) {
@@ -2805,7 +3156,7 @@ describe('Anthropic to OpenAI - Integration Tests', () => {
 
       const [, fetchOptions] = mockedFetch.mock.calls[0];
       const forwardedBody = JSON.parse(fetchOptions!.body as string);
-      expect(forwardedBody.reasoning).toEqual({ effort: 'high' });
+      expect(forwardedBody.reasoning).toEqual({ effort: 'high', summary: 'auto' });
       expect(forwardedBody.max_output_tokens).toBe(512);
     } finally {
       if (originalApiMode !== undefined) {
@@ -2858,7 +3209,7 @@ describe('Anthropic to OpenAI - Integration Tests', () => {
 
       const [, fetchOptions] = mockedFetch.mock.calls[0];
       const forwardedBody = JSON.parse(fetchOptions!.body as string);
-      expect(forwardedBody.reasoning).toEqual({ effort: 'xhigh' });
+      expect(forwardedBody.reasoning).toEqual({ effort: 'xhigh', summary: 'auto' });
       expect(forwardedBody.max_output_tokens).toBe(512);
     } finally {
       if (originalApiMode !== undefined) {
@@ -2911,7 +3262,7 @@ describe('Anthropic to OpenAI - Integration Tests', () => {
 
       const [, fetchOptions] = mockedFetch.mock.calls[0];
       const forwardedBody = JSON.parse(fetchOptions!.body as string);
-      expect(forwardedBody.reasoning).toEqual({ effort: 'xhigh' });
+      expect(forwardedBody.reasoning).toEqual({ effort: 'xhigh', summary: 'auto' });
       expect(forwardedBody.max_output_tokens).toBe(512);
     } finally {
       if (originalApiMode !== undefined) {

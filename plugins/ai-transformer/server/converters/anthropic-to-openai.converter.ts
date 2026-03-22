@@ -369,7 +369,10 @@ export class AnthropicToOpenAIConverter implements AIConverter {
     }
 
     if (chatBody.reasoning_effort !== undefined) {
-      responsesBody.reasoning = { effort: chatBody.reasoning_effort };
+      responsesBody.reasoning = {
+        effort: chatBody.reasoning_effort,
+        summary: 'auto'
+      };
     }
 
     if (chatBody.stream === true) {
@@ -1017,12 +1020,359 @@ export class AnthropicToOpenAIConverter implements AIConverter {
     return Array.isArray(openaiBody.output) && !Array.isArray(openaiBody.choices);
   }
 
+  private extractReasoningSummaryTexts(reasoningItem: any): string[] {
+    const texts: string[] = [];
+
+    const pushText = (value: unknown) => {
+      if (typeof value !== 'string') return;
+      const normalized = value.trim();
+      if (!normalized) return;
+      texts.push(normalized);
+    };
+
+    if (!reasoningItem || typeof reasoningItem !== 'object') {
+      return texts;
+    }
+
+    if (Array.isArray(reasoningItem.summary)) {
+      for (const item of reasoningItem.summary) {
+        if (typeof item === 'string') {
+          pushText(item);
+          continue;
+        }
+
+        if (!item || typeof item !== 'object') continue;
+        if (item.type === 'summary_text') {
+          pushText(item.text);
+          continue;
+        }
+
+        pushText(item.text);
+      }
+    } else {
+      pushText(reasoningItem.summary);
+    }
+
+    if (texts.length === 0) {
+      pushText(reasoningItem.text);
+    }
+
+    if (texts.length === 0) {
+      pushText(reasoningItem.delta);
+    }
+
+    return texts;
+  }
+
+  private appendUniqueThinkingBlocks(content: any[], texts: string[], seen: Set<string>): void {
+    for (const text of texts) {
+      if (typeof text !== 'string') continue;
+      const normalized = text.trim();
+      if (!normalized) continue;
+      if (seen.has(normalized)) continue;
+
+      content.push({
+        type: 'thinking',
+        thinking: normalized
+      });
+      seen.add(normalized);
+    }
+  }
+
+  private appendParsedContent(content: any[], parsedContent: Array<{ type: string; text?: string; thinking?: string }>, seenThinking: Set<string>): void {
+    for (const block of parsedContent) {
+      if (!block || typeof block !== 'object') continue;
+
+      if (block.type === 'thinking') {
+        const thinkingText = typeof block.thinking === 'string' ? block.thinking.trim() : '';
+        if (!thinkingText || seenThinking.has(thinkingText)) {
+          continue;
+        }
+
+        content.push({
+          type: 'thinking',
+          thinking: thinkingText
+        });
+        seenThinking.add(thinkingText);
+        continue;
+      }
+
+      if (block.type === 'text') {
+        const text = typeof block.text === 'string' ? block.text : '';
+        if (!text) continue;
+        content.push({
+          type: 'text',
+          text
+        });
+      }
+    }
+  }
+
+  private extractChatCompletionReasoningTexts(message: any): string[] {
+    const texts: string[] = [];
+
+    if (!message || typeof message !== 'object') {
+      return texts;
+    }
+
+    const directReasoning = this.extractReasoningSummaryTexts({
+      summary: message.reasoning,
+      text: message.reasoning_content
+    });
+    texts.push(...directReasoning);
+
+    if (typeof message.reasoning === 'string') {
+      texts.push(message.reasoning);
+    }
+
+    if (Array.isArray(message.reasoning_details)) {
+      for (const detail of message.reasoning_details) {
+        texts.push(...this.extractReasoningSummaryTexts(detail));
+      }
+    }
+
+    return texts;
+  }
+
+  private extractReasoningTextFromDeltaContentPart(part: any): string {
+    if (!part || typeof part !== 'object') {
+      return '';
+    }
+
+    const partType = typeof part.type === 'string' ? part.type : '';
+    const isReasoningPart = partType === 'reasoning' || partType === 'thinking' || part.thought === true;
+    if (!isReasoningPart) {
+      return '';
+    }
+
+    const texts = this.extractReasoningSummaryTexts(part);
+    if (texts.length > 0) {
+      return texts.join('');
+    }
+
+    if (typeof part.text === 'string') {
+      return part.text;
+    }
+
+    return '';
+  }
+
+  private extractChatThinkingDelta(delta: any): string {
+    if (!delta || typeof delta !== 'object') {
+      return '';
+    }
+
+    const chunks: string[] = [];
+
+    const pushChunk = (value: unknown) => {
+      if (typeof value !== 'string' || value.length === 0) return;
+      chunks.push(value);
+    };
+
+    pushChunk(delta.reasoning_content);
+    if (typeof delta.reasoning === 'string') {
+      pushChunk(delta.reasoning);
+    } else if (delta.reasoning && typeof delta.reasoning === 'object') {
+      pushChunk(this.extractReasoningSummaryTexts(delta.reasoning).join(''));
+    }
+
+    if (Array.isArray(delta.content)) {
+      for (const part of delta.content) {
+        pushChunk(this.extractReasoningTextFromDeltaContentPart(part));
+      }
+    }
+
+    return chunks.join('');
+  }
+
+  private getChatUsedIndices(ctx: StreamChunkContext): Set<number> {
+    const existing = ctx.streamState.get('chat_used_indices');
+    if (existing instanceof Set) {
+      return existing as Set<number>;
+    }
+
+    const created = new Set<number>();
+    ctx.streamState.set('chat_used_indices', created);
+    return created;
+  }
+
+  private allocateChatContentBlockIndex(ctx: StreamChunkContext, preferredIndex: number, minIndex: number): number {
+    const used = this.getChatUsedIndices(ctx);
+
+    let candidate = Number.isFinite(preferredIndex) ? Math.trunc(preferredIndex) : minIndex;
+    if (candidate < minIndex) {
+      candidate = minIndex;
+    }
+
+    if (!used.has(candidate)) {
+      used.add(candidate);
+      return candidate;
+    }
+
+    candidate = minIndex;
+    while (used.has(candidate)) {
+      candidate += 1;
+    }
+
+    used.add(candidate);
+    return candidate;
+  }
+
+  private ensureChatTextBlockStarted(events: any[], ctx: StreamChunkContext): number {
+    const existing = ctx.streamState.get('chat_text_index');
+    if (typeof existing === 'number' && Number.isFinite(existing)) {
+      return existing;
+    }
+
+    const index = this.allocateChatContentBlockIndex(ctx, 0, 0);
+    events.push({
+      type: 'content_block_start',
+      index,
+      content_block: {
+        type: 'text',
+        text: ''
+      }
+    });
+
+    ctx.streamState.set('chat_text_index', index);
+    ctx.streamState.set('text_block_started', true);
+    return index;
+  }
+
+  private ensureChatThinkingBlockStarted(events: any[], ctx: StreamChunkContext): number {
+    const existing = ctx.streamState.get('chat_thinking_index');
+    if (typeof existing === 'number' && Number.isFinite(existing)) {
+      return existing;
+    }
+
+    const index = this.allocateChatContentBlockIndex(ctx, 1, 1);
+    events.push({
+      type: 'content_block_start',
+      index,
+      content_block: {
+        type: 'thinking',
+        thinking: ''
+      }
+    });
+
+    ctx.streamState.set('chat_thinking_index', index);
+    return index;
+  }
+
+  private resolveChatToolIndex(rawIndex: number, ctx: StreamChunkContext): number {
+    const normalizedRawIndex = Number.isFinite(rawIndex) ? Math.trunc(rawIndex) : 0;
+    const mapKey = `chat_tool_index_${normalizedRawIndex}`;
+    const existing = ctx.streamState.get(mapKey);
+    if (typeof existing === 'number' && Number.isFinite(existing)) {
+      return existing;
+    }
+
+    const resolved = this.allocateChatContentBlockIndex(ctx, normalizedRawIndex, 0);
+    ctx.streamState.set(mapKey, resolved);
+    return resolved;
+  }
+
+  private resolveResponsesReasoningIndex(chunk: any, item: any, ctx: StreamChunkContext): number {
+    const outputIndex = typeof chunk?.output_index === 'number'
+      ? chunk.output_index
+      : typeof item?.output_index === 'number'
+        ? item.output_index
+        : undefined;
+
+    if (typeof outputIndex === 'number' && Number.isFinite(outputIndex)) {
+      return outputIndex + 1;
+    }
+
+    const itemId = typeof chunk?.item_id === 'string'
+      ? chunk.item_id
+      : typeof item?.id === 'string'
+        ? item.id
+        : '';
+
+    if (itemId) {
+      const mappedIndex = ctx.streamState.get(`resp_reasoning_item_${itemId}`);
+      if (typeof mappedIndex === 'number' && Number.isFinite(mappedIndex)) {
+        return mappedIndex;
+      }
+    }
+
+    return 1;
+  }
+
+  private ensureResponsesThinkingBlockStarted(events: any[], ctx: StreamChunkContext, index: number): void {
+    const blockKey = `resp_reasoning_block_${index}`;
+    if (ctx.streamState.get(blockKey) === true) {
+      return;
+    }
+
+    events.push({
+      type: 'content_block_start',
+      index,
+      content_block: {
+        type: 'thinking',
+        thinking: ''
+      }
+    });
+    ctx.streamState.set(blockKey, true);
+  }
+
+  private emitResponsesThinkingDelta(events: any[], ctx: StreamChunkContext, index: number, text: string): void {
+    if (typeof text !== 'string' || text.length === 0) {
+      return;
+    }
+
+    events.push({
+      type: 'content_block_delta',
+      index,
+      delta: {
+        type: 'thinking_delta',
+        thinking: text
+      }
+    });
+    ctx.streamState.set(`resp_reasoning_has_delta_${index}`, true);
+  }
+
+  private extractResponsesReasoningDeltaText(chunk: any): string {
+    if (!chunk || typeof chunk !== 'object') {
+      return '';
+    }
+
+    if (typeof chunk.delta === 'string') {
+      return chunk.delta;
+    }
+
+    if (typeof chunk.text === 'string') {
+      return chunk.text;
+    }
+
+    if (typeof chunk.summary_text === 'string') {
+      return chunk.summary_text;
+    }
+
+    if (chunk.delta && typeof chunk.delta === 'object' && typeof chunk.delta.text === 'string') {
+      return chunk.delta.text;
+    }
+
+    return '';
+  }
+
   private convertOpenAIResponsesToAnthropic(openaiBody: any): any {
     const content: any[] = [];
     const output = Array.isArray(openaiBody.output) ? openaiBody.output : [];
 
     for (const item of output) {
       if (!item || typeof item !== 'object') continue;
+
+      if (item.type === 'reasoning') {
+        const summaryTexts = this.extractReasoningSummaryTexts(item);
+        for (const summaryText of summaryTexts) {
+          content.push({
+            type: 'thinking',
+            thinking: summaryText
+          });
+        }
+        continue;
+      }
 
       if (item.type === 'function_call') {
         let parsedInput: Record<string, any> = {};
@@ -1104,6 +1454,9 @@ export class AnthropicToOpenAIConverter implements AIConverter {
 
     const message = choice.message;
     const content: any[] = [];
+    const seenThinking = new Set<string>();
+
+    this.appendUniqueThinkingBlocks(content, this.extractChatCompletionReasoningTexts(message), seenThinking);
 
     // tool_calls → tool_use
     if (Array.isArray(message.tool_calls)) {
@@ -1130,20 +1483,26 @@ export class AnthropicToOpenAIConverter implements AIConverter {
     if (typeof message.content === 'string' && message.content.length > 0) {
       // 文本与 <thinking> 标签拆分
       const parsedContent = parseThinkingTags(message.content);
-      content.push(...parsedContent);
+      this.appendParsedContent(content, parsedContent, seenThinking);
     } else if (Array.isArray(message.content)) {
       for (const part of message.content) {
         if (part?.type === 'text' && typeof part.text === 'string') {
-          content.push(...parseThinkingTags(part.text));
+          this.appendParsedContent(content, parseThinkingTags(part.text), seenThinking);
           continue;
         }
 
         if (typeof part === 'string') {
-          content.push(...parseThinkingTags(part));
+          this.appendParsedContent(content, parseThinkingTags(part), seenThinking);
           continue;
         }
 
         if (part && typeof part === 'object') {
+          const partType = typeof part.type === 'string' ? part.type : '';
+          if (partType === 'reasoning' || partType === 'thinking' || part.thought === true) {
+            this.appendUniqueThinkingBlocks(content, this.extractReasoningSummaryTexts(part), seenThinking);
+            continue;
+          }
+
           if (part.type === 'image_url' && typeof part.image_url?.url === 'string') {
             const source = this.parseOpenAIImageUrlSource(part.image_url.url);
             if (source) {
@@ -1219,11 +1578,13 @@ export class AnthropicToOpenAIConverter implements AIConverter {
     }
 
     const delta = choice.delta;
+    const thinkingDeltaText = this.extractChatThinkingDelta(delta);
+    const deltaText = this.extractDeltaText(delta?.content);
     const finishReason = choice.finish_reason;
 
     // 首次接收非空 delta - 发送 message_start
     if (!ctx.streamState.has('message_started')) {
-      if (delta && (delta.content || delta.tool_calls || delta.role)) {
+      if (delta && (delta.content || delta.tool_calls || delta.role || thinkingDeltaText)) {
         events.push({
           type: 'message_start',
           message: {
@@ -1239,24 +1600,26 @@ export class AnthropicToOpenAIConverter implements AIConverter {
       }
     }
 
-    // 文本增量
-    const deltaText = this.extractDeltaText(delta?.content);
-    if (deltaText) {
-      if (!ctx.streamState.has('text_block_started')) {
-        events.push({
-          type: 'content_block_start',
-          index: 0,
-          content_block: {
-            type: 'text',
-            text: ''
-          }
-        });
-        ctx.streamState.set('text_block_started', true);
-      }
+    if (thinkingDeltaText) {
+      const thinkingIndex = this.ensureChatThinkingBlockStarted(events, ctx);
 
       events.push({
         type: 'content_block_delta',
-        index: 0,
+        index: thinkingIndex,
+        delta: {
+          type: 'thinking_delta',
+          thinking: thinkingDeltaText
+        }
+      });
+    }
+
+    // 文本增量
+    if (deltaText) {
+      const textIndex = this.ensureChatTextBlockStarted(events, ctx);
+
+      events.push({
+        type: 'content_block_delta',
+        index: textIndex,
         delta: {
           type: 'text_delta',
           text: deltaText
@@ -1267,7 +1630,8 @@ export class AnthropicToOpenAIConverter implements AIConverter {
     // 工具调用增量
     if (delta.tool_calls) {
       for (const tc of delta.tool_calls) {
-        const index = tc.index || 0;
+        const rawIndex = typeof tc.index === 'number' ? tc.index : 0;
+        const index = this.resolveChatToolIndex(rawIndex, ctx);
         const toolKey = `tool_${index}`;
 
         if (!ctx.streamState.has(toolKey)) {
@@ -1309,10 +1673,19 @@ export class AnthropicToOpenAIConverter implements AIConverter {
 
     // 完成时
     if (finishReason) {
-      if (ctx.streamState.has('text_block_started')) {
+      const textIndex = ctx.streamState.get('chat_text_index');
+      if (typeof textIndex === 'number' && Number.isFinite(textIndex)) {
         events.push({
           type: 'content_block_stop',
-          index: 0
+          index: textIndex
+        });
+      }
+
+      const thinkingIndex = ctx.streamState.get('chat_thinking_index');
+      if (typeof thinkingIndex === 'number' && Number.isFinite(thinkingIndex)) {
+        events.push({
+          type: 'content_block_stop',
+          index: thinkingIndex
         });
       }
 
@@ -1480,6 +1853,25 @@ export class AnthropicToOpenAIConverter implements AIConverter {
           });
           ctx.streamState.set('message_started', true);
         }
+      } else if (item?.type === 'reasoning') {
+        ensureMessageStarted();
+
+        const index = this.resolveResponsesReasoningIndex(chunk, item, ctx);
+        const itemId = typeof item.id === 'string'
+          ? item.id
+          : typeof chunk.item_id === 'string'
+            ? chunk.item_id
+            : '';
+        if (itemId) {
+          ctx.streamState.set(`resp_reasoning_item_${itemId}`, index);
+        }
+
+        this.ensureResponsesThinkingBlockStarted(events, ctx, index);
+
+        const summaryTexts = this.extractReasoningSummaryTexts(item);
+        for (const summaryText of summaryTexts) {
+          this.emitResponsesThinkingDelta(events, ctx, index, summaryText);
+        }
       } else {
         ensureMessageStarted();
         events.push({
@@ -1544,6 +1936,28 @@ export class AnthropicToOpenAIConverter implements AIConverter {
           });
         }
 
+      } else if (item?.type === 'reasoning') {
+        ensureMessageStarted();
+
+        const index = this.resolveResponsesReasoningIndex(chunk, item, ctx);
+        const itemId = typeof item.id === 'string'
+          ? item.id
+          : typeof chunk.item_id === 'string'
+            ? chunk.item_id
+            : '';
+        if (itemId) {
+          ctx.streamState.set(`resp_reasoning_item_${itemId}`, index);
+        }
+
+        this.ensureResponsesThinkingBlockStarted(events, ctx, index);
+
+        const hasDelta = ctx.streamState.get(`resp_reasoning_has_delta_${index}`) === true;
+        if (!hasDelta) {
+          const summaryTexts = this.extractReasoningSummaryTexts(item);
+          for (const summaryText of summaryTexts) {
+            this.emitResponsesThinkingDelta(events, ctx, index, summaryText);
+          }
+        }
       }
 
       return this.finalizeResponsesStreamEvents(events, ctx);
@@ -1679,6 +2093,47 @@ export class AnthropicToOpenAIConverter implements AIConverter {
       return this.finalizeResponsesStreamEvents(events, ctx);
     }
 
+    if (
+      eventType === 'response.reasoning_summary_text.delta'
+      || eventType === 'response.reasoning_text.delta'
+      || eventType === 'response.reasoning.delta'
+    ) {
+      ensureMessageStarted();
+
+      const index = this.resolveResponsesReasoningIndex(chunk, undefined, ctx);
+      if (typeof chunk?.item_id === 'string' && chunk.item_id.length > 0) {
+        ctx.streamState.set(`resp_reasoning_item_${chunk.item_id}`, index);
+      }
+
+      this.ensureResponsesThinkingBlockStarted(events, ctx, index);
+      const deltaText = this.extractResponsesReasoningDeltaText(chunk);
+      this.emitResponsesThinkingDelta(events, ctx, index, deltaText);
+
+      return this.finalizeResponsesStreamEvents(events, ctx);
+    }
+
+    if (
+      eventType === 'response.reasoning_summary_text.done'
+      || eventType === 'response.reasoning_text.done'
+      || eventType === 'response.reasoning.done'
+    ) {
+      ensureMessageStarted();
+
+      const index = this.resolveResponsesReasoningIndex(chunk, undefined, ctx);
+      if (typeof chunk?.item_id === 'string' && chunk.item_id.length > 0) {
+        ctx.streamState.set(`resp_reasoning_item_${chunk.item_id}`, index);
+      }
+
+      this.ensureResponsesThinkingBlockStarted(events, ctx, index);
+      const hasDelta = ctx.streamState.get(`resp_reasoning_has_delta_${index}`) === true;
+      if (!hasDelta) {
+        const doneText = this.extractResponsesReasoningDeltaText(chunk);
+        this.emitResponsesThinkingDelta(events, ctx, index, doneText);
+      }
+
+      return this.finalizeResponsesStreamEvents(events, ctx);
+    }
+
     if (eventType === 'response.function_call_arguments.delta') {
       const rawIndex = typeof chunk.output_index === 'number' ? chunk.output_index + 1 : 1;
       const index = Number.isFinite(rawIndex) ? rawIndex : 1;
@@ -1772,6 +2227,18 @@ export class AnthropicToOpenAIConverter implements AIConverter {
         events.push({
           type: 'content_block_stop',
           index: 0
+        });
+      }
+
+      const reasoningBlockKeys = Array.from(ctx.streamState.keys())
+        .filter((k) => typeof k === 'string' && /^resp_reasoning_block_\d+$/.test(k))
+        .sort((a, b) => Number(a.slice('resp_reasoning_block_'.length)) - Number(b.slice('resp_reasoning_block_'.length)));
+
+      for (const blockKey of reasoningBlockKeys) {
+        const reasoningIndex = Number(blockKey.slice('resp_reasoning_block_'.length));
+        events.push({
+          type: 'content_block_stop',
+          index: Number.isFinite(reasoningIndex) ? reasoningIndex : 1
         });
       }
 
@@ -1892,6 +2359,7 @@ export class AnthropicToOpenAIConverter implements AIConverter {
     return content
       .map((part: any) => {
         if (typeof part === 'string') return part;
+        if (part?.type === 'reasoning' || part?.type === 'thinking' || part?.thought === true) return '';
         if (part?.type === 'text' && typeof part.text === 'string') return part.text;
         if (typeof part?.text === 'string') return part.text;
         return '';
