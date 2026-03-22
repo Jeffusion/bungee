@@ -14,76 +14,9 @@ import type { AIConverter } from './base';
 import type { MutableRequestContext, ResponseContext, StreamChunkContext } from '../../../../packages/core/src/hooks';
 import { parseThinkingTags } from './utils';
 
-interface OpenAIToAnthropicRuntimeOptions {
-  anthropicMaxTokens?: number;
-  openAILowToAnthropicTokens?: number;
-  openAIMediumToAnthropicTokens?: number;
-  openAIHighToAnthropicTokens?: number;
-  openAIXHighToAnthropicTokens?: number;
-}
-
 export class OpenAIToAnthropicConverter implements AIConverter {
   readonly from = 'openai';
   readonly to = 'anthropic';
-  private runtimeOptions: OpenAIToAnthropicRuntimeOptions = {};
-
-  setRuntimeOptions(options: unknown): void {
-    if (!options || typeof options !== 'object') {
-      this.runtimeOptions = {};
-      return;
-    }
-
-    const value = options as Record<string, unknown>;
-    this.runtimeOptions = {
-      anthropicMaxTokens: this.parseIntegerOption(value.anthropicMaxTokens),
-      openAILowToAnthropicTokens: this.parseIntegerOption(value.openAILowToAnthropicTokens),
-      openAIMediumToAnthropicTokens: this.parseIntegerOption(value.openAIMediumToAnthropicTokens),
-      openAIHighToAnthropicTokens: this.parseIntegerOption(value.openAIHighToAnthropicTokens),
-      openAIXHighToAnthropicTokens: this.parseIntegerOption(value.openAIXHighToAnthropicTokens)
-    };
-  }
-
-  private parseIntegerOption(value: unknown): number | undefined {
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return Math.trunc(value);
-    }
-
-    if (typeof value === 'string' && value.trim().length > 0) {
-      const parsed = parseInt(value, 10);
-      if (Number.isFinite(parsed)) {
-        return parsed;
-      }
-    }
-
-    return undefined;
-  }
-
-  private resolveAnthropicMaxTokens(): number | undefined {
-    if (this.runtimeOptions.anthropicMaxTokens !== undefined) {
-      return this.runtimeOptions.anthropicMaxTokens;
-    }
-
-    return this.parseIntegerOption(process.env.ANTHROPIC_MAX_TOKENS);
-  }
-
-  private resolveOpenAIToAnthropicBudget(effort: string): number | undefined {
-    const normalizedEffort = effort.trim().toLowerCase();
-    if (normalizedEffort === 'low' && this.runtimeOptions.openAILowToAnthropicTokens !== undefined) {
-      return this.runtimeOptions.openAILowToAnthropicTokens;
-    }
-    if (normalizedEffort === 'medium' && this.runtimeOptions.openAIMediumToAnthropicTokens !== undefined) {
-      return this.runtimeOptions.openAIMediumToAnthropicTokens;
-    }
-    if (normalizedEffort === 'high' && this.runtimeOptions.openAIHighToAnthropicTokens !== undefined) {
-      return this.runtimeOptions.openAIHighToAnthropicTokens;
-    }
-    if (normalizedEffort === 'xhigh' && this.runtimeOptions.openAIXHighToAnthropicTokens !== undefined) {
-      return this.runtimeOptions.openAIXHighToAnthropicTokens;
-    }
-
-    const envKey = `OPENAI_${normalizedEffort.toUpperCase()}_TO_ANTHROPIC_TOKENS`;
-    return this.parseIntegerOption(process.env[envKey]);
-  }
 
   async onBeforeRequest(ctx: MutableRequestContext): Promise<void> {
     const body = ctx.body as any;
@@ -129,15 +62,8 @@ export class OpenAIToAnthropicConverter implements AIConverter {
     }
 
     // Max tokens
-    if (normalizedBody.max_tokens) {
+    if (normalizedBody.max_tokens !== undefined) {
       anthropicBody.max_tokens = normalizedBody.max_tokens;
-    } else {
-      const anthropicMaxTokens = this.resolveAnthropicMaxTokens();
-      if (anthropicMaxTokens !== undefined) {
-        anthropicBody.max_tokens = anthropicMaxTokens;
-      } else if (!normalizedBody.max_completion_tokens) {
-        throw new Error('max_tokens is required. Provide it in request or set ANTHROPIC_MAX_TOKENS environment variable');
-      }
     }
 
     // Other parameters
@@ -170,22 +96,6 @@ export class OpenAIToAnthropicConverter implements AIConverter {
       if (anthropicToolChoice === 'none') {
         delete anthropicBody.tools;
       }
-    }
-
-    // Thinking budget conversion for reasoning models
-    if (normalizedBody.max_completion_tokens) {
-      const effort = normalizedBody.reasoning_effort || 'medium';
-      const envKey = `OPENAI_${effort.toUpperCase()}_TO_ANTHROPIC_TOKENS`;
-      const thinkingBudget = this.resolveOpenAIToAnthropicBudget(effort);
-
-      if (thinkingBudget === undefined) {
-        throw new Error(`Environment variable ${envKey} not configured for reasoning_effort conversion`);
-      }
-
-      anthropicBody.thinking = {
-        type: 'enabled',
-        budget_tokens: thinkingBudget
-      };
     }
 
     ctx.body = anthropicBody;

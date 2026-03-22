@@ -300,7 +300,13 @@ Apply plugins to all requests matching a route:
 {
   "routes": [{
     "path": "/v1/chat/completions",
-    "plugins": ["openai-to-anthropic"],
+    "plugins": [{
+      "name": "ai-transformer",
+      "options": {
+        "from": "openai",
+        "to": "anthropic"
+      }
+    }],
     "upstreams": [{
       "target": "https://api.anthropic.com"
     }]
@@ -316,7 +322,13 @@ Apply plugins to specific upstreams:
 {
   "routes": [{
     "path": "/api/ai",
-    "plugins": ["anthropic-to-openai"],
+    "plugins": [{
+      "name": "ai-transformer",
+      "options": {
+        "from": "anthropic",
+        "to": "openai"
+      }
+    }],
     "upstreams": [
       {
         "target": "https://api.openai.com",
@@ -325,7 +337,13 @@ Apply plugins to specific upstreams:
       {
         "target": "https://api.gemini.com",
         "priority": 2,
-        "plugins": ["anthropic-to-gemini"]
+        "plugins": [{
+          "name": "ai-transformer",
+          "options": {
+            "from": "anthropic",
+            "to": "gemini"
+          }
+        }]
       }
     ]
   }]
@@ -336,7 +354,7 @@ Apply plugins to specific upstreams:
 
 Bungee automatically loads plugins from:
 
-1. **Built-in plugins**: `packages/core/src/plugins/transformers/*.plugin.ts`
+1. **Built-in plugins**: `plugins/*/manifest.json` + `plugins/*/index.ts`
 2. **Custom plugins**: Specified by path in configuration
 
 ```json
@@ -357,16 +375,20 @@ Bungee automatically loads plugins from:
 
 ## Available Plugins
 
-Bungee includes 6 built-in transformer plugins for API format conversion:
+Bungee includes `ai-transformer` built-in plugin for API format conversion:
 
 | Plugin | Description |
 |--------|-------------|
-| `openai-to-anthropic` | Convert OpenAI format → Claude API |
-| `anthropic-to-openai` | Convert Claude API → OpenAI format |
-| `anthropic-to-gemini` | Convert Claude API → Gemini format |
-| `gemini-to-anthropic` | Convert Gemini format → Claude API |
-| `openai-to-gemini` | Convert OpenAI format → Gemini format |
-| `gemini-to-openai` | Convert Gemini format → OpenAI format |
+| `ai-transformer` | Convert request/response format between `openai` / `anthropic` / `gemini` by `from/to` options |
+
+Supported directions:
+
+- `openai → anthropic`
+- `anthropic → openai`
+- `openai → gemini`
+- `gemini → openai`
+- `anthropic → gemini`
+- `gemini → anthropic`
 
 ### Feature Support
 
@@ -1135,7 +1157,7 @@ async onBeforeRequest(ctx: PluginContext): Promise<void> {
 
 ```typescript
 export class OpenAIToAnthropicPlugin implements Plugin {
-  name = 'openai-to-anthropic';
+  name = 'my-format-plugin';
 
   async onBeforeRequest(ctx: PluginContext): Promise<void> {
     // ✅ Read pathname to check format
@@ -1182,7 +1204,7 @@ See `packages/core/tests/unit/plugin-url-security.test.ts` for complete test sui
 
 Each plugin should do one thing well:
 
-✅ **Good**: `openai-to-anthropic` - converts one format to another
+✅ **Good**: `ai-transformer` - one plugin with explicit `from/to` options per route
 ❌ **Bad**: `multi-format-converter` - tries to handle all formats
 
 ### 2. Use TypeScript Types
@@ -1308,9 +1330,9 @@ async onBeforeRequest(ctx: PluginContext): Promise<void> {
 
 For complete examples, see the built-in transformer plugins:
 
-- `packages/core/src/plugins/transformers/openai-to-anthropic.plugin.ts`
-- `packages/core/src/plugins/transformers/anthropic-to-gemini.plugin.ts`
-- `packages/core/src/plugins/transformers/gemini-to-openai.plugin.ts`
+- `plugins/ai-transformer/manifest.json`
+- `plugins/ai-transformer/server/index.ts`
+- `plugins/ai-transformer/server/converters/*.ts`
 
 These implementations demonstrate:
 

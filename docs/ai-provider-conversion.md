@@ -36,26 +36,26 @@
   - Assistant 的 `tool_calls` 转换为 `tool_use` 内容块，每个函数调用解析 JSON 参数并填入 `input` 对象。
   - Tool 角色消息转写成 user 角色，内容为 `tool_result` 块，指向对应 `tool_use_id`。
 - **参数映射**：
-  - `max_tokens`：优先使用客户端值，否则读取环境变量 `ANTHROPIC_MAX_TOKENS`，若皆缺失则报错。
+  - `max_tokens`：仅在客户端显式提供时透传；未提供则不注入。
   - `stop` → `stop_sequences`（始终为数组）。
   - `temperature`、`top_p`、`stream` 等保持语义一致。
   - `tools` 全部改写为 `{"name","description","input_schema"}` 形式的列表。
 - **思考模式**：
   - 当请求出现 `max_completion_tokens` 时视为启用 reasoning。
-  - `reasoning_effort`（默认 medium）与 `OPENAI_{LOW|MEDIUM|HIGH}_TO_ANTHROPIC_TOKENS` 环境变量映射到 `thinking.budget_tokens`。
-  - 若映射所需环境变量缺失或不是整数应当立即报错提醒配置。
+  - `reasoning_effort` 仅保留在 OpenAI 侧语义中，不再映射为 Anthropic `thinking.budget_tokens`。
 
 #### → Gemini
+- **端点范围**：当前仅转换 OpenAI Chat Completions 端点（`/v1/chat/completions`）。`/v1/responses` 请求不做该方向格式重写。
 - **模型字段**：透传至 `model`。
-- **系统消息**：写入 `system_instruction.parts[{"text": ...}]`。
+- **系统消息**：写入 `systemInstruction.parts[{"text": ...}]`。
 - **消息与角色**：
   - OpenAI 的 user / assistant 消息转换为 `contents` 数组。assistant 文本生成 `role: "model"`；user 为 `role: "user"`。
   - `tool_calls` 变成 `functionCall` 部分，包含 `name` 与 JSON 解码后的 `args`。
   - Tool 角色消息变为 `role: "tool"` 的 `functionResponse`，`tool_call_id` 用于提取函数名（格式为 `call_<name>_<hash>`）。
   - 多模态内容以 `parts` 中的 `{"text": ...}` 或 `{"inlineData": {...}}` 表达。
-- **生成配置**：`generationConfig` 必须存在；`temperature`、`topP`、`maxOutputTokens`（来源于 `max_tokens` 或 `ANTHROPIC_MAX_TOKENS`）、`stopSequences` 等按语义映射。
-- **结构化输出**：若 OpenAI 请求使用 `response_format.type = json_schema`，则附加 `response_mime_type = "application/json"` 与 `response_schema`。
-- **思考模式**：`max_completion_tokens` + `reasoning_effort` 触发，依赖 `OPENAI_{LOW|MEDIUM|HIGH}_TO_GEMINI_TOKENS` 计算 `generationConfig.thinkingConfig.thinkingBudget`。
+- **生成配置**：`generationConfig` 按需写入；`temperature`、`topP`、`maxOutputTokens`（仅在 `max_tokens` 显式提供时映射）、`stopSequences` 等按语义映射。
+- **结构化输出**：若 OpenAI 请求使用 `response_format.type = json_schema`，则附加 `responseMimeType = "application/json"` 与 `responseSchema`。
+- **思考模式**：`max_completion_tokens` + `reasoning_effort` 不再自动转换为 Gemini `thinkingConfig.thinkingBudget`。
 
 ### 2.2 非流式响应回写
 #### Anthropic → OpenAI
@@ -111,7 +111,7 @@
   - `role` 映射：`assistant`→`model`，`user`→`user`，`tool`→`tool`。
   - 内容块转换成 `parts`，包括文本、base64 图像、`tool_use` → `functionCall`、`tool_result` → `functionResponse`。
   - 为了后续匹配工具结果，需要维护工具调用 ID 与函数名映射。
-- **生成配置**：`temperature` → `temperature`，`top_p` → `topP`，`top_k` → `topK`，`max_tokens` → `maxOutputTokens`，`stop_sequences` → `stopSequences`。若原请求没有 `max_tokens`，使用 `ANTHROPIC_MAX_TOKENS` 或报错。
+- **生成配置**：`temperature` → `temperature`，`top_p` → `topP`，`top_k` → `topK`，`max_tokens` → `maxOutputTokens`，`stop_sequences` → `stopSequences`。
 - **思考模式**：`thinking.budget_tokens` 转写为 `generationConfig.thinkingConfig.thinkingBudget`，若未提供预算则设置为 `-1` 表示“动态思考”。
 - **工具**：转换成 `functionDeclarations` 列表，并递归清理 JSON Schema 中的非标准字段。
 
@@ -168,7 +168,7 @@
   - 图片（inlineData） → `{"type": "image", "source": {"type": "base64", ...}}`。
   - `functionCall` → `tool_use` 块，并通过历史映射或散列生成 `id`。
   - `functionResponse` → `tool_result`，从内容中获取文本化结果。
-- 参数映射与思考模式规则同 4.1.1，并在缺失 `maxOutputTokens` 时回退到 `ANTHROPIC_MAX_TOKENS`。
+- 参数映射与思考模式规则同 4.1.1；缺失 `maxOutputTokens` 时不注入 `max_tokens`。
 - 工具声明转换为 Anthropic `{"name","description","input_schema"}` 列表。
 
 ### 4.2 非流式响应回写
@@ -204,14 +204,8 @@
 
 ## 5. 环境变量与配置
 
-| 环境变量 | 用途 |
-| --- | --- |
-| `ANTHROPIC_MAX_TOKENS` | Anthropic 请求的 `max_tokens` 兜底值，同时作为 OpenAI→Gemini 时 `maxOutputTokens` 的默认来源。 |
-| `OPENAI_LOW_TO_ANTHROPIC_TOKENS`, `OPENAI_MEDIUM_TO_ANTHROPIC_TOKENS`, `OPENAI_HIGH_TO_ANTHROPIC_TOKENS` | 将 OpenAI `reasoning_effort` 映射到 Anthropic `thinking.budget_tokens`。 |
-| `OPENAI_LOW_TO_GEMINI_TOKENS`, `OPENAI_MEDIUM_TO_GEMINI_TOKENS`, `OPENAI_HIGH_TO_GEMINI_TOKENS` | 将 OpenAI `reasoning_effort` 映射到 Gemini `thinkingBudget`。 |
-| `GEMINI_TO_OPENAI_LOW_REASONING_THRESHOLD`, `GEMINI_TO_OPENAI_HIGH_REASONING_THRESHOLD` | 将 Gemini `thinkingBudget` 反推 OpenAI `reasoning_effort` 等级。 |
+当前转换规范不再依赖专用的推理映射环境变量。
 
-所有转换器在读取上述环境变量时都要求取值为有效整数，缺失或格式错误应尽早抛出异常而非静默忽略。
 
 ---
 

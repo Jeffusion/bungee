@@ -572,38 +572,27 @@ describe('Gemini to OpenAI - Integration Tests', () => {
     expect(forwardedBody.messages[0].content[1].image_url.url).toBe('data:image/jpeg;base64,/9j/4AAQSkZJRg==');
   });
 
-  test('should convert thinkingConfig to reasoning effort and keep max_completion_tokens request-driven', async () => {
-    const originalEnv = process.env.GEMINI_TO_OPENAI_HIGH_REASONING_THRESHOLD;
-    process.env.GEMINI_TO_OPENAI_HIGH_REASONING_THRESHOLD = '12000';
-
-    try {
-      const geminiRequest = {
-        contents: [{ role: 'user', parts: [{ text: 'Complex problem' }] }],
-        generationConfig: {
-          thinkingConfig: { thinkingBudget: 16000 }
-        }
-      };
-
-      const req = new Request('http://localhost/v1/gemini-to-openai/generateContent', {
-        method: 'POST',
-        body: JSON.stringify(geminiRequest),
-        headers: { 'Content-Type': 'application/json' }
-      });
-
-      await handleRequest(req, mockConfig);
-
-      const [, fetchOptions] = mockedFetch.mock.calls[0];
-      const forwardedBody = JSON.parse(fetchOptions!.body as string);
-
-      expect(forwardedBody.reasoning_effort).toBe('high');
-      expect(forwardedBody.max_completion_tokens).toBeUndefined();
-    } finally {
-      if (originalEnv !== undefined) {
-        process.env.GEMINI_TO_OPENAI_HIGH_REASONING_THRESHOLD = originalEnv;
-      } else {
-        delete process.env.GEMINI_TO_OPENAI_HIGH_REASONING_THRESHOLD;
+  test('should not infer reasoning_effort from thinkingConfig when maxOutputTokens is absent', async () => {
+    const geminiRequest = {
+      contents: [{ role: 'user', parts: [{ text: 'Complex problem' }] }],
+      generationConfig: {
+        thinkingConfig: { thinkingBudget: 16000 }
       }
-    }
+    };
+
+    const req = new Request('http://localhost/v1/gemini-to-openai/generateContent', {
+      method: 'POST',
+      body: JSON.stringify(geminiRequest),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    await handleRequest(req, mockConfig);
+
+    const [, fetchOptions] = mockedFetch.mock.calls[0];
+    const forwardedBody = JSON.parse(fetchOptions!.body as string);
+
+    expect(forwardedBody.reasoning_effort).toBeUndefined();
+    expect(forwardedBody.max_completion_tokens).toBeUndefined();
   });
 
   test('should map maxOutputTokens to max_completion_tokens when thinking is enabled', async () => {
@@ -625,36 +614,18 @@ describe('Gemini to OpenAI - Integration Tests', () => {
 
     const [, fetchOptions] = mockedFetch.mock.calls[0];
     const forwardedBody = JSON.parse(fetchOptions!.body as string);
-    expect(forwardedBody.reasoning_effort).toBeDefined();
+    expect(forwardedBody.reasoning_effort).toBeUndefined();
     expect(forwardedBody.max_completion_tokens).toBe(2048);
     expect(forwardedBody.max_tokens).toBeUndefined();
   });
 
-  test('should prefer plugin thresholds over environment variables for G2O reasoning conversion', async () => {
+  test('should ignore legacy G2O threshold environment variables', async () => {
     const originalLow = process.env.GEMINI_TO_OPENAI_LOW_REASONING_THRESHOLD;
     const originalHigh = process.env.GEMINI_TO_OPENAI_HIGH_REASONING_THRESHOLD;
-    delete process.env.GEMINI_TO_OPENAI_LOW_REASONING_THRESHOLD;
-    delete process.env.GEMINI_TO_OPENAI_HIGH_REASONING_THRESHOLD;
-
-    const configWithOptions: AppConfig = JSON.parse(JSON.stringify(mockConfig));
-    const firstRoute = configWithOptions.routes?.[0];
-    const firstPlugin = firstRoute && Array.isArray(firstRoute.plugins) ? firstRoute.plugins[0] : undefined;
-    if (!firstRoute || !firstPlugin || typeof firstPlugin === 'string') {
-      throw new Error('Invalid test config for ai-transformer plugin');
-    }
-
-    const nextOptions = typeof firstPlugin.options === 'object' && firstPlugin.options !== null
-      ? { ...firstPlugin.options }
-      : {};
-    nextOptions.geminiToOpenAILowReasoningThreshold = 1000;
-    nextOptions.geminiToOpenAIHighReasoningThreshold = 5000;
-    firstPlugin.options = nextOptions;
+    process.env.GEMINI_TO_OPENAI_LOW_REASONING_THRESHOLD = '1000';
+    process.env.GEMINI_TO_OPENAI_HIGH_REASONING_THRESHOLD = '5000';
 
     try {
-      await cleanupPluginRegistry();
-      initializeRuntimeState(configWithOptions);
-      await initializePluginRegistryForTests(configWithOptions);
-
       const req = new Request('http://localhost/v1/gemini-to-openai/generateContent', {
         method: 'POST',
         body: JSON.stringify({
@@ -666,18 +637,22 @@ describe('Gemini to OpenAI - Integration Tests', () => {
         headers: { 'Content-Type': 'application/json' }
       });
 
-      await handleRequest(req, configWithOptions);
+      await handleRequest(req, mockConfig);
 
       const [, fetchOptions] = mockedFetch.mock.calls[0];
       const forwardedBody = JSON.parse(fetchOptions!.body as string);
-      expect(forwardedBody.reasoning_effort).toBe('medium');
+      expect(forwardedBody.reasoning_effort).toBeUndefined();
       expect(forwardedBody.max_completion_tokens).toBeUndefined();
     } finally {
       if (originalLow !== undefined) {
         process.env.GEMINI_TO_OPENAI_LOW_REASONING_THRESHOLD = originalLow;
+      } else {
+        delete process.env.GEMINI_TO_OPENAI_LOW_REASONING_THRESHOLD;
       }
       if (originalHigh !== undefined) {
         process.env.GEMINI_TO_OPENAI_HIGH_REASONING_THRESHOLD = originalHigh;
+      } else {
+        delete process.env.GEMINI_TO_OPENAI_HIGH_REASONING_THRESHOLD;
       }
     }
   });

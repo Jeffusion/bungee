@@ -496,6 +496,33 @@ describe('OpenAI to Anthropic - Enhanced Integration Tests', () => {
     });
   });
 
+  test('should keep max_tokens and thinking omitted for responses request without related fields', async () => {
+    const openaiResponsesRequest = {
+      model: 'claude-3-opus-20240229',
+      input: [
+        {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: 'Ping' }]
+        }
+      ]
+    };
+
+    const req = new Request('http://localhost/v1/openai-to-anthropic/responses', {
+      method: 'POST',
+      body: JSON.stringify(openaiResponsesRequest),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    await handleRequest(req, mockConfig);
+
+    const [, fetchOptions] = mockedFetch.mock.calls[0];
+    const forwardedBody = JSON.parse(fetchOptions!.body as string);
+
+    expect(forwardedBody.max_tokens).toBeUndefined();
+    expect(forwardedBody.thinking).toBeUndefined();
+  });
+
   test('should convert top-level responses input_text/input_image items into one user message', async () => {
     const openaiResponsesRequest = {
       model: 'claude-3-opus-20240229',
@@ -817,13 +844,12 @@ describe('OpenAI to Anthropic - Enhanced Integration Tests', () => {
     expect(content.some((c: any) => c.type === 'text' && c.text === 'What is 2+2?')).toBe(true);
   });
 
-  test('should handle max_tokens fallback to ANTHROPIC_MAX_TOKENS', async () => {
+  test('should not inject max_tokens when request omits token limit fields', async () => {
     const openaiRequest = {
       model: 'claude-3-opus-20240229',
       messages: [
         { role: 'user', content: 'Hello!' }
       ]
-      // No max_tokens specified
     };
 
     const req = new Request('http://localhost/v1/openai-to-anthropic/chat/completions', {
@@ -837,8 +863,7 @@ describe('OpenAI to Anthropic - Enhanced Integration Tests', () => {
     const [, fetchOptions] = mockedFetch.mock.calls[0];
     const forwardedBody = JSON.parse(fetchOptions!.body as string);
 
-    // Should use ANTHROPIC_MAX_TOKENS from env (32000)
-    expect(forwardedBody.max_tokens).toBe(32000);
+    expect(forwardedBody.max_tokens).toBeUndefined();
   });
 
   test('should convert streaming responses', async () => {
@@ -883,7 +908,7 @@ describe('OpenAI to Anthropic - Enhanced Integration Tests', () => {
     });
   });
 
-  test('should handle reasoning effort to thinking budget conversion', async () => {
+  test('should not inject thinking when reasoning_effort is provided', async () => {
     const openaiRequest = {
       model: 'claude-3-opus-20240229',
       messages: [{ role: 'user', content: 'Solve this complex problem' }],
@@ -902,56 +927,28 @@ describe('OpenAI to Anthropic - Enhanced Integration Tests', () => {
     const [, fetchOptions] = mockedFetch.mock.calls[0];
     const forwardedBody = JSON.parse(fetchOptions!.body as string);
 
-    // Should use OPENAI_HIGH_TO_ANTHROPIC_TOKENS from env
-    expect(forwardedBody.thinking).toBeDefined();
-    expect(forwardedBody.thinking.type).toBe('enabled');
-    expect(forwardedBody.thinking.budget_tokens).toBe(16384);
+    expect(forwardedBody.thinking).toBeUndefined();
   });
 
-  test('should prefer plugin token mapping over environment variable for O2A reasoning budget conversion', async () => {
-    const originalHigh = process.env.OPENAI_HIGH_TO_ANTHROPIC_TOKENS;
-    delete process.env.OPENAI_HIGH_TO_ANTHROPIC_TOKENS;
+  test('should not inject thinking budget when max_completion_tokens exists without reasoning_effort', async () => {
+    const openaiRequest = {
+      model: 'claude-3-opus-20240229',
+      messages: [{ role: 'user', content: 'No explicit reasoning effort' }],
+      max_completion_tokens: 2048
+    };
 
-    const configWithMapping: AppConfig = JSON.parse(JSON.stringify(mockConfig));
-    const firstRoute = configWithMapping.routes?.[0];
-    const firstPlugin = firstRoute && Array.isArray(firstRoute.plugins) ? firstRoute.plugins[0] : undefined;
-    if (!firstRoute || !firstPlugin || typeof firstPlugin === 'string') {
-      throw new Error('Invalid test config for ai-transformer plugin');
-    }
+    const req = new Request('http://localhost/v1/openai-to-anthropic/chat/completions', {
+      method: 'POST',
+      body: JSON.stringify(openaiRequest),
+      headers: { 'Content-Type': 'application/json' }
+    });
 
-    const nextOptions = typeof firstPlugin.options === 'object' && firstPlugin.options !== null
-      ? { ...firstPlugin.options }
-      : {};
-    nextOptions.openAIHighToAnthropicTokens = 7777;
-    firstPlugin.options = nextOptions;
+    await handleRequest(req, mockConfig);
 
-    try {
-      await cleanupPluginRegistry();
-      initializeRuntimeState(configWithMapping);
-      await initializePluginRegistryForTests(configWithMapping);
+    const [, fetchOptions] = mockedFetch.mock.calls[0];
+    const forwardedBody = JSON.parse(fetchOptions!.body as string);
 
-      const req = new Request('http://localhost/v1/openai-to-anthropic/chat/completions', {
-        method: 'POST',
-        body: JSON.stringify({
-          model: 'claude-3-opus-20240229',
-          messages: [{ role: 'user', content: 'plugin mapping priority check' }],
-          max_completion_tokens: 4096,
-          reasoning_effort: 'high'
-        }),
-        headers: { 'Content-Type': 'application/json' }
-      });
-
-      await handleRequest(req, configWithMapping);
-
-      const [, fetchOptions] = mockedFetch.mock.calls[0];
-      const forwardedBody = JSON.parse(fetchOptions!.body as string);
-      expect(forwardedBody.thinking).toBeDefined();
-      expect(forwardedBody.thinking.budget_tokens).toBe(7777);
-    } finally {
-      if (originalHigh !== undefined) {
-        process.env.OPENAI_HIGH_TO_ANTHROPIC_TOKENS = originalHigh;
-      }
-    }
+    expect(forwardedBody.thinking).toBeUndefined();
   });
 
   test('should validate and remove tool_calls without corresponding tool results', async () => {

@@ -553,7 +553,7 @@ describe('Streaming Response - Detailed SSE Event Testing', () => {
   });
 });
 
-describe('Environment Variable Validation', () => {
+describe('Reasoning Mapping Behavior', () => {
   // 直接使用 converter 而不是 plugin wrapper
   const { OpenAIToAnthropicConverter } = require('../../../plugins/ai-transformer/server/converters/openai-to-anthropic.converter');
   const converter = new OpenAIToAnthropicConverter();
@@ -568,52 +568,18 @@ describe('Environment Variable Validation', () => {
     body,
   });
 
-  test('throws when reasoning mapping environment variable is missing', async () => {
-    const original = process.env.OPENAI_HIGH_TO_ANTHROPIC_TOKENS;
-    delete process.env.OPENAI_HIGH_TO_ANTHROPIC_TOKENS;
+  test('does not inject thinking budget when reasoning_effort is present', async () => {
+    const ctx = buildContext({
+      model: 'claude-3-opus-20240229',
+      messages: [{ role: 'user', content: 'Need reasoning' }],
+      max_completion_tokens: 1024,
+      reasoning_effort: 'high'
+    });
 
-    try {
-      const ctx = buildContext({
-        model: 'claude-3-opus-20240229',
-        messages: [{ role: 'user', content: 'Need reasoning' }],
-        max_completion_tokens: 1024,
-        reasoning_effort: 'high'
-      });
+    await expect(converter.onBeforeRequest(ctx)).resolves.toBeUndefined();
 
-      await expect(converter.onBeforeRequest(ctx)).rejects.toThrow(
-        'Environment variable OPENAI_HIGH_TO_ANTHROPIC_TOKENS not configured for reasoning_effort conversion'
-      );
-    } finally {
-      if (original !== undefined) {
-        process.env.OPENAI_HIGH_TO_ANTHROPIC_TOKENS = original;
-      } else {
-        delete process.env.OPENAI_HIGH_TO_ANTHROPIC_TOKENS;
-      }
-    }
-  });
-
-  test('throws when reasoning mapping environment variable is not an integer', async () => {
-    const original = process.env.OPENAI_HIGH_TO_ANTHROPIC_TOKENS;
-    process.env.OPENAI_HIGH_TO_ANTHROPIC_TOKENS = 'not-a-number';
-
-    try {
-      const ctx = buildContext({
-        model: 'claude-3-opus-20240229',
-        messages: [{ role: 'user', content: 'Need reasoning' }],
-        max_completion_tokens: 1024,
-        reasoning_effort: 'high'
-      });
-
-      await expect(converter.onBeforeRequest(ctx)).rejects.toThrow(
-        'Invalid OPENAI_HIGH_TO_ANTHROPIC_TOKENS value: must be integer'
-      );
-    } finally {
-      if (original !== undefined) {
-        process.env.OPENAI_HIGH_TO_ANTHROPIC_TOKENS = original;
-      } else {
-        delete process.env.OPENAI_HIGH_TO_ANTHROPIC_TOKENS;
-      }
-    }
+    const transformedBody = ctx.body as Record<string, unknown>;
+    expect(transformedBody.thinking).toBeUndefined();
   });
 
 });

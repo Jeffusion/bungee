@@ -15,10 +15,6 @@
 import type { AIConverter } from './base';
 import type { MutableRequestContext, ResponseContext, StreamChunkContext } from '../../../../packages/core/src/hooks';
 
-interface GeminiToAnthropicRuntimeOptions {
-  anthropicMaxTokens?: number;
-}
-
 interface GeminiPart {
   text?: string;
   thought?: boolean;
@@ -63,42 +59,6 @@ interface AnthropicMessage {
 export class GeminiToAnthropicConverter implements AIConverter {
   readonly from = 'gemini';
   readonly to = 'anthropic';
-  private runtimeOptions: GeminiToAnthropicRuntimeOptions = {};
-
-  setRuntimeOptions(options: unknown): void {
-    if (!options || typeof options !== 'object') {
-      this.runtimeOptions = {};
-      return;
-    }
-
-    const value = options as Record<string, unknown>;
-    this.runtimeOptions = {
-      anthropicMaxTokens: this.parseIntegerOption(value.anthropicMaxTokens)
-    };
-  }
-
-  private parseIntegerOption(value: unknown): number | undefined {
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return Math.trunc(value);
-    }
-
-    if (typeof value === 'string' && value.trim().length > 0) {
-      const parsed = parseInt(value, 10);
-      if (Number.isFinite(parsed)) {
-        return parsed;
-      }
-    }
-
-    return undefined;
-  }
-
-  private resolveAnthropicMaxTokens(): number | undefined {
-    if (this.runtimeOptions.anthropicMaxTokens !== undefined) {
-      return this.runtimeOptions.anthropicMaxTokens;
-    }
-
-    return this.parseIntegerOption(process.env.ANTHROPIC_MAX_TOKENS);
-  }
 
   /**
    * 修改请求 URL 和 body，转换为 Anthropic 格式
@@ -173,12 +133,6 @@ export class GeminiToAnthropicConverter implements AIConverter {
           }
         }
       }
-    }
-
-    // Set max_tokens from env if not already set
-    const anthropicMaxTokens = this.resolveAnthropicMaxTokens();
-    if (!anthropicBody.max_tokens && anthropicMaxTokens !== undefined) {
-      anthropicBody.max_tokens = anthropicMaxTokens;
     }
 
     // Tools

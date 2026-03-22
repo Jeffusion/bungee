@@ -12,130 +12,9 @@
 import type { AIConverter } from './base';
 import type { MutableRequestContext, ResponseContext, StreamChunkContext } from '../../../../packages/core/src/hooks';
 
-interface OpenAIToGeminiRuntimeOptions {
-  anthropicMaxTokens?: number;
-  openAILowToGeminiTokens?: number;
-  openAIMediumToGeminiTokens?: number;
-  openAIHighToGeminiTokens?: number;
-  openAIXHighToGeminiTokens?: number;
-}
-
 export class OpenAIToGeminiConverter implements AIConverter {
   readonly from = 'openai';
   readonly to = 'gemini';
-  private runtimeOptions: OpenAIToGeminiRuntimeOptions = {};
-
-  setRuntimeOptions(options: unknown): void {
-    if (!options || typeof options !== 'object') {
-      this.runtimeOptions = {};
-      return;
-    }
-
-    const value = options as Record<string, unknown>;
-    this.runtimeOptions = {
-      anthropicMaxTokens: this.parseIntegerOption(value.anthropicMaxTokens),
-      openAILowToGeminiTokens: this.parseIntegerOption(value.openAILowToGeminiTokens),
-      openAIMediumToGeminiTokens: this.parseIntegerOption(value.openAIMediumToGeminiTokens),
-      openAIHighToGeminiTokens: this.parseIntegerOption(value.openAIHighToGeminiTokens),
-      openAIXHighToGeminiTokens: this.parseIntegerOption(value.openAIXHighToGeminiTokens)
-    };
-  }
-
-  private parseIntegerOption(value: unknown): number | undefined {
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return Math.trunc(value);
-    }
-
-    if (typeof value === 'string' && value.trim().length > 0) {
-      const parsed = parseInt(value, 10);
-      if (Number.isFinite(parsed)) {
-        return parsed;
-      }
-    }
-
-    return undefined;
-  }
-
-  private resolveAnthropicMaxTokens(): number | undefined {
-    if (this.runtimeOptions.anthropicMaxTokens !== undefined) {
-      return this.runtimeOptions.anthropicMaxTokens;
-    }
-
-    return this.parseIntegerOption(process.env.ANTHROPIC_MAX_TOKENS);
-  }
-
-  private resolveOpenAIToGeminiBudget(effort: string): number | undefined {
-    const normalizedEffort = effort.trim().toLowerCase();
-    if (normalizedEffort === 'low' && this.runtimeOptions.openAILowToGeminiTokens !== undefined) {
-      return this.runtimeOptions.openAILowToGeminiTokens;
-    }
-    if (normalizedEffort === 'medium' && this.runtimeOptions.openAIMediumToGeminiTokens !== undefined) {
-      return this.runtimeOptions.openAIMediumToGeminiTokens;
-    }
-    if (normalizedEffort === 'high' && this.runtimeOptions.openAIHighToGeminiTokens !== undefined) {
-      return this.runtimeOptions.openAIHighToGeminiTokens;
-    }
-    if (normalizedEffort === 'xhigh' && this.runtimeOptions.openAIXHighToGeminiTokens !== undefined) {
-      return this.runtimeOptions.openAIXHighToGeminiTokens;
-    }
-
-    const envKey = `OPENAI_${normalizedEffort.toUpperCase()}_TO_GEMINI_TOKENS`;
-    return this.parseIntegerOption(process.env[envKey]);
-  }
-
-  /**
-   * Model-specific max output tokens mapping (based on official Gemini API documentation)
-   * Source: https://ai.google.dev/gemini-api/docs/models
-   */
-  private readonly modelMaxTokens: Record<string, number> = {
-    // Gemini 2.5 series
-    'gemini-2.5-pro': 65536,
-    'gemini-2.5-flash': 65536,
-    'gemini-2.5-flash-preview': 65536,
-    'gemini-2.5-flash-lite': 65536,
-    'gemini-2.5-flash-lite-preview': 65536,
-    'gemini-2.5-flash-image': 32768,
-    'gemini-2.5-flash-live': 8192,
-    'gemini-2.5-flash-tts': 16384,
-
-    // Gemini 2.0 series
-    'gemini-2.0-flash': 8192,
-    'gemini-2.0-flash-exp': 8192,
-    'gemini-2.0-flash-image': 8192,
-    'gemini-2.0-flash-live': 8192,
-    'gemini-2.0-flash-lite': 8192,
-
-    // Gemini 1.5 series
-    'gemini-1.5-pro': 8192,
-    'gemini-1.5-pro-latest': 8192,
-    'gemini-1.5-flash': 8192,
-    'gemini-1.5-flash-latest': 8192,
-    'gemini-1.5-flash-8b': 8192,
-
-    // Legacy
-    'gemini-pro': 8192,
-    'gemini-flash': 8192,
-  };
-
-  /**
-   * Get default max output tokens for a given model
-   */
-  private getDefaultMaxTokens(model: string): number {
-    // Direct match
-    if (this.modelMaxTokens[model]) {
-      return this.modelMaxTokens[model];
-    }
-
-    // Partial match for model with version suffix (e.g., "gemini-2.5-pro-001")
-    for (const [key, value] of Object.entries(this.modelMaxTokens)) {
-      if (model.startsWith(key)) {
-        return value;
-      }
-    }
-
-    // Default fallback for unknown models
-    return 8192;
-  }
 
   private extractInstructionText(content: any): string {
     if (typeof content === 'string') {
@@ -331,36 +210,12 @@ export class OpenAIToGeminiConverter implements AIConverter {
       generationConfig.topP = openaiBody.top_p;
     }
 
-    // max_tokens - 可选，根据模型使用动态默认值
-    if (openaiBody.max_tokens) {
+    if (openaiBody.max_tokens !== undefined) {
       generationConfig.maxOutputTokens = openaiBody.max_tokens;
-    } else {
-      const anthropicMaxTokens = this.resolveAnthropicMaxTokens();
-      if (anthropicMaxTokens !== undefined) {
-        generationConfig.maxOutputTokens = anthropicMaxTokens;
-      } else {
-        const model = openaiBody.model || 'gemini-pro';
-        generationConfig.maxOutputTokens = this.getDefaultMaxTokens(model);
-      }
     }
 
     if (openaiBody.stop) {
       generationConfig.stopSequences = Array.isArray(openaiBody.stop) ? openaiBody.stop : [openaiBody.stop];
-    }
-
-    // Thinking config for reasoning models
-    if (openaiBody.max_completion_tokens) {
-      const effort = openaiBody.reasoning_effort || 'medium';
-      const envKey = `OPENAI_${effort.toUpperCase()}_TO_GEMINI_TOKENS`;
-      const tokens = this.resolveOpenAIToGeminiBudget(effort);
-
-      if (tokens === undefined) {
-        throw new Error(`Environment variable ${envKey} not configured`);
-      }
-
-      generationConfig.thinkingConfig = {
-        thinkingBudget: tokens
-      };
     }
 
     // Response format

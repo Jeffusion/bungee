@@ -394,24 +394,7 @@ export const mockGeminiResponse = {
 
 // ==================== Environment Variables ====================
 
-export const mockEnvVars = {
-  // Anthropic max_tokens
-  ANTHROPIC_MAX_TOKENS: '32000',
-
-  // OpenAI to Anthropic thinking budget mappings
-  OPENAI_LOW_TO_ANTHROPIC_TOKENS: '2048',
-  OPENAI_MEDIUM_TO_ANTHROPIC_TOKENS: '8192',
-  OPENAI_HIGH_TO_ANTHROPIC_TOKENS: '16384',
-
-  // OpenAI to Gemini thinking budget mappings
-  OPENAI_LOW_TO_GEMINI_TOKENS: '2048',
-  OPENAI_MEDIUM_TO_GEMINI_TOKENS: '8192',
-  OPENAI_HIGH_TO_GEMINI_TOKENS: '16384',
-
-  // Gemini to OpenAI reasoning effort thresholds
-  GEMINI_TO_OPENAI_LOW_REASONING_THRESHOLD: '2048',
-  GEMINI_TO_OPENAI_HIGH_REASONING_THRESHOLD: '16384'
-};
+export const mockEnvVars: Record<string, string> = {};
 
 // ==================== Utility Functions ====================
 

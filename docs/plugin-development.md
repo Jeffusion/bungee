@@ -676,8 +676,8 @@ import type { Plugin, PluginContext } from '../../plugin.types';
 import { definePlugin } from '../../plugin.types';
 
 interface TransformerOptions {
-  from: 'openai' | 'anthropic';
-  to: 'openai' | 'anthropic';
+  from: 'openai' | 'anthropic' | 'gemini';
+  to: 'openai' | 'anthropic' | 'gemini';
 }
 
 export const APITransformerPlugin = definePlugin(
@@ -742,7 +742,8 @@ export default APITransformerPlugin;
 ## 更多资源
 
 - [Plugin API 参考](../packages/core/src/plugin.types.ts)
-- [内置插件示例](../packages/core/src/plugins/)
+- [ai-transformer 插件入口](../plugins/ai-transformer/server/index.ts)
+- [ai-transformer 转换规范](./ai-provider-conversion.md)
 - [测试示例](../packages/core/tests/)
 
 ---

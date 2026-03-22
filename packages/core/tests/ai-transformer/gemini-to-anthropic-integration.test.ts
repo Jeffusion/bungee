@@ -312,11 +312,10 @@ describe('Gemini to Anthropic - Integration Tests', () => {
     expect(forwardedBody.stop_sequences).toEqual(['STOP', 'END']);
   });
 
-  test('should use ANTHROPIC_MAX_TOKENS when maxOutputTokens not provided', async () => {
+  test('should not inject max_tokens when maxOutputTokens is not provided', async () => {
     const geminiRequest = {
       model: 'claude-3-opus-20240229',
       contents: [{ role: 'user', parts: [{ text: 'Test' }] }]
-      // No generationConfig.maxOutputTokens
     };
 
     const req = new Request('http://localhost/v1/gemini-to-anthropic/generateContent', {
@@ -330,8 +329,7 @@ describe('Gemini to Anthropic - Integration Tests', () => {
     const [, fetchOptions] = mockedFetch.mock.calls[0];
     const forwardedBody = JSON.parse(fetchOptions!.body as string);
 
-    // Should use ANTHROPIC_MAX_TOKENS from env (32000)
-    expect(forwardedBody.max_tokens).toBe(32000);
+    expect(forwardedBody.max_tokens).toBeUndefined();
   });
 
   test('should convert stop reasons correctly', async () => {

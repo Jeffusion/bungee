@@ -55,21 +55,6 @@ interface AITransformerOptions {
   }> | Record<string, string>;
 
   anthropicToOpenAIApiMode?: 'chat_completions' | 'responses';
-
-  anthropicMaxTokens?: number;
-
-  geminiToOpenAILowReasoningThreshold?: number;
-  geminiToOpenAIHighReasoningThreshold?: number;
-
-  openAILowToAnthropicTokens?: number;
-  openAIMediumToAnthropicTokens?: number;
-  openAIHighToAnthropicTokens?: number;
-  openAIXHighToAnthropicTokens?: number;
-
-  openAILowToGeminiTokens?: number;
-  openAIMediumToGeminiTokens?: number;
-  openAIHighToGeminiTokens?: number;
-  openAIXHighToGeminiTokens?: number;
 }
 
 type MaybeAITransformerOptions = AITransformerOptions | undefined;

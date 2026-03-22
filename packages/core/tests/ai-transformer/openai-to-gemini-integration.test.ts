@@ -438,11 +438,10 @@ describe('OpenAI to Gemini - Integration Tests', () => {
     expect(forwardedBody.user).toBeUndefined();
   });
 
-  test('should use ANTHROPIC_MAX_TOKENS when max_tokens not provided', async () => {
+  test('should not inject maxOutputTokens when max_tokens is not provided', async () => {
     const openaiRequest = {
       model: 'gpt-4',
       messages: [{ role: 'user', content: 'Test' }]
-      // No max_tokens
     };
 
     const req = new Request('http://localhost/v1/openai-to-gemini/chat/completions', {
@@ -456,8 +455,30 @@ describe('OpenAI to Gemini - Integration Tests', () => {
     const [, fetchOptions] = mockedFetch.mock.calls[0];
     const forwardedBody = JSON.parse(fetchOptions!.body as string);
 
-    // Should use ANTHROPIC_MAX_TOKENS from env (32000)
-    expect(forwardedBody.generationConfig.maxOutputTokens).toBe(32000);
+    expect(forwardedBody.generationConfig).toBeUndefined();
+  });
+
+  test('should keep /responses request as pass-through in O2G direction', async () => {
+    const openaiResponsesRequest = {
+      model: 'gpt-4.1',
+      input: 'Hello responses endpoint',
+      max_output_tokens: 128
+    };
+
+    const req = new Request('http://localhost/v1/openai-to-gemini/responses', {
+      method: 'POST',
+      body: JSON.stringify(openaiResponsesRequest),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    await handleRequest(req, mockConfig);
+
+    const [fetchUrl, fetchOptions] = mockedFetch.mock.calls[0];
+    const forwardedBody = JSON.parse(fetchOptions!.body as string);
+
+    expect(fetchUrl).toContain('/v1/responses');
+    expect(fetchUrl).not.toContain('/v1beta/models/');
+    expect(forwardedBody).toEqual(openaiResponsesRequest);
   });
 
   test('should convert tools to functionDeclarations with schema cleaning', async () => {
@@ -734,87 +755,47 @@ describe('OpenAI to Gemini - Integration Tests', () => {
     expect(userMsg.parts[1].inlineData.data).toBe('/9j/4AAQSkZJRg==');
   });
 
-  test('should convert reasoning_effort to thinkingConfig', async () => {
-    // Set up env var for reasoning conversion
-    const originalEnv = process.env.OPENAI_HIGH_TO_GEMINI_TOKENS;
-    process.env.OPENAI_HIGH_TO_GEMINI_TOKENS = '16384';
+  test('should not inject thinkingConfig when reasoning_effort is provided', async () => {
+    const openaiRequest = {
+      model: 'o1-preview',
+      messages: [{ role: 'user', content: 'Solve this complex problem' }],
+      max_completion_tokens: 4096,
+      reasoning_effort: 'high'
+    };
 
-    try {
-      const openaiRequest = {
-        model: 'o1-preview',
-        messages: [{ role: 'user', content: 'Solve this complex problem' }],
-        max_completion_tokens: 4096,
-        reasoning_effort: 'high'
-      };
+    const req = new Request('http://localhost/v1/openai-to-gemini/chat/completions', {
+      method: 'POST',
+      body: JSON.stringify(openaiRequest),
+      headers: { 'Content-Type': 'application/json' }
+    });
 
-      const req = new Request('http://localhost/v1/openai-to-gemini/chat/completions', {
-        method: 'POST',
-        body: JSON.stringify(openaiRequest),
-        headers: { 'Content-Type': 'application/json' }
-      });
+    await handleRequest(req, mockConfig);
 
-      await handleRequest(req, mockConfig);
+    const [, fetchOptions] = mockedFetch.mock.calls[0];
+    const forwardedBody = JSON.parse(fetchOptions!.body as string);
 
-      const [, fetchOptions] = mockedFetch.mock.calls[0];
-      const forwardedBody = JSON.parse(fetchOptions!.body as string);
-
-      // Verify thinking config
-      expect(forwardedBody.generationConfig.thinkingConfig).toBeDefined();
-      expect(forwardedBody.generationConfig.thinkingConfig.thinkingBudget).toBe(16384);
-    } finally {
-      if (originalEnv !== undefined) {
-        process.env.OPENAI_HIGH_TO_GEMINI_TOKENS = originalEnv;
-      } else {
-        delete process.env.OPENAI_HIGH_TO_GEMINI_TOKENS;
-      }
-    }
+    expect(forwardedBody.generationConfig?.thinkingConfig).toBeUndefined();
   });
 
-  test('should prefer plugin token mapping over environment variable for O2G reasoning budget conversion', async () => {
-    const originalHigh = process.env.OPENAI_HIGH_TO_GEMINI_TOKENS;
-    delete process.env.OPENAI_HIGH_TO_GEMINI_TOKENS;
+  test('should not inject thinkingConfig when max_completion_tokens exists without reasoning_effort', async () => {
+    const openaiRequest = {
+      model: 'o1-preview',
+      messages: [{ role: 'user', content: 'No explicit reasoning effort' }],
+      max_completion_tokens: 2048
+    };
 
-    const configWithMapping: AppConfig = JSON.parse(JSON.stringify(mockConfig));
-    const firstRoute = configWithMapping.routes?.[0];
-    const firstPlugin = firstRoute && Array.isArray(firstRoute.plugins) ? firstRoute.plugins[0] : undefined;
-    if (!firstRoute || !firstPlugin || typeof firstPlugin === 'string') {
-      throw new Error('Invalid test config for ai-transformer plugin');
-    }
+    const req = new Request('http://localhost/v1/openai-to-gemini/chat/completions', {
+      method: 'POST',
+      body: JSON.stringify(openaiRequest),
+      headers: { 'Content-Type': 'application/json' }
+    });
 
-    const nextOptions = typeof firstPlugin.options === 'object' && firstPlugin.options !== null
-      ? { ...firstPlugin.options }
-      : {};
-    nextOptions.openAIHighToGeminiTokens = 7777;
-    firstPlugin.options = nextOptions;
+    await handleRequest(req, mockConfig);
 
-    try {
-      await cleanupPluginRegistry();
-      initializeRuntimeState(configWithMapping);
-      await initializePluginRegistryForTests(configWithMapping);
+    const [, fetchOptions] = mockedFetch.mock.calls[0];
+    const forwardedBody = JSON.parse(fetchOptions!.body as string);
 
-      const req = new Request('http://localhost/v1/openai-to-gemini/chat/completions', {
-        method: 'POST',
-        body: JSON.stringify({
-          model: 'o1-preview',
-          messages: [{ role: 'user', content: 'plugin mapping priority check' }],
-          max_completion_tokens: 4096,
-          reasoning_effort: 'high'
-        }),
-        headers: { 'Content-Type': 'application/json' }
-      });
-
-      await handleRequest(req, configWithMapping);
-
-      const [, fetchOptions] = mockedFetch.mock.calls[0];
-      const forwardedBody = JSON.parse(fetchOptions!.body as string);
-
-      expect(forwardedBody.generationConfig.thinkingConfig).toBeDefined();
-      expect(forwardedBody.generationConfig.thinkingConfig.thinkingBudget).toBe(7777);
-    } finally {
-      if (originalHigh !== undefined) {
-        process.env.OPENAI_HIGH_TO_GEMINI_TOKENS = originalHigh;
-      }
-    }
+    expect(forwardedBody.generationConfig?.thinkingConfig).toBeUndefined();
   });
 
   test('should convert response_format to response_schema', async () => {
