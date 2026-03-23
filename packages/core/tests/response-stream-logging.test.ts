@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import fs from 'fs';
 import path from 'path';
 import type { AppConfig, ModificationRules } from '@jeffusion/bungee-types';
 import type { ExpressionContext } from '../src/expression-engine';
+import { MigrationManager } from '../src/migrations/migration-manager';
 import { accessLogWriter } from '../src/logger/access-log-writer';
 import { bodyStorageManager } from '../src/logger/body-storage';
 import { RequestLogger } from '../src/logger/request-logger';
@@ -25,6 +26,12 @@ const baseContext: ExpressionContext = {
 };
 
 const emptyRules: ModificationRules = {};
+
+beforeAll(async () => {
+  const dbPath = path.resolve(process.cwd(), 'logs', 'access.db');
+  const migrationManager = new MigrationManager(dbPath);
+  await migrationManager.migrate();
+});
 
 function createSSEBody(chunks: string[]): ReadableStream<Uint8Array> {
   return new ReadableStream<Uint8Array>({

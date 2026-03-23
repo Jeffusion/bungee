@@ -1,14 +1,22 @@
-import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
+import { describe, test, expect } from 'bun:test';
 import type { AppConfig } from '@jeffusion/bungee-types';
-import { handleRequest, initializeRuntimeState, initializePluginRegistryForTests, cleanupPluginRegistry } from '../src/worker';
+import { ScopedPluginRegistry } from '../src/scoped-plugin-registry';
+import type { MutableRequestContext } from '../src/hooks';
 
-const mockConfig: AppConfig = {
+type HeaderEcho = {
+  onlyA: string | null;
+  onlyB: string | null;
+  enabled: string | null;
+  disabled: string | null;
+};
+
+const createSameTargetConfig = (target: string): AppConfig => ({
   routes: [
     {
       path: '/same-target',
       upstreams: [
         {
-          target: 'http://mock-upstream-a.com',
+          target,
           priority: 1,
           plugins: [
             {
@@ -21,7 +29,7 @@ const mockConfig: AppConfig = {
           ]
         },
         {
-          target: 'http://mock-upstream-a.com',
+          target,
           priority: 2,
           plugins: [
             {
@@ -37,94 +45,96 @@ const mockConfig: AppConfig = {
       failover: { enabled: false, retryableStatusCodes: [] },
     },
   ],
-};
-
-const mockedFetch = mock(async (_request: Request | string, options?: RequestInit) => {
-  const headers = new Headers(options?.headers);
-    const onlyA = headers.get('x-only-a') || '0';
-    const onlyB = headers.get('x-only-b') || '0';
-    return new Response(JSON.stringify({ onlyA, onlyB }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
 });
 
-global.fetch = mockedFetch as any;
-
-describe('ScopedPluginRegistry upstream scope isolation', () => {
-  beforeEach(async () => {
-    mockedFetch.mockClear();
-    initializeRuntimeState(mockConfig);
-    await initializePluginRegistryForTests(mockConfig);
-  });
-
-  afterEach(async () => {
-    await cleanupPluginRegistry();
-  });
-
-  test('should isolate upstream plugins when targets are identical', async () => {
-    const req = new Request('http://localhost/same-target');
-    await handleRequest(req, mockConfig);
-
-    const fetchOptions = mockedFetch.mock.calls[0]?.[1];
-    if (!fetchOptions) throw new Error('fetch was called without options');
-    const forwardedHeaders = new Headers(fetchOptions.headers);
-
-    expect(forwardedHeaders.get('x-only-a')).toBe('1');
-    expect(forwardedHeaders.get('x-only-b')).toBeNull();
-  });
-
-  test('should not apply plugins from disabled upstream with same target', async () => {
-    const configWithDisable: AppConfig = {
-      routes: [
+const createDisabledConfig = (target: string): AppConfig => ({
+  routes: [
+    {
+      path: '/same-target-disabled',
+      upstreams: [
         {
-          path: '/same-target-disabled',
-          upstreams: [
+          target,
+          priority: 1,
+          plugins: [
             {
-              target: 'http://mock-upstream-a.com',
-              priority: 1,
-              plugins: [
-                {
-                  name: 'header-injection-example',
-                  options: {
-                    headers: { 'x-enabled': '1' },
-                    priority: 10,
-                  }
-                }
-              ]
-            },
-            {
-              target: 'http://mock-upstream-a.com',
-              priority: 2,
-              disabled: true,
-              plugins: [
-                {
-                  name: 'header-injection-example',
-                  options: {
-                    headers: { 'x-disabled': '1' },
-                    priority: 1,
-                  }
-                }
-              ]
+              name: 'header-injection-example',
+              options: {
+                headers: { 'x-enabled': '1' },
+                priority: 10,
+              }
             }
-          ],
-          failover: { enabled: false, retryableStatusCodes: [] },
+          ]
         },
+        {
+          target,
+          priority: 2,
+          disabled: true,
+          plugins: [
+            {
+              name: 'header-injection-example',
+              options: {
+                headers: { 'x-disabled': '1' },
+                priority: 1,
+              }
+            }
+          ]
+        }
       ],
+      failover: { enabled: false, retryableStatusCodes: [] },
+    },
+  ],
+});
+
+const runScenario = async (
+  configBuilder: (target: string) => AppConfig,
+  routeId: string,
+  upstreamId: string
+): Promise<HeaderEcho> => {
+  const registry = new ScopedPluginRegistry(process.cwd());
+
+  try {
+    const config = configBuilder('http://mock-upstream-a.com');
+    const { failed } = await registry.initializeFromConfig(config);
+    expect(failed).toBe(0);
+
+    const precompiledHooks = registry.getPrecompiledHooks(routeId, upstreamId);
+    if (!precompiledHooks) {
+      throw new Error(`No precompiled hooks found for route=${routeId}, upstream=${upstreamId}`);
+    }
+
+    const context: MutableRequestContext = {
+      method: 'GET',
+      originalUrl: new URL(`http://localhost${routeId}`),
+      clientIP: '127.0.0.1',
+      requestId: crypto.randomUUID(),
+      routeId,
+      upstreamId,
+      url: new URL('http://mock-upstream-a.com'),
+      headers: {},
+      body: null,
     };
 
-    await cleanupPluginRegistry();
-    initializeRuntimeState(configWithDisable);
-    await initializePluginRegistryForTests(configWithDisable);
+    const transformed = await precompiledHooks.hooks.onBeforeRequest.promise(context);
 
-    const req = new Request('http://localhost/same-target-disabled');
-    await handleRequest(req, configWithDisable);
+    return {
+      onlyA: transformed.headers['x-only-a'] ?? null,
+      onlyB: transformed.headers['x-only-b'] ?? null,
+      enabled: transformed.headers['x-enabled'] ?? null,
+      disabled: transformed.headers['x-disabled'] ?? null,
+    };
+  } finally {
+    await registry.destroy();
+  }
+};
 
-    const fetchOptions = mockedFetch.mock.calls[0]?.[1];
-    if (!fetchOptions) throw new Error('fetch was called without options');
-    const forwardedHeaders = new Headers(fetchOptions.headers);
+describe('ScopedPluginRegistry upstream scope isolation', () => {
+  test('should isolate plugins for identical and disabled upstream scenarios', async () => {
+    const sameTargetResult = await runScenario(createSameTargetConfig, '/same-target', '0');
+    expect(sameTargetResult.onlyA).toBe('1');
+    expect(sameTargetResult.onlyB).toBeNull();
 
-    expect(forwardedHeaders.get('x-enabled')).toBe('1');
-    expect(forwardedHeaders.get('x-disabled')).toBeNull();
+    const disabledResult = await runScenario(createDisabledConfig, '/same-target-disabled', '0');
+    expect(disabledResult.enabled).toBe('1');
+    expect(disabledResult.disabled).toBeNull();
   });
 });

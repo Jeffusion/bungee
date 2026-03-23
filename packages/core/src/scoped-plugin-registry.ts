@@ -695,8 +695,11 @@ export class ScopedPluginRegistry {
       const contextManager = getPluginContextManager();
       const existingContext = contextManager.getContext(pluginName);
       if (existingContext) {
-        // 返回带 scope 信息的 context
-        return { ...existingContext, scope: scopeInfo };
+        return {
+          ...existingContext,
+          config,
+          scope: scopeInfo,
+        };
       }
 
       // 创建新的 context
