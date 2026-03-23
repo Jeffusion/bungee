@@ -19,6 +19,11 @@
     "hide": "Hide",
     "copy": "Copy",
     "copied": "Copied",
+    "copyFailed": "Copy failed",
+    "copySelection": "Copy selection",
+    "copyAllContent": "Copy all content",
+    "expandAll": "Expand all",
+    "collapseAll": "Collapse all",
     "yes": "Yes",
     "no": "No"
   },
@@ -624,7 +629,11 @@
       "tabResponse": "Response",
       "requestData": "Request Data",
       "noDataAvailable": "No data available",
-      "step": "Step"
+      "step": "Step",
+      "sseMessageCount": "SSE messages {captured}/{total}",
+      "sseDroppedMessages": "{count} more not stored",
+      "sseDoneSignal": "Done",
+      "sseDataTruncated": "Truncated"
     },
     "steps": {
       "route_matched": "Route Matched",

@@ -53,6 +53,7 @@ export interface AccessLogEntry {
 export class AccessLogWriter {
   private db: Database;
   private writeQueue: AccessLogEntry[] = [];
+  private pendingRespBodyIdUpdates: Map<string, string> = new Map();
   private isProcessing = false;
   private flushInterval: Timer | null = null;
 
@@ -82,6 +83,11 @@ export class AccessLogWriter {
    * 注意：此方法不等待 flush() 完成，以避免阻塞请求处理
    */
   write(entry: AccessLogEntry): void {
+    const pendingRespBodyId = this.pendingRespBodyIdUpdates.get(entry.requestId);
+    if (pendingRespBodyId) {
+      entry.respBodyId = pendingRespBodyId;
+    }
+
     this.writeQueue.push(entry);
 
     // 队列超过 100 条立即刷新（不等待完成）
@@ -124,6 +130,11 @@ export class AccessLogWriter {
       let ignoredCount = 0;
 
       for (const entry of batch) {
+        const pendingRespBodyId = this.pendingRespBodyIdUpdates.get(entry.requestId);
+        if (pendingRespBodyId) {
+          entry.respBodyId = pendingRespBodyId;
+        }
+
         const result = insert.run(
           entry.requestId,
           entry.timestamp,
@@ -160,6 +171,10 @@ export class AccessLogWriter {
           insertedCount++;
         } else {
           ignoredCount++;
+        }
+
+        if (pendingRespBodyId) {
+          this.pendingRespBodyIdUpdates.delete(entry.requestId);
         }
       }
 
@@ -229,6 +244,36 @@ export class AccessLogWriter {
    */
   getDatabase(): Database {
     return this.db;
+  }
+
+  updateResponseBodyId(requestId: string, respBodyId: string): void {
+    if (!requestId || !respBodyId) {
+      return;
+    }
+
+    this.pendingRespBodyIdUpdates.set(requestId, respBodyId);
+
+    for (const entry of this.writeQueue) {
+      if (entry.requestId === requestId) {
+        entry.respBodyId = respBodyId;
+      }
+    }
+
+    try {
+      const result = this.db
+        .prepare('UPDATE access_logs SET resp_body_id = ? WHERE request_id = ?')
+        .run(respBodyId, requestId);
+
+      if (result.changes > 0) {
+        this.pendingRespBodyIdUpdates.delete(requestId);
+      }
+    } catch (error) {
+      console.error('Failed to update response body id for streamed log:', {
+        requestId,
+        respBodyId,
+        error,
+      });
+    }
   }
 }
 

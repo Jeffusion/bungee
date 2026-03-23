@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { _ } from '../i18n';
+  import JsonBodyViewer from './JsonBodyViewer.svelte';
   import type { LogEntry } from '../api/logs';
   import { loadBodyById, loadHeaderById } from '../api/logs';
   import { getConfig } from '../api/config';
@@ -8,8 +9,8 @@
   export let log: LogEntry;
   export let onClose: () => void;
 
-  let requestBody: any = null;
-  let responseBody: any = null;
+  let requestBody: unknown = undefined;
+  let responseBody: unknown = undefined;
   let loadingRequestBody = false;
   let loadingResponseBody = false;
   let requestBodyError: string | null = null;
@@ -25,7 +26,7 @@
 
   // 原始请求数据（转换前）
   let originalRequestHeaders: Record<string, string> | null = null;
-  let originalRequestBody: any = null;
+  let originalRequestBody: unknown = undefined;
   let loadingOriginalRequestHeaders = false;
   let loadingOriginalRequestBody = false;
   let originalRequestHeadersError: string | null = null;
@@ -35,6 +36,7 @@
   let activeTab: 'original' | 'transformed' | 'response' = 'original';
   let showTimeline = false; // 默认折叠时间轴
   let copyFeedback = false;
+  const BODY_VIEWER_DEFAULT_EXPAND_DEPTH = 2;
 
   function formatTime(timestamp: number): string {
     return new Date(timestamp).toLocaleString();
@@ -62,10 +64,6 @@
   function getRequestTypeLabel(requestType?: string): string {
     if (!requestType) return '-';
     return $_(`logs.requestType_${requestType}`);
-  }
-
-  function formatJson(obj: any): string {
-    return JSON.stringify(obj, null, 2);
   }
 
   // 时间轴辅助函数
@@ -211,7 +209,7 @@
   }
 
   async function loadRequestBody() {
-    if (!log.reqBodyId || requestBody !== null) return;
+    if (!log.reqBodyId || loadingRequestBody || requestBody !== undefined) return;
 
     loadingRequestBody = true;
     requestBodyError = null;
@@ -226,7 +224,7 @@
   }
 
   async function loadResponseBody() {
-    if (!log.respBodyId || responseBody !== null) return;
+    if (!log.respBodyId || loadingResponseBody || responseBody !== undefined) return;
 
     loadingResponseBody = true;
     responseBodyError = null;
@@ -286,7 +284,7 @@
   }
 
   async function loadOriginalRequestBody() {
-    if (!log.originalReqBodyId || originalRequestBody !== null) return;
+    if (!log.originalReqBodyId || loadingOriginalRequestBody || originalRequestBody !== undefined) return;
 
     loadingOriginalRequestBody = true;
     originalRequestBodyError = null;
@@ -300,6 +298,38 @@
     }
   }
 
+  async function loadActiveTabData(tab: 'original' | 'transformed' | 'response'): Promise<void> {
+    if (tab === 'original') {
+      if (log.originalReqHeaderId) {
+        await loadOriginalRequestHeaders();
+      }
+
+      if (bodyLoggingEnabled && log.originalReqBodyId) {
+        await loadOriginalRequestBody();
+      }
+      return;
+    }
+
+    if (tab === 'transformed') {
+      if (log.reqHeaderId) {
+        await loadRequestHeaders();
+      }
+
+      if (bodyLoggingEnabled && log.reqBodyId) {
+        await loadRequestBody();
+      }
+      return;
+    }
+
+    if (log.respHeaderId) {
+      await loadResponseHeaders();
+    }
+
+    if (bodyLoggingEnabled && log.respBodyId) {
+      await loadResponseBody();
+    }
+  }
+
   onMount(async () => {
     try {
       const config = await getConfig();
@@ -309,14 +339,10 @@
       bodyLoggingEnabled = false;
     }
 
-    // Auto-load all available data
-    if (log.originalReqHeaderId) loadOriginalRequestHeaders();
-    if (log.originalReqBodyId) loadOriginalRequestBody();
-    if (log.reqHeaderId) loadRequestHeaders();
-    if (log.respHeaderId) loadResponseHeaders();
-    if (log.reqBodyId) loadRequestBody();
-    if (log.respBodyId) loadResponseBody();
+    await loadActiveTabData(activeTab);
   });
+
+  $: void loadActiveTabData(activeTab);
 </script>
 
 <div
@@ -744,8 +770,19 @@
                         <div class="alert alert-error">
                           <span class="text-sm">{originalRequestBodyError}</span>
                         </div>
-                      {:else if originalRequestBody !== null}
-                        <pre class="bg-base-300 p-4 rounded overflow-x-auto text-xs max-h-96">{formatJson(originalRequestBody)}</pre>
+                      {:else if originalRequestBody !== undefined}
+                        <JsonBodyViewer
+                          value={originalRequestBody}
+                          emptyText={$_('logs.detail.noBody')}
+                          copyText={$_('common.copy')}
+                          copiedText={$_('common.copied')}
+                          copyFailedText={$_('common.copyFailed')}
+                          copySelectionText={$_('common.copySelection')}
+                          copyAllContentText={$_('common.copyAllContent')}
+                          expandAllText={$_('common.expandAll')}
+                          collapseAllText={$_('common.collapseAll')}
+                          defaultExpandDepth={BODY_VIEWER_DEFAULT_EXPAND_DEPTH}
+                        />
                       {:else}
                         <div class="text-sm opacity-60">{$_('logs.detail.noBody')}</div>
                       {/if}
@@ -812,8 +849,19 @@
                         <div class="alert alert-error">
                           <span class="text-sm">{requestBodyError}</span>
                         </div>
-                      {:else if requestBody !== null}
-                        <pre class="bg-base-300 p-4 rounded overflow-x-auto text-xs max-h-96">{formatJson(requestBody)}</pre>
+                      {:else if requestBody !== undefined}
+                        <JsonBodyViewer
+                          value={requestBody}
+                          emptyText={$_('logs.detail.noBody')}
+                          copyText={$_('common.copy')}
+                          copiedText={$_('common.copied')}
+                          copyFailedText={$_('common.copyFailed')}
+                          copySelectionText={$_('common.copySelection')}
+                          copyAllContentText={$_('common.copyAllContent')}
+                          expandAllText={$_('common.expandAll')}
+                          collapseAllText={$_('common.collapseAll')}
+                          defaultExpandDepth={BODY_VIEWER_DEFAULT_EXPAND_DEPTH}
+                        />
                       {:else}
                         <div class="text-sm opacity-60">{$_('logs.detail.noBody')}</div>
                       {/if}
@@ -880,8 +928,19 @@
                         <div class="alert alert-error">
                           <span class="text-sm">{responseBodyError}</span>
                         </div>
-                      {:else if responseBody !== null}
-                        <pre class="bg-base-300 p-4 rounded overflow-x-auto text-xs max-h-96">{formatJson(responseBody)}</pre>
+                      {:else if responseBody !== undefined}
+                        <JsonBodyViewer
+                          value={responseBody}
+                          emptyText={$_('logs.detail.noBody')}
+                          copyText={$_('common.copy')}
+                          copiedText={$_('common.copied')}
+                          copyFailedText={$_('common.copyFailed')}
+                          copySelectionText={$_('common.copySelection')}
+                          copyAllContentText={$_('common.copyAllContent')}
+                          expandAllText={$_('common.expandAll')}
+                          collapseAllText={$_('common.collapseAll')}
+                          defaultExpandDepth={BODY_VIEWER_DEFAULT_EXPAND_DEPTH}
+                        />
                       {:else}
                         <div class="text-sm opacity-60">{$_('logs.detail.noBody')}</div>
                       {/if}

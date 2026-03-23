@@ -19,6 +19,11 @@
     "hide": "隐藏",
     "copy": "复制",
     "copied": "已复制",
+    "copyFailed": "复制失败",
+    "copySelection": "复制选中内容",
+    "copyAllContent": "复制全部内容",
+    "expandAll": "全部展开",
+    "collapseAll": "全部折叠",
     "yes": "是",
     "no": "否"
   },
@@ -661,7 +666,11 @@
       "tabResponse": "响应数据",
       "requestData": "请求数据",
       "noDataAvailable": "暂无数据",
-      "step": "步骤"
+      "step": "步骤",
+      "sseMessageCount": "SSE 消息 {captured}/{total}",
+      "sseDroppedMessages": "另有 {count} 条未保存",
+      "sseDoneSignal": "结束信号",
+      "sseDataTruncated": "已截断"
     },
     "steps": {
       "route_matched": "路由匹配",

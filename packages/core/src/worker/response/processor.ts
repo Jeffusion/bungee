@@ -4,6 +4,8 @@
  */
 
 import { logger } from '../../logger';
+import { accessLogWriter } from '../../logger/access-log-writer';
+import { bodyStorageManager } from '../../logger/body-storage';
 import type { RequestLogger } from '../../logger/request-logger';
 import type { AppConfig, ModificationRules } from '@jeffusion/bungee-types';
 import type { ExpressionContext } from '../../expression-engine';
@@ -16,6 +18,169 @@ import {
 } from '../../stream-executor';
 
 const SSE_IDLE_HEARTBEAT_MS = 4_000;
+
+interface LoggedSSEMessage {
+  index: number;
+  event?: string;
+  done?: boolean;
+  dataText: string;
+  data?: unknown;
+}
+
+interface LoggedSSEPayload {
+  kind: 'sse_messages';
+  totalMessages: number;
+  capturedMessages: number;
+  droppedMessages: number;
+  messages: LoggedSSEMessage[];
+}
+
+function createSSECaptureTapStream(
+  requestLog: any,
+  reqLogger: RequestLogger
+): TransformStream<Uint8Array, Uint8Array> {
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let currentEvent: string | null = null;
+  let currentDataLines: string[] = [];
+  const messages: LoggedSSEMessage[] = [];
+  let totalMessages = 0;
+
+  const resetCurrentMessage = () => {
+    currentEvent = null;
+    currentDataLines = [];
+  };
+
+  const parseDataIfJson = (fullDataText: string): unknown | undefined => {
+    if (!fullDataText) {
+      return undefined;
+    }
+
+    try {
+      return JSON.parse(fullDataText);
+    } catch {
+      return undefined;
+    }
+  };
+
+  const captureCurrentMessage = () => {
+    if (currentDataLines.length === 0) {
+      resetCurrentMessage();
+      return;
+    }
+
+    const fullDataText = currentDataLines.join('\n');
+    const isDone = fullDataText.trim() === '[DONE]';
+
+    messages.push({
+      index: totalMessages,
+      event: currentEvent || undefined,
+      done: isDone ? true : undefined,
+      dataText: fullDataText,
+      data: isDone ? undefined : parseDataIfJson(fullDataText),
+    });
+
+    totalMessages += 1;
+    resetCurrentMessage();
+  };
+
+  const consumeCompleteLines = (text: string) => {
+    buffer += text;
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const lineWithCR of lines) {
+      const line = lineWithCR.endsWith('\r') ? lineWithCR.slice(0, -1) : lineWithCR;
+
+      if (line.startsWith('event:')) {
+        currentEvent = line.slice(6).trim();
+      } else if (line.startsWith('data:')) {
+        currentDataLines.push(line.slice(5).trimStart());
+      } else if (line === '') {
+        captureCurrentMessage();
+      }
+    }
+  };
+
+  return new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      consumeCompleteLines(decoder.decode(chunk, { stream: true }));
+      controller.enqueue(chunk);
+    },
+    async flush() {
+      const remainingText = `${decoder.decode()}${buffer}`;
+      if (remainingText.length > 0) {
+        const line = remainingText.endsWith('\r') ? remainingText.slice(0, -1) : remainingText;
+        if (line.startsWith('event:')) {
+          currentEvent = line.slice(6).trim();
+        } else if (line.startsWith('data:')) {
+          currentDataLines.push(line.slice(5).trimStart());
+        }
+      }
+
+      captureCurrentMessage();
+
+      if (totalMessages === 0) {
+        return;
+      }
+
+      const requestId = reqLogger.getRequestId();
+      const payload: LoggedSSEPayload = {
+        kind: 'sse_messages',
+        totalMessages,
+        capturedMessages: totalMessages,
+        droppedMessages: 0,
+        messages,
+      };
+
+      try {
+        const bodyId = await bodyStorageManager.save(requestId, payload, 'response', true);
+
+        if (!bodyId) {
+          logger.debug(
+            {
+              request: requestLog,
+              stream: {
+                requestId,
+                totalMessages,
+                capturedMessages: totalMessages,
+              },
+            },
+            'Skipped SSE message recording'
+          );
+          return;
+        }
+
+        accessLogWriter.updateResponseBodyId(requestId, bodyId);
+        logger.debug(
+          {
+            request: requestLog,
+            stream: {
+              requestId,
+              totalMessages,
+              capturedMessages: totalMessages,
+              bodyId,
+            },
+          },
+          'Recorded SSE messages into request log'
+        );
+      } catch (error) {
+        logger.warn(
+          {
+            request: requestLog,
+            error,
+            stream: {
+              requestId,
+              totalMessages,
+              capturedMessages: totalMessages,
+            },
+          },
+          'Failed to record SSE messages into request log'
+        );
+      }
+    }
+  });
+}
 
 function getRequestIdFromLog(requestLog: any): string {
   return typeof requestLog?.requestId === 'string' ? requestLog.requestId : 'unknown';
@@ -392,7 +557,6 @@ export async function prepareResponse(
     logger.info({ request: requestLog }, '--- Applying SSE Stream Transformation ---');
     headers.delete('content-length');
 
-    // Record SSE response headers (不记录 body，因为是流式数据)
     if (reqLogger) {
       const responseHeaders: Record<string, string> = {};
       res.headers.forEach((value, key) => {
@@ -433,6 +597,11 @@ export async function prepareResponse(
       streamBody = upstreamSSEBody.pipeThrough(
         createSSEStageTapStream<Uint8Array>('upstream-pass-through', requestLog, { includeBytes: true })
       );
+    }
+
+    const shouldCaptureSSEMessages = Boolean(reqLogger && config?.logging?.body?.enabled);
+    if (shouldCaptureSSEMessages && reqLogger) {
+      streamBody = streamBody.pipeThrough(createSSECaptureTapStream(requestLog, reqLogger));
     }
 
     streamBody = createResilientSSEInputStream(streamBody, requestLog);

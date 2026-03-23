@@ -18,6 +18,13 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
+    include: [
+      'ajv-dist',
+      'immutable-json-patch',
+      'lodash-es',
+      '@fortawesome/free-regular-svg-icons',
+      'jmespath'
+    ],
     exclude: ['svelte-spa-router']
   },
   build: {
