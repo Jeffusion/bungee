@@ -421,6 +421,7 @@ describe('openai-messages-to-chat plugin', () => {
 
     expect(forwardedMessages[1]).toEqual({
       role: 'assistant',
+      reasoning_content: '',
       content: null,
       tool_calls: [
         {
@@ -443,6 +444,76 @@ describe('openai-messages-to-chat plugin', () => {
     const lastMessage = forwardedMessages[3];
     expect(lastMessage.role).toBe('user');
     expect(lastMessage.content).toEqual([{ type: 'text', text: 'Now summarize briefly.' }]);
+  });
+
+  test('defaults reasoning_content for assistant tool_calls when content is omitted', async () => {
+    const req = new Request('http://localhost/v1/messages-compat/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'user',
+            content: 'Use tool and continue',
+          },
+          {
+            role: 'assistant',
+            tool_calls: [
+              {
+                id: 'call_weather_compat_1',
+                type: 'function',
+                function: {
+                  name: 'get_weather',
+                  arguments: '{"city":"Shanghai"}',
+                },
+              },
+            ],
+          },
+          {
+            role: 'tool',
+            tool_call_id: 'call_weather_compat_1',
+            content: '{"temperature":22}',
+          },
+          {
+            role: 'user',
+            content: 'Continue',
+          },
+        ],
+      }),
+    });
+
+    const response = await handleRequest(req, {
+      routes: [
+        {
+          path: '/v1/messages-compat',
+          pathRewrite: { '^/v1/messages-compat': '/v1' },
+          plugins: [{ name: 'openai-messages-to-chat' }],
+          upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
+        },
+      ],
+    });
+
+    expect(response.status).toBe(200);
+
+    const { options } = getForwardedCall();
+    const forwardedBody = await readForwardedBody(options);
+    const forwardedMessages = forwardedBody.messages as Array<Record<string, unknown>>;
+
+    expect(forwardedMessages[1]).toMatchObject({
+      role: 'assistant',
+      reasoning_content: '',
+      tool_calls: [
+        {
+          id: 'call_weather_compat_1',
+          type: 'function',
+          function: {
+            name: 'get_weather',
+            arguments: '{"city":"Shanghai"}',
+          },
+        },
+      ],
+    });
   });
 
   test('maps assistant thinking blocks to reasoning_content when tool_use is present', async () => {

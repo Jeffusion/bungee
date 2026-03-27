@@ -855,6 +855,25 @@ export const OpenAIMessagesToChatPlugin = definePlugin(
       };
     }
 
+    private ensureAssistantToolCallReasoningContent(message: JsonObject): void {
+      if (message.role !== 'assistant') {
+        return;
+      }
+
+      if (!Array.isArray(message.tool_calls) || message.tool_calls.length === 0) {
+        return;
+      }
+
+      if (typeof message.reasoning_content === 'string') {
+        message.reasoning_content = message.reasoning_content.trim().length > 0
+          ? message.reasoning_content
+          : '';
+        return;
+      }
+
+      message.reasoning_content = '';
+    }
+
     private normalizeMessage(rawMessage: unknown, messageIndex: number): NormalizedMessageResult {
       if (!isRecord(rawMessage)) {
         return {
@@ -893,6 +912,7 @@ export const OpenAIMessagesToChatPlugin = definePlugin(
         }
 
         normalizedMessage.content = null;
+        this.ensureAssistantToolCallReasoningContent(normalizedMessage);
         return {
           ok: true,
           messages: [normalizedMessage]
@@ -901,6 +921,7 @@ export const OpenAIMessagesToChatPlugin = definePlugin(
 
       if (typeof content === 'string') {
         normalizedMessage.content = content;
+        this.ensureAssistantToolCallReasoningContent(normalizedMessage);
         return {
           ok: true,
           messages: [normalizedMessage]
@@ -936,6 +957,7 @@ export const OpenAIMessagesToChatPlugin = definePlugin(
         }
 
         normalizedMessage.content = normalizedParts;
+        this.ensureAssistantToolCallReasoningContent(normalizedMessage);
         return {
           ok: true,
           messages: [normalizedMessage]
@@ -945,6 +967,7 @@ export const OpenAIMessagesToChatPlugin = definePlugin(
       if (content === undefined) {
         const hasToolCalls = Array.isArray(rawMessage.tool_calls) && rawMessage.tool_calls.length > 0;
         if (role === 'assistant' && hasToolCalls) {
+          this.ensureAssistantToolCallReasoningContent(normalizedMessage);
           return {
             ok: true,
             messages: [normalizedMessage]
@@ -958,6 +981,8 @@ export const OpenAIMessagesToChatPlugin = definePlugin(
           };
         }
       }
+
+      this.ensureAssistantToolCallReasoningContent(normalizedMessage);
 
       return {
         ok: true,
@@ -1228,6 +1253,7 @@ export const OpenAIMessagesToChatPlugin = definePlugin(
 
       if (toolCalls.length > 0) {
         normalizedMessage.tool_calls = toolCalls;
+        this.ensureAssistantToolCallReasoningContent(normalizedMessage);
 
         const textSegments: string[] = [];
         for (let i = 0; i < normalizedParts.length; i += 1) {
