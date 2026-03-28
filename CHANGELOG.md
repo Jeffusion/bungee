@@ -1,3 +1,19 @@
+# [3.2.0](https://github.com/jeffusion/bungee/compare/v3.1.0...v3.2.0) (2026-03-28)
+
+
+### Bug Fixes
+
+* **plugins:** enforce reasoning_content on assistant tool calls ([c88c481](https://github.com/jeffusion/bungee/commit/c88c481b471a22c54e90d50320ab15de08718ae2))
+* **plugins:** fill reasoning_content for array-based tool calls ([b5463f5](https://github.com/jeffusion/bungee/commit/b5463f5d258ee50913343da5c2a8b7e141efd70b))
+* **ui:** restore sticky session editor and retry rule validation ([ae44c17](https://github.com/jeffusion/bungee/commit/ae44c170f7b789d3ff74b9e30525eb74b257abd2))
+
+
+### Features
+
+* **core:** add sticky routing and responses guard ([56a7521](https://github.com/jeffusion/bungee/commit/56a7521001de2a3c8c9c79dceda959cdb9423fc0))
+* **model-mapping:** add standalone plugin and strict row filtering ([950a617](https://github.com/jeffusion/bungee/commit/950a617bd6ed08b70e8650da15359a473f3a6ac5))
+* **plugins:** unify OpenAI responses/messages chat compatibility ([3a4fcb1](https://github.com/jeffusion/bungee/commit/3a4fcb179ac4a321d74b60fd293315f11b997ea6))
+
 # [3.1.0](https://github.com/jeffusion/bungee/compare/v3.0.0...v3.1.0) (2026-03-26)
 
 
