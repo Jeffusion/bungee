@@ -39,6 +39,12 @@ function isNpmScopePublish404(error: unknown): boolean {
     || (message.includes('404 Not Found - PUT https://registry.npmjs.org/@'));
 }
 
+function isVersionAlreadyPublished(error: unknown): boolean {
+  const message = getErrorMessage(error);
+  return message.includes('You cannot publish over the previously published versions')
+    || message.includes('EPUBLISHCONFLICT');
+}
+
 function parseSemver(version: string): [number, number, number] | null {
   const match = version.trim().match(/^(\d+)\.(\d+)\.(\d+)/);
   if (!match) {
@@ -195,8 +201,14 @@ async function publish() {
           console.log(`✅ ${pkg.name}@${pkgJson.version} published!\n`);
         }
       } catch (error) {
-        console.error(`❌ Failed to publish ${pkg.name}:`, error);
         const errorMessage = getErrorMessage(error);
+
+        if (isVersionAlreadyPublished(error)) {
+          console.log(`⚠️  ${pkg.name}@${pkgJson.version} already exists on npm, skipping...\n`);
+          continue;
+        }
+
+        console.error(`❌ Failed to publish ${pkg.name}:`, error);
         if (isNpmScopePublish404(error)) {
           console.error(`❌ Trusted Publishing rejected for ${pkg.name}. Check npm package Trusted Publisher settings (repository/workflow/branch/environment).`);
           console.error('   Also ensure this workflow has id-token: write and runs with npm >= 11.5.1.');
