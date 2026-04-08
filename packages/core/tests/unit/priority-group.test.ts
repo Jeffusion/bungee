@@ -5,6 +5,9 @@ import type { RouteConfig } from '@jeffusion/bungee-types';
 
 // Helper function to create mock upstreams
 function createMockUpstream(overrides: Partial<RuntimeUpstream> = {}): RuntimeUpstream {
+  const upstreamId = overrides.upstreamId
+    ?? (typeof overrides.target === 'string' ? overrides.target : 'upstream-default');
+
   return {
     target: 'http://example.com',
     weight: 100,
@@ -13,7 +16,9 @@ function createMockUpstream(overrides: Partial<RuntimeUpstream> = {}): RuntimeUp
     status: 'HEALTHY',
     consecutiveFailures: 0,
     consecutiveSuccesses: 0,
-    ...overrides
+    recoveryAttemptCount: 0,
+    ...overrides,
+    upstreamId
   };
 }
 

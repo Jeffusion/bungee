@@ -17,6 +17,7 @@ function createMockUpstream(overrides: Partial<RuntimeUpstream> = {}): RuntimeUp
     status: 'HEALTHY',
     consecutiveFailures: 0,
     consecutiveSuccesses: 0,
+    recoveryAttemptCount: 0,
     ...overrides,
     upstreamId
   };
