@@ -1,6 +1,6 @@
 import type { Plugin } from '../../../packages/core/src/plugin.types';
 import { definePlugin } from '../../../packages/core/src/plugin.types';
-import type { PluginHooks } from '../../../packages/core/src/hooks';
+import type { MutableRequestContext, PluginHooks } from '../../../packages/core/src/hooks';
 import { fetchModels, listModels } from 'tokenlens';
 import type { ModelCatalog, ProviderInfo, ProviderModel } from 'tokenlens';
 import { logger } from '../../../packages/core/src/logger';
@@ -249,12 +249,13 @@ export const ModelMappingPlugin = definePlugin(
       return map;
     }
 
-    private applyModelMapping(ctx: { body?: unknown }): void {
+    private applyModelMapping(ctx: MutableRequestContext): void {
       if (this.modelMappingMap.size === 0) return;
-      if (!ctx.body || typeof ctx.body !== 'object') return;
 
-      const body = ctx.body as Record<string, unknown>;
-      const currentModel = typeof body.model === 'string' ? body.model.trim() : '';
+      const modelInfo = this.extractModelFromContext(ctx);
+      if (!modelInfo) return;
+
+      const { model: currentModel, source } = modelInfo;
       if (!currentModel) return;
 
       const mappedModel = this.resolveMappedModel(currentModel);
@@ -263,14 +264,61 @@ export const ModelMappingPlugin = definePlugin(
       const normalizedMappedModel = this.normalizeMappedTargetModel(mappedModel);
       if (!normalizedMappedModel || normalizedMappedModel === currentModel) return;
 
-      body.model = normalizedMappedModel;
+      if (source === 'body' && ctx.body && typeof ctx.body === 'object') {
+        (ctx.body as Record<string, unknown>).model = normalizedMappedModel;
+      } else if (source === 'url') {
+        this.updateModelInUrlPath(ctx.url, currentModel, normalizedMappedModel);
+      }
+
       logger.debug(
         {
           fromModel: currentModel,
-          toModel: normalizedMappedModel
+          toModel: normalizedMappedModel,
+          source
         },
         'Model mapping applied'
       );
+    }
+
+    private extractModelFromContext(ctx: MutableRequestContext): { model: string; source: 'body' | 'url' } | null {
+      if (ctx.body && typeof ctx.body === 'object') {
+        const bodyModel = (ctx.body as Record<string, unknown>).model;
+        if (typeof bodyModel === 'string' && bodyModel.trim()) {
+          return { model: bodyModel.trim(), source: 'body' };
+        }
+      }
+
+      const urlModel = this.extractModelFromUrlPath(ctx.url.pathname);
+      if (urlModel) {
+        return { model: urlModel, source: 'url' };
+      }
+
+      return null;
+    }
+
+    private extractModelFromUrlPath(pathname: string): string | null {
+      const geminiMatch = pathname.match(/^\/v1(?:beta)?\/models\/([^/:]+)(?::|(?:\/(?:generateContent|streamGenerateContent)))/);
+      if (geminiMatch) {
+        const rawModel = geminiMatch[1];
+        try {
+          return decodeURIComponent(rawModel);
+        } catch {
+          return rawModel;
+        }
+      }
+
+      return null;
+    }
+
+    private updateModelInUrlPath(url: URL, oldModel: string, newModel: string): void {
+      const encodedNewModel = encodeURIComponent(newModel);
+      const encodedOldModel = encodeURIComponent(oldModel);
+
+      if (url.pathname.includes(encodedOldModel)) {
+        url.pathname = url.pathname.replace(encodedOldModel, encodedNewModel);
+      } else {
+        url.pathname = url.pathname.replace(oldModel, encodedNewModel);
+      }
     }
 
     private resolveMappedModel(currentModel: string): string | undefined {
