@@ -8,9 +8,14 @@ export interface PluginSearchPathOptions {
 export class PluginPathResolver {
   private readonly systemPluginsDir: string;
   private readonly customPluginsDir: string;
+  private readonly includeSystemPlugins: boolean;
 
   constructor(baseDir: string, configBasePath: string) {
     const isDevMode = baseDir.endsWith('/src') || baseDir.endsWith('\\src');
+    const includeSystemPluginsEnv = process.env.BUNGEE_INCLUDE_SYSTEM_PLUGINS;
+    this.includeSystemPlugins = includeSystemPluginsEnv === 'true'
+      || (!isDevMode && includeSystemPluginsEnv !== 'false');
+
     this.systemPluginsDir = isDevMode
       ? path.join(baseDir, '..', 'dist', 'plugins')
       : path.join(baseDir, 'plugins');
@@ -37,16 +42,23 @@ export class PluginPathResolver {
       path.join(this.customPluginsDir, `${subPath}.js`),
       path.join(this.customPluginsDir, subPath, 'index.ts'),
       path.join(this.customPluginsDir, subPath, 'index.js'),
-      path.join(this.systemPluginsDir, `${subPath}.js`),
-      path.join(this.systemPluginsDir, `${subPath}.ts`),
-      path.join(this.systemPluginsDir, subPath, 'index.js'),
-      path.join(this.systemPluginsDir, subPath, 'index.ts'),
     );
+
+    if (this.includeSystemPlugins) {
+      paths.push(
+        path.join(this.systemPluginsDir, `${subPath}.js`),
+        path.join(this.systemPluginsDir, `${subPath}.ts`),
+        path.join(this.systemPluginsDir, subPath, 'index.js'),
+        path.join(this.systemPluginsDir, subPath, 'index.ts'),
+      );
+    }
 
     return paths;
   }
 
   getScanDirectories(): string[] {
-    return [this.customPluginsDir, this.systemPluginsDir];
+    return this.includeSystemPlugins
+      ? [this.customPluginsDir, this.systemPluginsDir]
+      : [this.customPluginsDir];
   }
 }
