@@ -22,7 +22,7 @@ Bungee features a powerful, TypeScript-first plugin system that enables extensib
 
 ## Architecture Overview
 
-Bungee 插件系统采用**分层架构**，支持内置插件和外部插件，同时提供前后端扩展能力。
+Bungee 插件系统采用**分层架构**，支持内置插件和外部插件，同时提供前后端扩展能力。新架构引入了 **Artifact-first** 契约，将 `manifest.json` 作为插件元数据的唯一真相来源。
 
 ```plaintext
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -32,8 +32,8 @@ Bungee 插件系统采用**分层架构**，支持内置插件和外部插件，
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
 │  │                        Plugin Registry Layer                         │   │
 │  │  ┌─────────────────────┐    ┌─────────────────────────────────────┐ │   │
-│  │  │   PluginRegistry    │    │      ScopedPluginRegistry           │ │   │
-│  │  │  (Discovery/Meta)   │    │  (Instance Management/Hooks)        │ │   │
+│  │  │   PluginRegistry    │    │      PluginRuntimeOrchestrator      │ │   │
+│  │  │  (Discovery/Meta)   │    │  (Reconcile/Generation/Convergence)  │ │   │
 │  │  └─────────────────────┘    └─────────────────────────────────────┘ │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │                                     │                                       │
@@ -46,7 +46,7 @@ Bungee 插件系统采用**分层架构**，支持内置插件和外部插件，
 │  │  │     plugins/        │    │   ┌─────────────────────────────┐   │ │   │
 │  │  │                     │    │   │ token-stats/                │   │ │   │
 │  │  │ • ai-transformer    │    │   │  ├─ manifest.json           │   │ │   │
-│  │  │ • token-cache       │    │   │  ├─ server/index.ts         │   │ │   │
+│  │  │ • token-cache       │    │   │  ├─ dist/index.js (Artifact)│   │ │   │
 │  │  │ • hooks-example     │    │   │  └─ ui/TokenStatsChart.svelte│  │ │   │
 │  │  └─────────────────────┘    │   └─────────────────────────────┘   │ │   │
 │  │                             └─────────────────────────────────────┘ │   │
@@ -56,9 +56,9 @@ Bungee 插件系统采用**分层架构**，支持内置插件和外部插件，
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
 │  │                       Plugin Capabilities                            │   │
 │  │  ┌──────────────┐  ┌──────────────┐  ┌────────────────────────────┐ │   │
-│  │  │    Hooks     │  │     API      │  │    Native Widgets          │ │   │
-│  │  │ onRequest    │  │ /summary     │  │    (Dashboard UI)          │ │   │
-│  │  │ onResponse   │  │ /by-route    │  │ TokenStatsChart.svelte     │ │   │
+│  │  │    Hooks     │  │     API      │  │    UI Extensions           │ │   │
+│  │  │ onRequest    │  │ /summary     │  │ 1. Native Widgets (Static) │ │   │
+│  │  │ onResponse   │  │ /by-route    │  │ 2. Sandbox Iframe (Dynamic)│ │   │
 │  │  │ onStreamChunk│  │              │  │                            │ │   │
 │  │  └──────────────┘  └──────────────┘  └────────────────────────────┘ │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
@@ -70,108 +70,158 @@ Bungee 插件系统采用**分层架构**，支持内置插件和外部插件，
 
 | Feature | Description |
 |---------|-------------|
-| **Type Safety** | Full TypeScript interfaces with IntelliSense support |
-| **Scoped Execution** | Global, Route, Upstream 三级作用域 |
-| **Native Widgets** | 原生 Svelte 组件，与主应用共享样式和图表库 |
-| **Plugin API** | 插件可声明自定义 API 端点 |
-| **Hot Reload** | 支持插件配置热更新 |
-| **High Cohesion** | 外部插件 server/ui 代码放在同一目录 |
+| **Artifact-first** | `manifest.json` 声明所有能力，框架按需加载，无需预执行代码 |
+| **State Machine** | 完整的生命周期管理，支持 `quarantined` (隔离) 和 `degraded` (降级) 状态 |
+| **Generation Control** | 基于 Generation 的多 worker 状态收敛，支持平滑热更新 |
+| **UI Boundary** | 明确 Native Widget (静态) 与 Sandbox Iframe (动态) 的安全边界 |
+| **Type Safety** | 全量 TypeScript 接口支持，IDE 友好 |
+| **Scoped Execution** | Global, Route, Upstream 三级作用域精确控制 |
 
 ---
 
 ## Plugin Directory Structure
 
-### Internal Plugins（内置插件）
-
-位于 `packages/core/src/plugins/`，与核心代码一起编译：
-
-```plaintext
-packages/core/src/plugins/
-├── ai-transformer/           # 目录形式插件
-│   └── index.ts
-├── token-cache/
-│   └── index.ts
-└── hooks-example/
-    └── index.ts
-```
-
 ### External Plugins（外部插件）
 
-位于项目根目录 `plugins/`，高内聚结构：
+位于项目根目录 `plugins/`，采用 **Artifact-first** 结构：
 
 ```plaintext
 plugins/
 └── token-stats/              # 插件根目录
-    ├── manifest.json         # 插件元数据（单一数据源 ✨）
-    ├── server/               # 后端代码
-    │   └── index.ts          # 入口文件（必须）
-    └── ui/                   # 前端组件（可选）
-        └── TokenStatsChart.svelte
+    ├── manifest.json         # 插件元数据（唯一真相来源 ✨）
+    ├── dist/                 # 编译后的产物目录
+    │   └── index.js          # 服务端入口（Artifact）
+    └── ui/                   # 前端组件与资源
+        ├── TokenStatsChart.svelte
+        └── logo.png
 ```
 
-#### manifest.json 规范
+#### manifest.json vNext 规范
 
-**manifest.json 是插件元数据的唯一真相来源**。框架通过读取此文件发现插件能力，无需执行插件代码。
+**manifest.json 是插件元数据的唯一真相来源**。
+
+**Sandbox Iframe 示例**
 
 ```json
 {
   "name": "token-stats",
   "version": "1.0.0",
-  "displayName": "metadata.name",
-  "description": "plugin.description",
-  "icon": "bar_chart",
-  "author": "Bungee Team",
-  "main": "server/index.ts",
-  "ui": {
-    "components": [
-      {
-        "name": "TokenStatsChart",
-        "entry": "ui/TokenStatsChart.svelte"
-      }
-    ]
+  "manifestContract": "vnext",
+  "schemaVersion": 2,
+  "artifactKind": "runtime-plugin",
+  "main": "dist/index.js",
+  "uiExtensionMode": "sandbox-iframe",
+  "capabilities": ["hooks", "api", "sandboxUiExtension"],
+  "engines": {
+    "bungee": "^3.2.0"
   },
   "contributes": {
-    "nativeWidgets": [
-      {
-        "id": "token-stats-chart",
-        "title": "widgets.chart.title",
-        "size": "medium",
-        "component": "TokenStatsChart",
-        "props": {}
-      }
-    ],
-    "api": [
-      {
-        "path": "/summary",
-        "methods": ["GET"],
-        "handler": "getSummary"
-      }
-    ]
+    "api": [...]
+  }
+}
+```
+
+**Native Widget 静态示例**
+
+```json
+{
+  "name": "token-stats",
+  "version": "1.0.0",
+  "manifestContract": "vnext",
+  "schemaVersion": 2,
+  "artifactKind": "runtime-plugin",
+  "main": "dist/index.js",
+  "uiExtensionMode": "native-static",
+  "capabilities": ["hooks", "api", "nativeWidgetsStatic"],
+  "engines": {
+    "bungee": "^3.2.0"
   },
-  "translations": {
-    "en": {
-      "metadata.name": "Token Statistics",
-      "plugin.description": "Track AI API token usage"
-    },
-    "zh-CN": {
-      "metadata.name": "Token 统计",
-      "plugin.description": "追踪 AI API 的 Token 使用量"
-    }
+  "contributes": {
+    "nativeWidgets": [...],
+    "api": [...]
   }
 }
 ```
 
 | 字段 | 类型 | 必填 | 描述 |
 |------|------|------|------|
-| `name` | string | ✅ | 插件唯一标识符 |
-| `version` | string | ✅ | 版本号（semver） |
-| `displayName` | string | - | 显示名称（支持 i18n key） |
-| `description` | string | - | 插件描述 |
-| `icon` | string | - | Material Icon 名称 |
-| `main` | string | - | 服务端入口路径 |
-| `ui.components` | array | - | UI 组件声明（用于自动注册） |
-| `contributes` | object | - | 贡献点配置 |
-| `translations` | object | - | 多语言翻译 |
+| `manifestContract` | string | ✅ | 契约版本，固定为 `"vnext"` |
+| `schemaVersion` | number | ✅ | Manifest 结构版本，当前为 `2` |
+| `artifactKind` | string | ✅ | 产物类型，当前仅支持 `"runtime-plugin"` |
+| `main` | string | ✅ | 服务端入口产物路径（相对于插件根目录） |
+| `uiExtensionMode` | string | ✅ | UI 模式：`none`, `native-static`, `sandbox-iframe` |
+| `capabilities` | array | ✅ | 声明能力：`hooks`, `api`, `nativeWidgetsStatic`, `sandboxUiExtension` |
+| `engines.bungee` | string | ✅ | 兼容的 Bungee 版本范围（semver） |
+
+---
+
+## State Model & Lifecycle
+
+Bungee 插件系统引入了严格的状态机管理，确保系统稳定性。
+
+### Lifecycle States
+
+| 状态 | 描述 | 运维含义 |
+|------|------|----------|
+| `undiscovered` | 尚未发现 | 插件目录不存在或未扫描 |
+| `discovered` | 已发现 | 已读取 manifest，等待验证 |
+| `validated` | 验证通过 | Manifest 规范、引擎版本、产物路径均合法 |
+| `enabled` | 已启用 | 配置中声明启用，准备加载到运行时 |
+| `loaded` | 已加载 | 插件类已实例化并完成 `init` |
+| `serving` | 正在服务 | 插件已注册 Hooks/API，正在处理流量 |
+| `disabled` | 已禁用 | 配置中显式禁用，或数据库状态为禁用 |
+| `degraded` | 降级运行 | 运行时加载失败（如代码报错），但不影响主流程 |
+| `quarantined` | 已隔离 | 严重验证失败（如引擎不匹配），禁止加载 |
+
+### Rollback & Quarantine 机制
+
+- **自动隔离 (Quarantine)**：如果插件的 `engines.bungee` 与当前版本不匹配，或 `schemaVersion` 过旧，系统会将其标记为 `quarantined`，防止不兼容代码破坏系统。
+- **运行时降级 (Degraded)**：如果插件在 `init` 或 `register` 阶段抛出异常，Orchestrator 会将其标记为 `degraded`，并保留旧版本的 `serving` 状态（如果存在）或直接跳过，确保代理主流程不中断。
+
+---
+
+## Reconcile & Convergence
+
+### PluginRuntimeOrchestrator
+
+Orchestrator 是插件运行时的指挥官，负责：
+1. **Reconcile**：对比配置与当前状态，计算增量变化。
+2. **Generation 管理**：每次配置应用都会产生一个新的 `generation`。
+3. **平滑过渡**：通过 `servingGeneration` 和 `drainingGenerations` 确保旧请求在旧插件实例中完成，新请求进入新实例。
+
+### 多 Worker 收敛 (Convergence)
+
+在多进程模式下，Master 进程通过 IPC 协调所有 Worker 的状态：
+- **Target Generation**：Master 下发的期望版本。
+- **Converged**：所有 Worker 均报告已成功应用 Target Generation。
+- **Stale/Failed**：部分 Worker 仍运行在旧版本或应用失败。
+
+---
+
+## UI Boundary: Static vs Dynamic
+
+Bungee 严格区分了两种 UI 扩展模式，以平衡性能与灵活性。
+
+### 1. Native Widgets (静态边界)
+- **模式**：`native-static`
+- **特点**：高性能，与主应用深度集成。
+- **约束**：必须在构建期通过 `bun run generate:widgets` 注册。不支持运行时动态注入代码。
+- **安全**：代码经过主应用构建流水线，安全性高。
+
+### 2. Sandbox Iframe (动态边界)
+- **模式**：`sandbox-iframe`
+- **特点**：强隔离，支持运行时动态加载。
+- **约束**：资源通过 `/__ui/plugins/:pluginName/assets/` 暴露。
+- **安全**：通过 iframe 隔离 CSS 和 JS 环境，受 `sandboxUiExtension` 能力声明约束。
+
+---
+
+## Known Limitations & Non-goals
+
+- **路径解析约束**：`PluginRegistry` 目前优先寻找 `index.ts/js`。对于 `vnext` 插件，建议在 `config.json` 中显式提供 `path` 指向插件根目录。
+- **DB 状态优先级**：首次发现的插件在数据库中默认为 `disabled`。如果需要在配置文件中显式启用，需确保数据库状态同步。
+- **Native Widget 动态性**：目前不支持在不重新构建 UI 的情况下动态添加 Native Widget。
+
 
 ### Compiled Output（编译输出）
 
@@ -220,7 +270,8 @@ class MyPlugin implements Plugin {
 {
   "name": "token-stats",
   "version": "1.0.0",
-  "main": "server/index.ts",
+  "manifestContract": "vnext",
+  "main": "dist/index.js",
   "contributes": {
     "api": [
       { "path": "/summary", "methods": ["GET"], "handler": "getSummary" },
@@ -230,14 +281,12 @@ class MyPlugin implements Plugin {
 }
 ```
 
-**server/index.ts**:
+**server/index.ts**（Source）:
 ```typescript
 class TokenStatsPlugin implements Plugin {
-  // 最小静态属性（用于类型检查和向后兼容）
   static readonly name = 'token-stats';
   static readonly version = '1.0.0';
 
-  // API Handler 方法
   async getSummary(req: Request): Promise<Response> {
     return new Response(JSON.stringify({ total: 1000 }));
   }
@@ -352,16 +401,17 @@ Apply plugins to specific upstreams:
 
 ### Plugin Loading
 
-Bungee automatically loads plugins from:
+Bungee 自动从以下位置加载插件：
 
-1. **Built-in plugins**: `plugins/*/manifest.json` + `plugins/*/index.ts`
-2. **Custom plugins**: Specified by path in configuration
+1. **系统插件**: `packages/core/dist/plugins/*/manifest.json`
+2. **外部插件**: `plugins/*/manifest.json`
+3. **自定义路径**: 在配置中通过 `path` 指定
 
 ```json
 {
   "plugins": [
     {
-      "path": "./custom-plugins/my-plugin.ts",
+      "path": "./plugins/my-plugin",
       "enabled": true,
       "options": {
         "customOption": "value"
@@ -370,6 +420,9 @@ Bungee automatically loads plugins from:
   ]
 }
 ```
+
+> **开发模式提示**: 在开发环境下，`PluginRegistry` 会自动尝试解析 `server/index.ts` 以支持热更新调试。但在生产部署时，必须确保 `manifest.json` 中的 `main` 指向已编译的 `dist/index.js`。
+
 
 ---
 
