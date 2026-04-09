@@ -132,7 +132,7 @@
           (realField: string) => !value[realField]
         );
         if (missingFields.length > 0) {
-          return `${field.label} is required`;
+          return `${$_(field.label)} is required`;
         }
       }
       return null;  // 虚拟字段不进行其他验证
@@ -141,7 +141,7 @@
     // 普通字段：原有验证逻辑
     const isEmptyArray = Array.isArray(val) && val.length === 0;
     if (field.required && (val === undefined || val === null || val === '' || isEmptyArray)) {
-      return `${field.label} is required`;
+      return `${$_(field.label)} is required`;
     }
 
     if (field.validation) {
@@ -150,21 +150,21 @@
       if (pattern && typeof val === 'string') {
         const regex = new RegExp(pattern);
         if (!regex.test(val)) {
-          return message || `Invalid format for ${field.label}`;
+          return message || `Invalid format for ${$_(field.label)}`;
         }
       }
 
       if (min !== undefined) {
         const numVal = typeof val === 'number' ? val : (typeof val === 'string' ? val.length : 0);
         if (numVal < min) {
-          return message || `${field.label} must be at least ${min}`;
+          return message || `${$_(field.label)} must be at least ${min}`;
         }
       }
 
       if (max !== undefined) {
         const numVal = typeof val === 'number' ? val : (typeof val === 'string' ? val.length : 0);
         if (numVal > max) {
-          return message || `${field.label} must be at most ${max}`;
+          return message || `${$_(field.label)} must be at most ${max}`;
         }
       }
     }
@@ -211,7 +211,7 @@
             type="text"
             class="input input-bordered"
             class:input-error={errors[field.name]}
-            placeholder={field.placeholder}
+            placeholder={field.placeholder ? $_(field.placeholder) : undefined}
             value={getFieldValue(field)}
             on:input={(e) => handleChange(field.name, e.currentTarget.value)}
             on:blur={() => handleBlur(field)}
@@ -223,7 +223,7 @@
             type="number"
             class="input input-bordered"
             class:input-error={errors[field.name]}
-            placeholder={field.placeholder}
+            placeholder={field.placeholder ? $_(field.placeholder) : undefined}
             value={getFieldValue(field)}
             on:input={(e) => handleChange(field.name, parseFloat(e.currentTarget.value))}
             on:blur={() => handleBlur(field)}
@@ -247,7 +247,7 @@
             on:change={(e) => handleChange(field.name, e.currentTarget.value)}
             on:blur={() => handleBlur(field)}
           >
-            <option value="">-- Select --</option>
+            <option value="">{$_('common.select')}</option>
             {#each field.options || [] as option}
               <option value={option.value}>{$_(option.label)}</option>
             {/each}
@@ -276,7 +276,7 @@
             id={field.name}
             class="textarea textarea-bordered"
             class:textarea-error={errors[field.name]}
-            placeholder={field.placeholder}
+            placeholder={field.placeholder ? $_(field.placeholder) : undefined}
             rows="4"
             value={getFieldValue(field)}
             on:input={(e) => handleChange(field.name, e.currentTarget.value)}
@@ -288,7 +288,7 @@
             id={field.name}
             class="textarea textarea-bordered font-mono text-xs"
             class:textarea-error={errors[field.name]}
-            placeholder={field.placeholder || '{}'}
+            placeholder={field.placeholder ? $_(field.placeholder) : '{}'}
             rows="6"
             value={JSON.stringify(formattedValues[field.name] || {}, null, 2)}
             on:input={(e) => {
