@@ -142,7 +142,7 @@ describe('LLMSRuntime adapters', () => {
     expect(converted.top_p).toBe(0.9);
     expect(converted.stop).toEqual(['DONE']);
     expect(converted.stream).toBe(true);
-    expect(converted.stream_options).toEqual({ include_usage: true });
+    expect(converted.stream_options).toBeUndefined();
   });
 
   test('throws when target provider adapter is missing during anthropic to openai request conversion', () => {
