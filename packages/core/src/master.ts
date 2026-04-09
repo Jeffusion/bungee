@@ -9,6 +9,12 @@ import dotenv from "dotenv";
 import { PluginStorageCleanupService } from "./plugin-storage-cleanup";
 import { Database } from "bun:sqlite";
 import { initializePermissionManager } from "./plugin-permissions";
+import {
+  PluginRuntimeMultiWorkerCoordinator,
+  type PluginRuntimeConvergenceStatusReport,
+  type PluginRuntimeClusterReconcileRequestMessage,
+  type PluginRuntimeWorkerMessage,
+} from "./plugin-runtime-multi-worker-convergence";
 
 // Load environment variables from .env file
 dotenv.config();
@@ -23,6 +29,7 @@ interface WorkerInfo {
   process: ChildProcess;
   workerId: number;
   status: "starting" | "ready" | "shutting_down" | "stopped";
+  pluginRuntimeGeneration: number | null;
   exitPromise?: Promise<void>;
   exitResolve?: () => void;
 }
@@ -33,6 +40,7 @@ class Master {
   private isReloading = false;
   private reloadTimeout: NodeJS.Timeout | null = null;
   private pluginStorageCleanupService: PluginStorageCleanupService | null = null;
+  private pluginRuntimeConvergenceCoordinator = new PluginRuntimeMultiWorkerCoordinator();
 
   constructor() {
     this.loadAndStart();
@@ -112,6 +120,18 @@ class Master {
       }
     }
 
+    const startupConvergence = await this.reconcilePluginRuntimeAcrossWorkers();
+    logger.info(
+      {
+        targetGeneration: startupConvergence.targetGeneration,
+        convergedGeneration: startupConvergence.convergedGeneration,
+        status: startupConvergence.status,
+        failedWorkers: startupConvergence.failedWorkers,
+        staleWorkers: startupConvergence.staleWorkers,
+      },
+      "Initial multi-worker plugin runtime convergence completed",
+    );
+
     logger.info("All workers have been started.");
   }
 
@@ -146,11 +166,13 @@ class Master {
           process: workerProcess,
           workerId,
           status: "starting",
+          pluginRuntimeGeneration: null,
           exitPromise,
           exitResolve,
         };
 
         this.workers.set(workerId, workerInfo);
+        this.pluginRuntimeConvergenceCoordinator.noteWorkerStarting(workerId, workerProcess.pid ?? null);
 
         // Set a timeout for worker startup
         const startupTimeout = setTimeout(() => {
@@ -179,6 +201,7 @@ class Master {
 
           this.workers.delete(workerId);
           workerInfo.status = "stopped";
+          this.pluginRuntimeConvergenceCoordinator.noteWorkerStopped(workerId);
 
           // Resolve the exit promise
           if (exitResolve) {
@@ -190,16 +213,52 @@ class Master {
           }
         });
 
-        workerProcess.on("message", (message: any) => {
+        workerProcess.on("message", (message: PluginRuntimeWorkerMessage) => {
           clearTimeout(startupTimeout);
-          if (message.status === "ready") {
+          if ("command" in message && message.command === "cluster-reconcile-plugin-runtime") {
+            void this.handleClusterPluginRuntimeReconcileRequest(workerInfo, message);
+            return;
+          }
+
+          if (!("status" in message)) {
+            return;
+          }
+
+          const workerMessage = message;
+
+          if (workerMessage.status === "ready") {
             logger.info(
               `Worker #${workerId} (PID: ${workerProcess.pid}) reported ready.`
             );
             workerInfo.status = "ready";
+            workerInfo.pluginRuntimeGeneration = workerMessage.pluginRuntime.generation;
+            this.pluginRuntimeConvergenceCoordinator.noteWorkerReady(
+              workerId,
+              workerMessage.pluginRuntime.generation,
+              workerMessage.pid,
+            );
             resolve(true);
-          } else if (message.status === "error") {
-            const errorMsg = message.error || "Unknown error";
+          } else if (workerMessage.status === "plugin-runtime-reconcile-complete") {
+            workerInfo.pluginRuntimeGeneration = workerMessage.servingGeneration;
+            this.pluginRuntimeConvergenceCoordinator.noteWorkerReconcileSuccess(
+              workerId,
+              workerMessage.generation,
+              workerMessage.servingGeneration,
+              workerMessage.pid,
+            );
+            this.logPluginRuntimeConvergenceStatus();
+          } else if (workerMessage.status === "plugin-runtime-reconcile-failed") {
+            workerInfo.pluginRuntimeGeneration = workerMessage.servingGeneration;
+            this.pluginRuntimeConvergenceCoordinator.noteWorkerReconcileFailure(
+              workerId,
+              workerMessage.generation,
+              workerMessage.error,
+              workerMessage.servingGeneration,
+              workerMessage.pid,
+            );
+            this.logPluginRuntimeConvergenceStatus();
+          } else if (workerMessage.status === "error") {
+            const errorMsg = workerMessage.error || "Unknown error";
             logger.error(
               `Worker #${workerId} (PID: ${workerProcess.pid}) reported an error: ${errorMsg}`
             );
@@ -221,6 +280,53 @@ class Master {
         resolve(false);
       }
     });
+  }
+
+  private async reconcilePluginRuntimeAcrossWorkers(): Promise<PluginRuntimeConvergenceStatusReport> {
+    return await this.pluginRuntimeConvergenceCoordinator.dispatchReconcile(
+      Array.from(this.workers.values()).map((workerInfo) => ({
+        workerId: workerInfo.workerId,
+        status: workerInfo.status,
+        send: workerInfo.process.send?.bind(workerInfo.process),
+      })),
+    );
+  }
+
+  private async handleClusterPluginRuntimeReconcileRequest(
+    requester: WorkerInfo,
+    message: PluginRuntimeClusterReconcileRequestMessage,
+  ): Promise<void> {
+    try {
+      const convergence = await this.reconcilePluginRuntimeAcrossWorkers();
+      requester.process.send?.({
+        status: "cluster-plugin-runtime-reconcile-result",
+        requestId: message.requestId,
+        convergence,
+      });
+    } catch (error) {
+      requester.process.send?.({
+        status: "cluster-plugin-runtime-reconcile-result",
+        requestId: message.requestId,
+        convergence: null,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private logPluginRuntimeConvergenceStatus(): void {
+    const report = this.pluginRuntimeConvergenceCoordinator.getStatusReport();
+    logger.info(
+      {
+        targetGeneration: report.targetGeneration,
+        convergedGeneration: report.convergedGeneration,
+        status: report.status,
+        failedWorkers: report.failedWorkers,
+        staleWorkers: report.staleWorkers,
+        pendingWorkers: report.pendingWorkers,
+        workers: report.workers,
+      },
+      "Plugin runtime multi-worker convergence status updated",
+    );
   }
 
   private watchConfig() {

@@ -6,17 +6,17 @@
 import { logger } from './logger';
 import { bodyStorageManager } from './logger/body-storage';
 import { logCleanupService } from './logger/log-cleanup';
-import { PluginRegistry } from './plugin-registry';
 import { initializePluginContextManager } from './plugin-context-manager';
-import {
-  initScopedPluginRegistry,
-  destroyScopedPluginRegistry,
-} from './scoped-plugin-registry';
 import { accessLogWriter } from './logger/access-log-writer';
 import type { AppConfig } from '@jeffusion/bungee-types';
 import type { Server } from 'bun';
 import { loadConfig } from './config';
 import { forEach, map } from 'lodash-es';
+import type {
+  PluginRuntimeWorkerMessage,
+  PluginRuntimeWorkerReconcileCommand,
+} from './plugin-runtime-multi-worker-convergence';
+import { getPluginRuntimeOrchestrator } from './worker/state/plugin-manager';
 
 // ===== Import and re-export types from worker modules =====
 export type { RuntimeUpstream, RequestSnapshot, UpstreamSelector } from './worker/types';
@@ -26,6 +26,8 @@ export { runtimeState, initializeRuntimeState } from './worker/state/runtime-sta
 export {
   getPluginRegistry,
   setPluginRegistry,
+  getPluginRuntimeOrchestrator,
+  initializePluginRuntime,
   initializePluginRegistryForTests,
   cleanupPluginRegistry
 } from './worker/state/plugin-manager';
@@ -43,9 +45,12 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT) : 8088;
  * Start the worker server
  * Initializes runtime state, plugin registry, and starts HTTP server
  */
-export async function startServer(config: AppConfig): Promise<Server<unknown>> {
+export async function startServer(config: AppConfig): Promise<{
+  server: Server<unknown>;
+  pluginRuntimeGeneration: number;
+}> {
   const { initializeRuntimeState } = await import('./worker/state/runtime-state');
-  const { setPluginRegistry } = await import('./worker/state/plugin-manager');
+  const { initializePluginRuntime } = await import('./worker/state/plugin-manager');
   const { handleRequest } = await import('./worker/request/handler');
 
   initializeRuntimeState(config);
@@ -55,20 +60,19 @@ export async function startServer(config: AppConfig): Promise<Server<unknown>> {
   initializePluginContextManager(db);
   logger.info('Plugin context manager initialized');
 
-  // 初始化 Plugin Registry（✅ 传递数据库实例）
-  const pluginRegistry = new PluginRegistry(process.cwd(), db);
-  setPluginRegistry(pluginRegistry);
-
-  // 扫描所有插件目录（插件状态由数据库管理）
-  logger.info('🔍 Scanning plugin directories...');
-  await pluginRegistry.scanAndLoadAllPlugins();
-  logger.info('✅ Plugin directory scan completed');
-
-  // 初始化 ScopedPluginRegistry（预编译 Hooks，实际执行插件）
-  logger.info('🔧 Initializing scoped plugin registry...');
-  const scopedRegistry = initScopedPluginRegistry(process.cwd());
-  await scopedRegistry.initializeFromConfig(config);
-  logger.info('✅ Scoped plugin registry initialized');
+  logger.info('🔧 Initializing plugin runtime orchestrator...');
+  const orchestratorResult = await initializePluginRuntime(config, {
+    basePath: process.cwd(),
+    db,
+  });
+  logger.info(
+    {
+      generation: orchestratorResult.generation,
+      diff: orchestratorResult.diff,
+      runtime: orchestratorResult.runtime,
+    },
+    '✅ Plugin runtime orchestrator initialized',
+  );
 
   logger.info(`🚀 Reverse proxy server starting on port ${PORT}`);
   logger.info(`📋 Health check: http://localhost:${PORT}/health`);
@@ -88,7 +92,10 @@ export async function startServer(config: AppConfig): Promise<Server<unknown>> {
       return new Response(JSON.stringify({ error: 'Internal Server Error' }), { status: 500 });
     },
   });
-  return server;
+  return {
+    server,
+    pluginRuntimeGeneration: orchestratorResult.generation,
+  };
 }
 
 /**
@@ -96,19 +103,11 @@ export async function startServer(config: AppConfig): Promise<Server<unknown>> {
  * Cleans up plugins and stops the HTTP server
  */
 export async function shutdownServer(server: Server<unknown>) {
-  const { getPluginRegistry, setPluginRegistry } = await import('./worker/state/plugin-manager');
+  const { cleanupPluginRegistry } = await import('./worker/state/plugin-manager');
 
   logger.info('Shutting down server...');
 
-  // 清理 ScopedPluginRegistry（预编译 Hooks）
-  await destroyScopedPluginRegistry();
-
-  // 清理 PluginRegistry（UI 元数据）
-  const pluginRegistry = getPluginRegistry();
-  if (pluginRegistry) {
-    await pluginRegistry.unloadAll();
-    setPluginRegistry(null);
-  }
+  await cleanupPluginRegistry();
 
   server.stop(true);
   logger.info('Server has been shut down.');
@@ -142,11 +141,18 @@ async function startWorker() {
       logger.info('Log cleanup service started in worker process');
     }
 
-    const server = await startServer(config);
+    const { server, pluginRuntimeGeneration } = await startServer(config);
 
     // Notify master that worker is ready
     if (process.send) {
-      process.send({ status: 'ready', pid: process.pid });
+      const message: PluginRuntimeWorkerMessage = {
+        status: 'ready',
+        pid: process.pid,
+        pluginRuntime: {
+          generation: pluginRuntimeGeneration,
+        },
+      };
+      process.send(message);
     }
 
     // Listen for shutdown commands from master
@@ -154,6 +160,48 @@ async function startWorker() {
       if (message && typeof message === 'object' && message.command === 'shutdown') {
         logger.info(`Worker #${workerId} received shutdown command. Initiating graceful shutdown...`);
         await shutdownServer(server);
+        return;
+      }
+
+      if (message && typeof message === 'object' && message.command === 'reconcile-plugin-runtime') {
+        const reconcileCommand = message as PluginRuntimeWorkerReconcileCommand;
+        logger.info(
+          { workerId, generation: reconcileCommand.generation },
+          'Worker received plugin runtime reconcile command',
+        );
+
+        try {
+          const nextConfig = configPath ? await loadConfig(configPath) : await loadConfig();
+          const { reconcilePluginRuntime } = await import('./worker/state/plugin-manager');
+          const result = await reconcilePluginRuntime(nextConfig);
+
+          if (process.send) {
+            const reconcileMessage: PluginRuntimeWorkerMessage = {
+              status: 'plugin-runtime-reconcile-complete',
+              pid: process.pid,
+              generation: reconcileCommand.generation,
+              servingGeneration: result.generation,
+            };
+            process.send(reconcileMessage);
+          }
+        } catch (error) {
+          logger.error(
+            { error, workerId, generation: reconcileCommand.generation },
+            'Worker failed to reconcile plugin runtime generation',
+          );
+
+          const servingGeneration = getPluginRuntimeOrchestrator()?.getStatusReport().generation ?? null;
+          if (process.send) {
+            const reconcileMessage: PluginRuntimeWorkerMessage = {
+              status: 'plugin-runtime-reconcile-failed',
+              pid: process.pid,
+              generation: reconcileCommand.generation,
+              servingGeneration,
+              error: error instanceof Error ? error.message : String(error),
+            };
+            process.send(reconcileMessage);
+          }
+        }
       }
     });
 
