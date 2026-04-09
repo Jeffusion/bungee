@@ -6,6 +6,7 @@
   import { _ } from '../i18n';
   import type { PluginConfig } from '../api/routes';
   import { isVirtualField } from '../utils/field-transform';
+  import { getPluginText } from '../utils/plugin-i18n';
 
   export let plugins: Array<PluginConfig | string> = [];
   export let label = 'Plugins';
@@ -183,7 +184,7 @@
           <div class="card-body p-3">
             <div class="flex items-start justify-between gap-3">
               <div class="flex-1 min-w-0">
-                <h4 class="font-semibold text-sm mb-1">{pluginMeta?.metadata?.name ? $_(pluginMeta.metadata.name) : pluginName}</h4>
+                <h4 class="font-semibold text-sm mb-1">{pluginMeta?.metadata?.name ? getPluginText(pluginMeta.metadata.name, pluginName, $_) : pluginName}</h4>
                 {#if pluginOptions && Object.keys(pluginOptions).length > 0 && pluginMeta}
                   <PluginConfigDisplay
                     schema={pluginMeta.configSchema || []}
@@ -244,7 +245,7 @@
           </option>
           {#each availablePlugins as p}
             <option value={p.name}>
-              {$_(p.metadata?.name ?? p.name)} {p.version ? `(v${p.version})` : ''}
+              {getPluginText(p.metadata?.name ?? p.name, p.name, $_)} {p.version ? `(v${p.version})` : ''}
             </option>
           {/each}
         </select>
@@ -259,7 +260,7 @@
           {@const plugin = availablePlugins.find(p => p.name === selectedPluginName)}
           {#if plugin?.description}
             <div class="label">
-              <span class="label-text-alt text-gray-500">{$_(plugin.description)}</span>
+              <span class="label-text-alt text-gray-500">{getPluginText(plugin.description, plugin.name, $_)}</span>
             </div>
           {/if}
         {/if}
