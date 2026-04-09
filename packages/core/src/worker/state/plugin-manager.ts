@@ -14,18 +14,24 @@
 
 import { logger } from '../../logger';
 import { PluginRegistry } from '../../plugin-registry';
-import {
-  initScopedPluginRegistry,
-  getScopedPluginRegistry,
-  destroyScopedPluginRegistry
-} from '../../scoped-plugin-registry';
 import type { AppConfig } from '@jeffusion/bungee-types';
+import type { Database } from 'bun:sqlite';
+import {
+  PluginRuntimeOrchestrator,
+  type PluginRuntimeOrchestratorApplyResult,
+} from '../../plugin-runtime-orchestrator';
+import type {
+  PluginRuntimeConvergenceStatusReport,
+  PluginRuntimeClusterReconcileResultMessage,
+} from '../../plugin-runtime-multi-worker-convergence';
 
 /**
  * Global plugin registry instance
  * Null when not initialized
  */
 let pluginRegistry: PluginRegistry | null = null;
+let pluginRuntimeOrchestrator: PluginRuntimeOrchestrator | null = null;
+let lastPluginRuntimeReconcileResult: PluginRuntimeOrchestratorApplyResult | null = null;
 
 /**
  * Gets the current plugin registry instance
@@ -57,6 +63,114 @@ export function setPluginRegistry(registry: PluginRegistry | null): void {
   pluginRegistry = registry;
 }
 
+export function getPluginRuntimeOrchestrator(): PluginRuntimeOrchestrator | null {
+  return pluginRuntimeOrchestrator;
+}
+
+export async function initializePluginRuntime(
+  config: AppConfig,
+  options: {
+    basePath?: string;
+    db?: Database;
+  } = {},
+): Promise<PluginRuntimeOrchestratorApplyResult> {
+  await cleanupPluginRegistry();
+
+  pluginRuntimeOrchestrator = new PluginRuntimeOrchestrator(
+    options.basePath ?? process.cwd(),
+    options.db,
+  );
+
+  const result = await pluginRuntimeOrchestrator.applyConfig(config);
+  pluginRegistry = pluginRuntimeOrchestrator.getPluginRegistry();
+  lastPluginRuntimeReconcileResult = result;
+
+  logger.debug({ generation: result.generation }, 'Plugin runtime initialized via orchestrator');
+  return result;
+}
+
+export async function reconcilePluginRuntime(
+  config: AppConfig,
+): Promise<PluginRuntimeOrchestratorApplyResult> {
+  if (!pluginRuntimeOrchestrator) {
+    throw new Error('Plugin runtime orchestrator not initialized');
+  }
+
+  const result = await pluginRuntimeOrchestrator.applyConfig(config);
+  pluginRegistry = pluginRuntimeOrchestrator.getPluginRegistry();
+  lastPluginRuntimeReconcileResult = result;
+
+  logger.debug({ generation: result.generation }, 'Plugin runtime reconciled via orchestrator');
+  return result;
+}
+
+export async function reconcilePluginRuntimeAcrossWorkers(
+  config: AppConfig,
+): Promise<{
+  result: PluginRuntimeOrchestratorApplyResult;
+  convergence: PluginRuntimeConvergenceStatusReport | null;
+}> {
+  if (process.env.BUNGEE_ROLE !== 'worker' || !process.send) {
+    return {
+      result: await reconcilePluginRuntime(config),
+      convergence: null,
+    };
+  }
+
+  const convergence = await requestClusterPluginRuntimeReconcile();
+  if (!lastPluginRuntimeReconcileResult) {
+    throw new Error('Cluster plugin runtime reconcile completed without a local reconcile result');
+  }
+
+  return {
+    result: lastPluginRuntimeReconcileResult,
+    convergence,
+  };
+}
+
+async function requestClusterPluginRuntimeReconcile(): Promise<PluginRuntimeConvergenceStatusReport> {
+  const requestId = crypto.randomUUID();
+
+  return await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      process.off('message', handleMessage);
+      reject(new Error('Timed out waiting for cluster plugin runtime reconcile result'));
+    }, 10000);
+
+    const handleMessage = (message: unknown) => {
+      if (!message || typeof message !== 'object') {
+        return;
+      }
+
+      const clusterMessage = message as Partial<PluginRuntimeClusterReconcileResultMessage>;
+      if (clusterMessage.status !== 'cluster-plugin-runtime-reconcile-result' || clusterMessage.requestId !== requestId) {
+        return;
+      }
+
+      clearTimeout(timeout);
+      process.off('message', handleMessage);
+
+      if (clusterMessage.error) {
+        reject(new Error(clusterMessage.error));
+        return;
+      }
+
+      if (!clusterMessage.convergence) {
+        reject(new Error('Cluster plugin runtime reconcile result did not include convergence status'));
+        return;
+      }
+
+      resolve(clusterMessage.convergence);
+    };
+
+    process.on('message', handleMessage);
+    process.send?.({
+      command: 'cluster-reconcile-plugin-runtime',
+      requestId,
+    });
+  });
+}
+
 /**
  * Initialize Plugin Registries for testing
  *
@@ -85,23 +199,7 @@ export async function initializePluginRegistryForTests(
   config: AppConfig,
   basePath: string = process.cwd()
 ): Promise<void> {
-  // Clean up existing registries if any
-  if (pluginRegistry) {
-    await pluginRegistry.unloadAll();
-  }
-  await destroyScopedPluginRegistry();
-
-  // Create new plugin registry (for UI and plugin metadata)
-  pluginRegistry = new PluginRegistry(basePath);
-
-  // Load global plugins if configured
-  if (config.plugins && config.plugins.length > 0) {
-    await pluginRegistry.loadPlugins(config.plugins);
-  }
-
-  // Initialize ScopedPluginRegistry (precompiled hooks)
-  const scopedRegistry = initScopedPluginRegistry(basePath);
-  await scopedRegistry.initializeFromConfig(config);
+  await initializePluginRuntime(config, { basePath });
 
   logger.debug('Plugin registries initialized for tests');
 }
@@ -123,12 +221,11 @@ export async function initializePluginRegistryForTests(
  * ```
  */
 export async function cleanupPluginRegistry(): Promise<void> {
-  // 清理 ScopedPluginRegistry（预编译 Hooks）
-  await destroyScopedPluginRegistry();
-
-  // 清理 PluginRegistry（UI 元数据）
-  if (pluginRegistry) {
-    await pluginRegistry.unloadAll();
-    pluginRegistry = null;
+  if (pluginRuntimeOrchestrator) {
+    await pluginRuntimeOrchestrator.destroy();
+    pluginRuntimeOrchestrator = null;
   }
+
+  pluginRegistry = null;
+  lastPluginRuntimeReconcileResult = null;
 }
