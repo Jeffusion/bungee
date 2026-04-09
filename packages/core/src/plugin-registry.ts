@@ -33,7 +33,6 @@ interface PluginFactoryInfo {
   PluginClass: PluginFactory;
   config: PluginConfig;
   enabled: boolean;
-  /** 插件 manifest（如果存在） */
   manifest?: LoadedPluginManifest;
   metadata?: PluginMetadata;
   entryPath: string;
@@ -192,6 +191,7 @@ export class PluginRegistry {
         { error, manifestPath },
         'Failed to load manifest.json'
       );
+
       return {
         manifest: null,
         pluginNameHint,
@@ -561,23 +561,21 @@ export class PluginRegistry {
     let pluginMetadata: import('./plugin.types').PluginMetadata | undefined;
 
     if (manifest) {
-      // manifest-first 模式
       pluginName = manifest.name;
       pluginVersion = manifest.version;
-      pluginDescription = manifest.description || '';
+      pluginDescription = manifest.metadata?.description || manifest.description || '';
 
-      // 将 manifest 转换为 PluginMetadata 格式
       pluginMetadata = {
         name: manifest.metadata?.name || manifest.name,
-        description: manifest.description,
-        icon: manifest.icon,
+        description: manifest.metadata?.description || manifest.description,
+        icon: manifest.metadata?.icon || manifest.icon,
         author: manifest.author,
         license: manifest.license,
         homepage: manifest.homepage,
         repository: manifest.repository,
         keywords: manifest.keywords,
         engines: manifest.engines,
-        contributes: manifest.contributes,
+        contributes: manifest.metadata?.contributes || manifest.contributes,
         permissions: manifest.permissions,
       };
 

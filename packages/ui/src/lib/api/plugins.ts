@@ -55,6 +55,7 @@ export interface PluginMetadata {
 export interface Plugin {
   name: string;
   version?: string;
+  description?: string;
   enabled: boolean;
   metadata?: PluginMetadata;
 }

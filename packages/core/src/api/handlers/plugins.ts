@@ -146,6 +146,9 @@ export async function handleGetPlugins(_req: Request): Promise<Response> {
       name: isTranslationKey(plugin.metadata.name)
         ? `plugins.${plugin.name}.${plugin.metadata.name}`
         : plugin.metadata.name
+      ,description: isTranslationKey(plugin.description)
+        ? `plugins.${plugin.name}.${plugin.description}`
+        : (plugin.metadata.description ?? plugin.description)
     } : plugin.metadata
   }));
 
