@@ -1,5 +1,3 @@
-import type { Readable } from 'svelte/store';
-
 /**
  * 获取插件的翻译文本（支持翻译键）
  *
@@ -26,6 +24,10 @@ export function getPluginText(
   _: (key: string, options?: any) => string
 ): string {
   if (!text) return '';
+
+  if (text.startsWith('plugins.')) {
+    return _(text, { default: text });
+  }
 
   // 检测是否为翻译键（包含 `.` 且不包含空格）
   const isTranslationKey = text.includes('.') && !text.includes(' ');

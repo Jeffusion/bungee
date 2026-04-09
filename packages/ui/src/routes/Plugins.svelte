@@ -4,6 +4,7 @@
   import { PluginsAPI, type Plugin } from '../lib/api/plugins';
   import { toast } from '../lib/stores/toast';
   import { pluginList, pluginsLoading, refreshPlugins, updatePluginState } from '../lib/stores/plugins';
+  import { getPluginText } from '../lib/utils/plugin-i18n';
 
   let processing = false;
 
@@ -18,7 +19,7 @@
 
       // I18n for toast messages
       const newStatus = !plugin.enabled;
-      const pluginDisplayName = $_(plugin.metadata?.name) || plugin.name;
+      const pluginDisplayName = getPluginText(plugin.metadata?.name, plugin.name, $_) || plugin.name;
       const statusText = newStatus ? $_('plugins.enabled') : $_('plugins.disabled');
       toast.show(`${pluginDisplayName}: ${statusText}`, 'success');
 
@@ -50,7 +51,7 @@
       <h1 class="text-3xl font-bold">{$_('plugins.title')}</h1>
       <p class="text-sm text-gray-500 mt-1">{$_('plugins.subtitle')}</p>
     </div>
-    <button class="btn btn-primary btn-sm" on:click={refreshPlugins} disabled={$pluginsLoading}>
+    <button class="btn btn-primary btn-sm" on:click={() => refreshPlugins()} disabled={$pluginsLoading}>
       <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
       </svg>
@@ -88,7 +89,7 @@
                 </div>
                 <div>
                   <h2 class="card-title text-lg">
-                    {$_(plugin.metadata?.name) || plugin.name}
+                    {getPluginText(plugin.metadata?.name, plugin.name, $_) || plugin.name}
                   </h2>
                   <div class="flex items-center gap-2">
                     <span class="badge badge-sm badge-ghost">v{plugin.version || '0.0.0'}</span>
@@ -103,7 +104,7 @@
             </div>
 
             <p class="text-sm text-gray-500 mt-2 min-h-[40px]">
-              {$_(plugin.description) || $_('plugins.noDescription')}
+              {getPluginText(plugin.metadata?.description, plugin.name, $_) || $_('plugins.noDescription')}
             </p>
 
             <div class="card-actions justify-between mt-4 items-center">
