@@ -1517,7 +1517,7 @@ describe('Anthropic to OpenAI - Integration Tests', () => {
 
     const [, fetchOptions] = mockedFetch.mock.calls[0];
     const forwardedBody = JSON.parse(fetchOptions!.body as string);
-    expect(forwardedBody.stream_options).toEqual({ include_usage: true });
+    expect(forwardedBody.stream_options).toBeUndefined();
   });
 
   test('should convert chat completions reasoning deltas into anthropic thinking deltas', async () => {

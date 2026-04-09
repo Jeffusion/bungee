@@ -301,11 +301,6 @@ export class AnthropicToOpenAIConverter implements AIConverter {
 
     if (anthropicBody.stream !== undefined) {
       openaiBody.stream = anthropicBody.stream;
-      if (anthropicBody.stream === true) {
-        openaiBody.stream_options = {
-          include_usage: true
-        };
-      }
     }
 
     // 4. Tools conversion
