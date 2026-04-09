@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { onMount, afterUpdate } from 'svelte';
+  import { onMount } from 'svelte';
   import { location, replace } from 'svelte-spa-router';
   import { _ } from '../lib/i18n';
   import { PluginsAPI, type Plugin } from '../lib/api/plugins';
   import PluginHost from '../lib/components/PluginHost.svelte';
   import { toast } from '../lib/stores/toast';
+  import { getPluginText } from '../lib/utils/plugin-i18n';
 
   export let params: { name: string; path?: string } = { name: '' };
 
@@ -90,7 +91,7 @@
       </div>
       <div>
         <h1 class="text-3xl font-bold flex items-center gap-3">
-          {$_(plugin.metadata?.name) || plugin.name}
+          {getPluginText(plugin.metadata?.name, plugin.name, $_) || plugin.name}
           <span class="badge badge-lg badge-ghost">v{plugin.version || '0.0.0'}</span>
            {#if plugin.enabled}
               <span class="badge badge-lg badge-success">{$_('plugins.enabled')}</span>
@@ -98,7 +99,7 @@
               <span class="badge badge-lg badge-ghost">{$_('plugins.disabled')}</span>
             {/if}
         </h1>
-        <p class="text-gray-500 mt-1">{$_(plugin.description) || $_('plugins.noDescription')}</p>
+        <p class="text-gray-500 mt-1">{getPluginText(plugin.metadata?.description, plugin.name, $_) || $_('plugins.noDescription')}</p>
       </div>
     </div>
 
