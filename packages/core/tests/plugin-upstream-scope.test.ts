@@ -1,7 +1,54 @@
 import { describe, test, expect } from 'bun:test';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { AppConfig } from '@jeffusion/bungee-types';
 import { ScopedPluginRegistry } from '../src/scoped-plugin-registry';
 import type { MutableRequestContext } from '../src/hooks';
+
+const TEST_PLUGIN_NAME = 'test-header-injection';
+
+function createTempPluginRoot(): string {
+  const root = mkdtempSync(join(tmpdir(), 'bungee-plugin-scope-'));
+  const pluginDir = join(root, 'plugins', TEST_PLUGIN_NAME, 'server');
+  mkdirSync(pluginDir, { recursive: true });
+
+  const pluginTypesPath = JSON.stringify(join(process.cwd(), 'packages/core/src/plugin.types'));
+  const hooksPath = JSON.stringify(join(process.cwd(), 'packages/core/src/hooks'));
+
+  writeFileSync(
+    join(pluginDir, 'index.ts'),
+    `import type { Plugin } from ${pluginTypesPath};
+import { definePlugin } from ${pluginTypesPath};
+import type { PluginHooks, PluginInitContext } from ${hooksPath};
+
+export default definePlugin(
+  class implements Plugin {
+    static readonly name = '${TEST_PLUGIN_NAME}';
+    static readonly version = '1.0.0';
+
+    customHeaders: Record<string, string> = {};
+
+    async init(context: PluginInitContext): Promise<void> {
+      this.customHeaders = context.config.headers || {};
+    }
+
+    register(hooks: PluginHooks): void {
+      hooks.onBeforeRequest.tap(
+        { name: '${TEST_PLUGIN_NAME}', stage: -50 },
+        (ctx) => {
+          Object.assign(ctx.headers, this.customHeaders);
+          return ctx;
+        }
+      );
+    }
+  }
+);
+`
+  );
+
+  return root;
+}
 
 type HeaderEcho = {
   onlyA: string | null;
@@ -20,7 +67,7 @@ const createSameTargetConfig = (target: string): AppConfig => ({
           priority: 1,
           plugins: [
             {
-              name: 'header-injection-example',
+              name: TEST_PLUGIN_NAME,
               options: {
                 headers: { 'x-only-a': '1' },
                 priority: 10,
@@ -33,7 +80,7 @@ const createSameTargetConfig = (target: string): AppConfig => ({
           priority: 2,
           plugins: [
             {
-              name: 'header-injection-example',
+              name: TEST_PLUGIN_NAME,
               options: {
                 headers: { 'x-only-b': '1' },
                 priority: 1,
@@ -57,7 +104,7 @@ const createDisabledConfig = (target: string): AppConfig => ({
           priority: 1,
           plugins: [
             {
-              name: 'header-injection-example',
+              name: TEST_PLUGIN_NAME,
               options: {
                 headers: { 'x-enabled': '1' },
                 priority: 10,
@@ -71,7 +118,7 @@ const createDisabledConfig = (target: string): AppConfig => ({
           disabled: true,
           plugins: [
             {
-              name: 'header-injection-example',
+              name: TEST_PLUGIN_NAME,
               options: {
                 headers: { 'x-disabled': '1' },
                 priority: 1,
@@ -90,7 +137,8 @@ const runScenario = async (
   routeId: string,
   upstreamId: string
 ): Promise<HeaderEcho> => {
-  const registry = new ScopedPluginRegistry(process.cwd());
+  const pluginRoot = createTempPluginRoot();
+  const registry = new ScopedPluginRegistry(pluginRoot);
 
   try {
     const config = configBuilder('http://mock-upstream-a.com');
@@ -124,6 +172,7 @@ const runScenario = async (
     };
   } finally {
     await registry.destroy();
+    rmSync(pluginRoot, { recursive: true, force: true });
   }
 };
 
