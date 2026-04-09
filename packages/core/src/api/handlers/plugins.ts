@@ -1,7 +1,13 @@
-import { getPluginRegistry } from '../../worker/state/plugin-manager';
+import { loadConfig } from '../../config';
+import { freezePluginRuntimeState } from '../../plugin-runtime-state-machine';
 import { getScopedPluginRegistry } from '../../scoped-plugin-registry';
 import { logger } from '../../logger';
 import { getPermissionManager } from '../../plugin-permissions';
+import {
+  getPluginRegistry,
+  getPluginRuntimeOrchestrator,
+  reconcilePluginRuntimeAcrossWorkers,
+} from '../../worker/state/plugin-manager';
 
 /**
  * 检测文本是否为翻译键
@@ -49,23 +55,87 @@ function prefixPluginTranslationKeys(
   return result;
 }
 
+function getFrozenPluginState(pluginName: string) {
+  const orchestratorEntry = getPluginRuntimeOrchestrator()
+    ?.getStatusReport()
+    .plugins.find((plugin) => plugin.pluginName === pluginName);
+
+  if (orchestratorEntry) {
+    return {
+      generation: orchestratorEntry.generation,
+      lifecycle: orchestratorEntry.state.lifecycle,
+      authorities: orchestratorEntry.state.authorities,
+      states: orchestratorEntry.state.states,
+      runtime: orchestratorEntry.state.runtime,
+      reasons: orchestratorEntry.state.reasons,
+      failures: orchestratorEntry.state.failures,
+      sources: orchestratorEntry.sources,
+    };
+  }
+
+  const registrySnapshot = getPluginRegistry()?.getPluginStateSnapshot(pluginName);
+  if (!registrySnapshot) {
+    return null;
+  }
+
+  const runtimeSnapshot = getScopedPluginRegistry()?.getPluginRuntimeStateSnapshot(pluginName);
+  const frozenState = freezePluginRuntimeState(registrySnapshot, runtimeSnapshot);
+
+  return {
+    generation: 0,
+    lifecycle: frozenState.lifecycle,
+    authorities: frozenState.authorities,
+    states: frozenState.states,
+    runtime: frozenState.runtime,
+    reasons: frozenState.reasons,
+    failures: frozenState.failures,
+    sources: {
+      registry: true,
+      runtime: Boolean(runtimeSnapshot),
+    },
+  };
+}
+
 /**
  * 获取所有已扫描插件的元数据
  */
-export async function handleGetPlugins(req: Request): Promise<Response> {
+export async function handleGetPlugins(_req: Request): Promise<Response> {
   const registry = getPluginRegistry();
-  if (!registry) {
+  const orchestratorReport = getPluginRuntimeOrchestrator()?.getStatusReport() ?? null;
+
+  if (!registry && !orchestratorReport) {
     return new Response(JSON.stringify([]), {
       headers: { 'Content-Type': 'application/json' }
     });
   }
 
-  // 使用 PluginRegistry 的公共方法获取所有插件元数据
-  const plugins = registry.getAllPluginsMetadata();
+  const registryPlugins = registry?.getAllPluginsMetadata() ?? [];
+  const registryPluginMap = new Map(registryPlugins.map((plugin) => [plugin.name, plugin]));
+  const pluginNames = new Set<string>([
+    ...registryPlugins.map((plugin) => plugin.name),
+    ...(orchestratorReport?.plugins.map((plugin) => plugin.pluginName) ?? []),
+  ]);
+
+  const plugins = Array.from(pluginNames)
+    .sort((left, right) => left.localeCompare(right))
+    .map((pluginName) => {
+      const pluginState = orchestratorReport?.plugins.find((plugin) => plugin.pluginName === pluginName);
+      const registryPlugin = registryPluginMap.get(pluginName);
+
+      return {
+        name: pluginName,
+        version: registryPlugin?.version ?? 'unknown',
+        description: registryPlugin?.description ?? '',
+        metadata: registryPlugin?.metadata ?? { name: pluginName },
+        enabled: registryPlugin?.enabled ?? (pluginState?.state.states.persistedEnabled === 'enabled'),
+        hasManifest: registryPlugin?.hasManifest ?? Boolean(pluginState?.sources.registry),
+      };
+    });
 
   // 为翻译键添加命名空间前缀
   const transformedPlugins = plugins.map(plugin => ({
     ...plugin,
+    state: getFrozenPluginState(plugin.name),
     // 转换 description
     description: isTranslationKey(plugin.description)
       ? `plugins.${plugin.name}.${plugin.description}`
@@ -190,7 +260,26 @@ export async function handleTogglePlugin(_req: Request, pluginName: string, enab
       `Plugin ${enable ? 'enabled' : 'disabled'} via API`
     );
 
-    return new Response(JSON.stringify({ success: true, enabled: enable }), {
+    const reconcileOutcome = await reconcilePluginRuntimeAcrossWorkers(await loadConfig());
+    const pluginState = reconcileOutcome.result.status.plugins.find((plugin) => plugin.pluginName === pluginName);
+
+    return new Response(JSON.stringify({
+      success: true,
+      pluginName,
+      generation: reconcileOutcome.result.generation,
+      diff: reconcileOutcome.result.diff,
+      convergence: reconcileOutcome.convergence,
+      persistedEnabled: enable ? 'enabled' : 'disabled',
+      state: pluginState ? {
+        lifecycle: pluginState.state.lifecycle,
+        authorities: pluginState.state.authorities,
+        states: pluginState.state.states,
+        runtime: pluginState.state.runtime,
+        reasons: pluginState.state.reasons,
+        failures: pluginState.state.failures,
+        sources: pluginState.sources,
+      } : getFrozenPluginState(pluginName),
+    }), {
       headers: { 'Content-Type': 'application/json' }
     });
   } catch (error: any) {
@@ -341,6 +430,7 @@ export async function handlePluginApiRequest(
 ): Promise<Response> {
   try {
     const scopedRegistry = getScopedPluginRegistry();
+    const registry = getPluginRegistry();
     if (!scopedRegistry) {
       return new Response(
         JSON.stringify({ error: 'Plugin system not initialized' }),
@@ -348,32 +438,23 @@ export async function handlePluginApiRequest(
       );
     }
 
-    // 获取插件类（如果未加载则尝试加载）
-    let pluginClass = scopedRegistry.getPluginClass(pluginName);
-    if (!pluginClass) {
-      // 尝试动态加载插件类
-      try {
-        pluginClass = await scopedRegistry.ensurePluginClassLoaded({ name: pluginName });
-      } catch (loadError) {
-        logger.debug({ error: loadError, pluginName }, 'Failed to load plugin class');
-      }
+    if (!registry) {
+      return new Response(
+        JSON.stringify({ error: 'Plugin registry not initialized' }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
+      );
     }
 
-    if (!pluginClass) {
+    const pluginDescriptor = registry.getPluginAssetDescriptor(pluginName);
+    if (!pluginDescriptor && !registry.getPluginManifest(pluginName) && registry.getPluginApiDeclarations(pluginName).length === 0) {
       return new Response(
         JSON.stringify({ error: `Plugin "${pluginName}" not found` }),
         { status: 404, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
-    // 检查 API 端点是否在 contributes.api 中声明
-    // 优先从 manifest 获取（新架构），回退到静态属性（向后兼容）
-    const registry = getPluginRegistry();
-    const manifest = registry?.getPluginManifest(pluginName);
     const apiDeclarations: Array<{ path: string; methods: string[]; handler: string }> =
-      manifest?.contributes?.api
-      || pluginClass.metadata?.contributes?.api
-      || [];
+      registry.getPluginApiDeclarations(pluginName);
     const method = req.method as 'GET' | 'POST' | 'PUT' | 'DELETE';
 
     const matchedApi = apiDeclarations.find(api => {
@@ -391,40 +472,15 @@ export async function handlePluginApiRequest(
       );
     }
 
-    // 获取处理器实例（从 global scope 获取）
-    let globalInstances = scopedRegistry.getGlobalInstances();
-    let instance = globalInstances.find(i => i.handler.pluginName === pluginName);
-
-    // 如果没有全局实例，但插件已启用且声明了 API，则动态创建实例
-    if (!instance) {
-      const registry = getPluginRegistry();
-      const pluginMeta = registry?.getAllPluginsMetadata().find(p => p.name === pluginName);
-
-      if (pluginMeta?.enabled) {
-        logger.info({ pluginName }, 'Creating global instance for API handling');
-
-        try {
-          // 动态创建全局实例
-          await scopedRegistry.createInstance(
-            { type: 'global' },
-            { name: pluginName, enabled: true }
-          );
-
-          // 重新获取实例
-          globalInstances = scopedRegistry.getGlobalInstances();
-          instance = globalInstances.find(i => i.handler.pluginName === pluginName);
-        } catch (createError) {
-          logger.error({ error: createError, pluginName }, 'Failed to create global instance');
-        }
-      }
-    }
+    const globalInstances = scopedRegistry.getGlobalInstances();
+    const instance = globalInstances.find(i => i.handler.pluginName === pluginName);
 
     if (!instance) {
-      logger.warn({ pluginName }, 'Plugin has no global instance for API handling');
+      logger.warn({ pluginName }, 'Plugin API request rejected because no global runtime instance is serving');
       return new Response(
         JSON.stringify({
-          error: `Plugin "${pluginName}" is not enabled or failed to initialize`,
-          hint: 'Enable the plugin in the Plugins management page'
+          error: `Plugin "${pluginName}" has no active global runtime instance`,
+          hint: 'Reconcile plugin runtime before calling plugin APIs'
         }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
