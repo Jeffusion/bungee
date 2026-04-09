@@ -70,20 +70,28 @@ Bungee 插件是一个实现 `Plugin` 接口的 TypeScript 类，可以在请求
 
 ```typescript
 interface Plugin {
-  // 全局初始化（只调用一次）
-  onInit?(context: PluginInitContext): Promise<void>;
+  /**
+   * 插件初始化
+   * 在 register 之前调用，用于初始化配置和资源。
+   * 只有 global scope 的插件实例会调用此方法。
+   */
+  init?(context: PluginInitContext): Promise<void>;
 
-  // 请求级别钩子
-  onRequest?(ctx: PluginContext): Promise<void>;
-  onBeforeRequest?(ctx: PluginContext): Promise<void>;
-  onResponse?(ctx: PluginContext & { response: Response }): Promise<Response | void>;
+  /**
+   * 注册 Hooks
+   * 插件在此方法中选择需要的 hooks 并注册回调。
+   */
+  register(hooks: PluginHooks): void;
 
-  // 流式响应钩子
-  processStreamChunk?(chunk: any, ctx: StreamChunkContext): Promise<any[] | null>;
-  flushStream?(ctx: StreamChunkContext): Promise<any[]>;
+  /**
+   * 重置状态（对象池使用）
+   */
+  reset?(): void | Promise<void>;
 
-  // 错误处理钩子
-  onError?(ctx: PluginContext & { error: Error }): Promise<void>;
+  /**
+   * 插件销毁
+   */
+  onDestroy?(): Promise<void>;
 }
 ```
 
@@ -91,13 +99,10 @@ interface Plugin {
 
 | 阶段 | 调用时机 | 用途 |
 |------|----------|------|
-| `onInit` | 插件加载时（全局一次） | 初始化全局资源、连接外部服务 |
-| `onRequest` | 接收到客户端请求时 | 日志记录、请求验证、修改请求 |
-| `onBeforeRequest` | 发送给上游前 | 最后的请求转换、格式适配 |
-| `onResponse` | 收到上游响应时 | 响应转换、错误处理、修改响应 |
-| `processStreamChunk` | 处理流式数据块时 | 流式数据转换、过滤 |
-| `flushStream` | 流式响应结束时 | 刷新缓冲数据 |
-| `onError` | 发生错误时 | 错误处理、降级策略 |
+| `init` | 插件加载时（全局一次） | 初始化全局资源、连接外部服务 |
+| `register` | 插件注册时 | 声明式注册 Hook 回调（如 `hooks.onRequest.tap(...)`） |
+| `reset` | 实例归还对象池时 | 清理请求相关的临时状态 |
+| `onDestroy` | 插件卸载时 | 释放全局资源 |
 
 ---
 
@@ -105,153 +110,67 @@ interface Plugin {
 
 ### 1. 创建插件文件
 
-在 `packages/core/src/plugins/` 目录下创建插件文件：
+在 `plugins/` 目录下创建插件目录（推荐采用 **Artifact-first** 结构）：
 
 ```bash
-# 方式 1: 单文件插件
-packages/core/src/plugins/my-plugin.ts
-
-# 方式 2: 目录插件（推荐用于复杂插件）
-packages/core/src/plugins/my-plugin/
-  ├── index.ts           # 主入口
-  ├── handlers.ts        # 业务逻辑
-  └── utils.ts           # 工具函数
+plugins/my-plugin/
+  ├── manifest.json      # 插件元数据
+  ├── server/
+  │   └── index.ts       # 服务端源码
+  ├── dist/
+  │   └── index.js       # 编译后的产物 (Artifact)
+  └── ui/
+      └── MyWidget.svelte # UI 组件
 ```
+
+> **注意**: 生产环境运行时仅加载 `dist/index.js`。开发模式下支持直接加载 `server/index.ts` 以实现快速调试，但这属于 **dev-compat** 行为，不应作为正式发布的契约。
 
 ### 2. 实现插件类
 
 ```typescript
-import type { Plugin, PluginContext } from '../../plugin.types';
-import { definePlugin } from '../../plugin.types';
-import { logger } from '../../logger';
+import type { Plugin, PluginHooks, PluginInitContext } from '@jeffusion/bungee-types';
+import { definePlugin } from '@jeffusion/bungee-types';
 
-/**
- * 插件配置选项
- */
-interface MyPluginOptions {
-  // 定义插件所需的配置项
-  apiKey?: string;
-  timeout?: number;
-}
-
-/**
- * 我的第一个插件
- */
 export const MyPlugin = definePlugin(
   class implements Plugin {
-    // ===== 静态元数据（必需） =====
+    // 静态元数据（必需，需与 manifest.json 一致）
     static readonly name = 'my-plugin';
     static readonly version = '1.0.0';
-    static readonly description = 'My awesome plugin for Bungee';
 
-    // 插件配置选项
-    private options: MyPluginOptions;
-
-    constructor(options: MyPluginOptions = {}) {
-      this.options = options;
-      logger.info({ options }, 'MyPlugin initialized');
+    async init(context: PluginInitContext): Promise<void> {
+      // 初始化逻辑
     }
 
-    // ===== 生命周期钩子 =====
-
-    /**
-     * 全局初始化（可选）
-     */
-    async onInit(context: PluginInitContext): Promise<void> {
-      logger.info('MyPlugin: Global initialization');
-      // 初始化全局资源，如数据库连接、外部服务连接等
-    }
-
-    /**
-     * 请求拦截（可选）
-     */
-    async onRequest(ctx: PluginContext): Promise<void> {
-      logger.debug('MyPlugin: Processing request');
-
-      // 修改请求 URL
-      ctx.url.searchParams.set('plugin', 'my-plugin');
-
-      // 修改请求 headers
-      ctx.headers.set('x-plugin-processed', 'true');
-
-      // 修改请求 body (如果需要)
-      if (ctx.body && typeof ctx.body === 'object') {
-        ctx.body.plugin_metadata = {
-          name: 'my-plugin',
-          timestamp: Date.now()
-        };
-      }
-    }
-
-    /**
-     * 响应处理（可选）
-     */
-    async onResponse(ctx: PluginContext & { response: Response }): Promise<Response | void> {
-      logger.debug('MyPlugin: Processing response');
-
-      // 读取响应内容
-      const data = await ctx.response.json();
-
-      // 修改响应数据
-      data.plugin_info = {
-        name: 'my-plugin',
-        version: '1.0.0'
-      };
-
-      // 返回新的响应
-      return new Response(JSON.stringify(data), {
-        status: ctx.response.status,
-        headers: ctx.response.headers
+    register(hooks: PluginHooks): void {
+      // 注册请求钩子
+      hooks.onBeforeRequest.tapPromise({ name: 'my-plugin' }, async (ctx) => {
+        ctx.headers['x-my-plugin'] = 'active';
       });
     }
   }
 );
 
-// 导出插件（必需）
 export default MyPlugin;
 ```
 
-### 3. 配置插件
-
-在 `config.json` 中启用插件：
+### 3. 编写 manifest.json (vNext)
 
 ```json
 {
-  "routes": [
-    {
-      "path": "/api",
-      "plugins": [
-        {
-          "name": "my-plugin",
-          "options": {
-            "apiKey": "your-api-key",
-            "timeout": 5000
-          }
-        }
-      ],
-      "upstreams": [
-        {
-          "target": "https://api.example.com"
-        }
-      ]
-    }
-  ]
+  "name": "my-plugin",
+  "version": "1.0.0",
+  "manifestContract": "vnext",
+  "schemaVersion": 2,
+  "artifactKind": "runtime-plugin",
+  "main": "dist/index.js",
+  "uiExtensionMode": "none",
+  "capabilities": ["hooks"],
+  "engines": {
+    "bungee": "^3.2.0"
+  }
 }
 ```
 
-### 4. 测试插件
-
-```bash
-# 重新构建插件
-cd packages/core
-bun run build:plugins
-
-# 启动 Bungee
-bun run dev
-
-# 发送测试请求
-curl http://localhost:8088/api/test
-```
 
 ---
 
