@@ -39,3 +39,12 @@ export type {
   OpenAIMessagesCompatibilityRequestLike,
   OpenAIProtocolConversionOptions
 } from './providers/openai';
+
+export {
+  TOKEN_ACCOUNTING_AUTHORITIES,
+  assertCanonicalTokenAccountingEventV2,
+  createTokenAccountingSession,
+  getProviderTokenAccountingCapabilities
+} from './token-accounting';
+
+export type { CanonicalTokenAccountingEventV2 } from './token-accounting/types';
