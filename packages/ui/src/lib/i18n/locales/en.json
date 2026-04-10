@@ -63,12 +63,14 @@
     "outputTokens": "Output Tokens",
     "totalInput": "Total Input",
     "totalOutput": "Total Output",
-    "totalRequests": "Total Requests",
     "dimension": {
       "all": "All",
       "route": "By Route",
-      "upstream": "By Upstream"
+      "upstream": "By Upstream",
+      "provider": "By Provider"
     },
+    "logicalRequests": "Logical Requests",
+    "upstreamAttempts": "Upstream Attempts",
     "noData": "No token usage data"
   },
   "monitoring": {

@@ -57,8 +57,8 @@ Bungee 插件系统采用**分层架构**，支持内置插件和外部插件，
 │  │                       Plugin Capabilities                            │   │
 │  │  ┌──────────────┐  ┌──────────────┐  ┌────────────────────────────┐ │   │
 │  │  │    Hooks     │  │     API      │  │    UI Extensions           │ │   │
-│  │  │ onRequest    │  │ /summary     │  │ 1. Native Widgets (Static) │ │   │
-│  │  │ onResponse   │  │ /by-route    │  │ 2. Sandbox Iframe (Dynamic)│ │   │
+│  │  │ onRequest    │  │ /stats v2    │  │ 1. Native Widgets (Static) │ │   │
+│  │  │ onResponse   │  │ groupBy=route│  │ 2. Sandbox Iframe (Dynamic)│ │   │
 │  │  │ onStreamChunk│  │              │  │                            │ │   │
 │  │  └──────────────┘  └──────────────┘  └────────────────────────────┘ │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
@@ -274,8 +274,7 @@ class MyPlugin implements Plugin {
   "main": "dist/index.js",
   "contributes": {
     "api": [
-      { "path": "/summary", "methods": ["GET"], "handler": "getSummary" },
-      { "path": "/by-route", "methods": ["GET"], "handler": "getByRoute" }
+      { "path": "/stats", "methods": ["GET"], "handler": "getStats" }
     ]
   }
 }
@@ -287,19 +286,26 @@ class TokenStatsPlugin implements Plugin {
   static readonly name = 'token-stats';
   static readonly version = '1.0.0';
 
-  async getSummary(req: Request): Promise<Response> {
-    return new Response(JSON.stringify({ total: 1000 }));
-  }
-
-  async getByRoute(req: Request): Promise<Response> {
-    return new Response(JSON.stringify([]));
+  async getStats(req: Request): Promise<Response> {
+    return new Response(JSON.stringify({
+      groupBy: 'route',
+      totalInputTokens: 1000,
+      totalOutputTokens: 600,
+      logicalRequests: 24,
+      upstreamAttempts: 28,
+      authorityBreakdown: {
+        input: { official: 24, local: 0, heuristic: 0, partial: 0, none: 0 },
+        output: { official: 24, local: 0, heuristic: 0, partial: 0, none: 0 },
+      },
+      data: [],
+    }));
   }
 }
 ```
 
 **API 路由规则**：`/api/plugins/{pluginName}/{path}`
 
-示例：`GET /api/plugins/token-stats/summary`
+示例：`GET /api/plugins/token-stats/stats?groupBy=route&range=24h`
 
 ### 3. Widget Plugins（组件插件）
 
@@ -704,14 +710,9 @@ async onResponse(ctx: PluginContext & { response: Response }): Promise<Response 
   "contributes": {
     "api": [
       {
-        "path": "/summary",
+        "path": "/stats",
         "methods": ["GET"],
-        "handler": "getSummary"
-      },
-      {
-        "path": "/data",
-        "methods": ["GET", "POST"],
-        "handler": "handleData"
+        "handler": "getStats"
       }
     ]
   }
@@ -722,18 +723,18 @@ async onResponse(ctx: PluginContext & { response: Response }): Promise<Response 
 
 | 声明路径 | 实际 API URL |
 |----------|-------------|
-| `/summary` | `/api/plugins/token-stats/summary` |
-| `/data` | `/api/plugins/token-stats/data` |
+| `/stats` | `/api/plugins/token-stats/stats?groupBy=route&range=24h` |
 
 **Handler 方法签名**：
 
 ```typescript
-async getSummary(req: Request): Promise<Response> {
+async getStats(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const range = url.searchParams.get('range') || '24h';
+  const groupBy = url.searchParams.get('groupBy') || 'route';
 
-  // 从 storage 读取数据
-  const data = await this.storage.get('stats');
+  // 从 storage 读取 v2 聚合数据
+  const data = await this.storage.get(`token-stats:v2:${groupBy}:all:${new Date().toISOString().slice(0, 13)}`);
 
   return new Response(JSON.stringify(data), {
     headers: { 'Content-Type': 'application/json' },
@@ -863,13 +864,34 @@ import { api, _, chartTheme } from '@bungee/plugin-sdk';
 
   onMount(async () => {
     // 调用插件 API
-    const result = await api.get('/plugins/token-stats/summary?range=1h');
-    chartData = transformData(result);
+    const result = await api.get('/plugins/token-stats/stats?range=1h&groupBy=route');
+    chartData = result.data;
   });
 </script>
 
 <!-- 使用 i18n -->
 <h3>{$_('plugins.token-stats.widgets.chart.title')}</h3>
+
+<!-- 当前 v2 返回形状示例 -->
+<pre>{JSON.stringify({
+  groupBy: 'route',
+  totalInputTokens: 1000,
+  totalOutputTokens: 600,
+  logicalRequests: 24,
+  upstreamAttempts: 28,
+  authorityBreakdown: { input: {}, output: {} },
+  data: [{
+    dimension: 'openai-chat',
+    inputTokens: 500,
+    outputTokens: 300,
+    logicalRequests: 12,
+    upstreamAttempts: 14,
+    officialInputTokens: 500,
+    officialOutputTokens: 300,
+    partialOutputs: 0,
+    authorityBreakdown: { input: {}, output: {} },
+  }],
+}, null, 2)}</pre>
 
 <!-- 使用图表 -->
 <Chart type="bar" data={chartData} options={chartTheme.bar} />

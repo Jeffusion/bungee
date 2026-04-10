@@ -422,10 +422,10 @@ function matchPathPattern(pattern: string, path: string): boolean {
  * - 插件只能访问自己的存储命名空间
  * - 插件只能响应自己在 contributes.api 中声明的端点
  *
- * @example
- * // 请求 GET /api/plugins/token-stats/summary
- * // 会调用 token-stats 插件实例的 getSummary 方法
- */
+  * @example
+  * // 请求 GET /api/plugins/token-stats/stats
+  * // 会调用 token-stats 插件实例的 getStats 方法
+  */
 export async function handlePluginApiRequest(
   req: Request,
   pluginName: string,
