@@ -454,6 +454,7 @@ export class PluginRegistry {
     // 解析 plugin 路径
     let pluginPath: string;
     let pluginDir: string | undefined;
+    let manifest: LoadedPluginManifest | null = null;
 
     if (config.path) {
       // 如果提供了 path，直接使用（支持绝对路径和相对路径）
@@ -466,23 +467,31 @@ export class PluginRegistry {
 
       logger.debug({ pluginPath, pluginDir, source: 'path' }, 'Loading plugin from explicit path');
     } else if (config.name) {
+      const cachedManifest = this.pluginManifests.get(config.name) ?? null;
+      if (cachedManifest?.mainPath) {
+        manifest = cachedManifest;
+        pluginPath = cachedManifest.mainPath;
+        pluginDir = cachedManifest.pluginDir;
+        logger.debug({ pluginName: config.name, pluginPath, source: 'cached-manifest' }, 'Plugin resolved from cached manifest');
+      } else {
       // 如果没有提供 path，通过 name 解析路径
       // 先尝试 transformers 目录，如果失败则尝试根目录
-      try {
-          pluginPath = await resolvePluginPath(this.pathResolver, config.name, 'transformers');
-        logger.debug({ pluginName: config.name, pluginPath, source: 'name-transformers' }, 'Plugin resolved from transformers category');
-      } catch {
-        // 如果在 transformers 中未找到，尝试根目录
         try {
+          pluginPath = await resolvePluginPath(this.pathResolver, config.name, 'transformers');
+          logger.debug({ pluginName: config.name, pluginPath, source: 'name-transformers' }, 'Plugin resolved from transformers category');
+        } catch {
+          // 如果在 transformers 中未找到，尝试根目录
+          try {
             pluginPath = await resolvePluginPath(this.pathResolver, config.name);
-          logger.debug({ pluginName: config.name, pluginPath, source: 'name-root' }, 'Plugin resolved from root');
-        } catch (error) {
-          // 所有路径都失败
-          throw new Error(
-            `Failed to resolve plugin "${config.name}". ` +
-            `Searched in transformers category and root directory. ` +
-            `Please check plugin name or provide explicit path.`
-          );
+            logger.debug({ pluginName: config.name, pluginPath, source: 'name-root' }, 'Plugin resolved from root');
+          } catch (error) {
+            // 所有路径都失败
+            throw new Error(
+              `Failed to resolve plugin "${config.name}". ` +
+              `Searched in transformers category and root directory. ` +
+              `Please check plugin name or provide explicit path.`
+            );
+          }
         }
       }
     } else {
@@ -492,10 +501,8 @@ export class PluginRegistry {
     logger.info({ pluginPath }, 'Loading plugin');
 
     // 尝试获取或加载 manifest
-    let manifest: LoadedPluginManifest | null = null;
-
     // 1. 检查是否已有缓存的 manifest（来自 scanAndLoadPlugins）
-    if (config.name && this.pluginManifests.has(config.name)) {
+    if (!manifest && config.name && this.pluginManifests.has(config.name)) {
       manifest = this.pluginManifests.get(config.name)!;
       logger.debug({ pluginName: config.name }, 'Using cached manifest');
     }
