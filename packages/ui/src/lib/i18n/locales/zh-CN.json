@@ -760,6 +760,29 @@
     "notFound": "插件未找到",
     "backToPlugins": "返回插件列表",
     "moreInfo": "更多信息",
-    "noDescription": "暂无描述。"
+    "noDescription": "暂无描述。",
+    "modelMappingCatalog": {
+      "title": "模型目录",
+      "description": "为“模型映射”插件手动获取并保存模型目录。手动刷新后编辑器优先使用已保存目录；首次未刷新前会回退到 Tokenlens 离线数据。",
+      "refreshAction": "获取模型列表",
+      "refreshSuccess": "模型目录已刷新",
+      "refreshFailed": "模型目录刷新失败",
+      "catalogSource": "数据来源",
+      "sourceStored": "在线数据",
+      "sourceStatic": "本地数据",
+      "modelCount": "模型数",
+      "providerCount": "提供商数",
+      "lastRefresh": "上次刷新时间",
+      "neverRefreshed": "从未刷新",
+      "staticHint": "当前还没有已保存目录，编辑器正在使用 Tokenlens 自带的离线模型数据。",
+      "storedHint": "编辑器当前正在使用最近一次手动刷新后保存的模型目录。",
+      "searchModels": "搜索模型...",
+      "allProviders": "所有提供商",
+      "showingModels": "显示 {count} / {total} 个模型",
+      "provider": "提供商",
+      "modelId": "模型 ID",
+      "modelName": "名称",
+      "noModelsFound": "没有匹配的模型"
+    }
   }
 }

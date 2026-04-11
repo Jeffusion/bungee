@@ -18,6 +18,8 @@
   export let value: ModelMapping[] = [];
   export let pluginName = 'model-mapping';
   export let catalogPlugin = 'model-mapping';
+  export let sourceCatalogProvider = '';
+  export let targetCatalogProvider = '';
 
   const dispatch = createEventDispatcher<{ change: ModelMapping[] }>();
 
@@ -27,6 +29,8 @@
   let rowProviderFilters: RowProviderFilter[] = [];
   let rowOptions: RowOptionSet[] = [];
   let loading = false;
+  let lastCatalogRequestKey = '';
+  let catalogRequestToken = 0;
 
   $: rows = Array.isArray(value)
     ? value.map((item) => ({
@@ -37,9 +41,22 @@
 
   $: i18nPrefix = `plugins.${(pluginName || 'model-mapping').trim()}.modelMapping`;
 
-  $: void loadCatalogOptions();
-
   $: providerOptions = buildProviderOptions(allOptions);
+  $: normalizedCatalogPlugin = (catalogPlugin || 'model-mapping').trim();
+  $: normalizedSourceCatalogProvider = sourceCatalogProvider.trim();
+  $: normalizedTargetCatalogProvider = targetCatalogProvider.trim();
+  $: showProviderFilters = true;
+  $: catalogRequestKey = JSON.stringify([
+    normalizedCatalogPlugin,
+    normalizedSourceCatalogProvider,
+    normalizedTargetCatalogProvider,
+  ]);
+  $: if (normalizedCatalogPlugin) {
+    void loadCatalogOptions(catalogRequestKey);
+  } else {
+    allOptions = [];
+    lastCatalogRequestKey = '';
+  }
 
   $: providerFilterOptions = [
     {
@@ -96,23 +113,52 @@
     rowProviderFilters = nextFilters;
   }
 
-  async function loadCatalogOptions(): Promise<void> {
-    const normalizedPlugin = (catalogPlugin || 'model-mapping').trim();
-    if (!normalizedPlugin) {
-      allOptions = [];
+  async function loadCatalogOptions(requestKey: string): Promise<void> {
+    if (!normalizedCatalogPlugin || requestKey === lastCatalogRequestKey) {
       return;
     }
+
+    lastCatalogRequestKey = requestKey;
+    const requestToken = ++catalogRequestToken;
 
     loading = true;
 
     try {
-      const response = await getCachedPluginModelCatalog(PluginsAPI.getPluginModels, normalizedPlugin);
-      const models = Array.isArray(response?.models) ? response.models : [];
-      allOptions = models;
+      const fixedProviders = Array.from(new Set([
+        normalizedSourceCatalogProvider,
+        normalizedTargetCatalogProvider,
+      ].filter((provider) => provider.length > 0)));
+
+      if (fixedProviders.length > 0) {
+        const responses = await Promise.all(
+          fixedProviders.map(async (provider) => {
+            const response = await getCachedPluginModelCatalog(PluginsAPI.getPluginModels, normalizedCatalogPlugin, provider);
+            const models = Array.isArray(response?.models) ? response.models : [];
+            return models.map((model) => ({
+              ...model,
+              provider: typeof model.provider === 'string' && model.provider.length > 0 ? model.provider : provider,
+            }));
+          })
+        );
+
+        if (requestToken === catalogRequestToken) {
+          allOptions = responses.flat();
+        }
+        return;
+      }
+
+      const response = await getCachedPluginModelCatalog(PluginsAPI.getPluginModels, normalizedCatalogPlugin);
+      if (requestToken === catalogRequestToken) {
+        allOptions = Array.isArray(response?.models) ? response.models : [];
+      }
     } catch (_error) {
-      allOptions = [];
+      if (requestToken === catalogRequestToken) {
+        lastCatalogRequestKey = '';
+      }
     } finally {
-      loading = false;
+      if (requestToken === catalogRequestToken) {
+        loading = false;
+      }
     }
   }
 
@@ -143,30 +189,38 @@
 
   {#each rows as row, index}
     <div class="space-y-2 rounded-lg border border-base-300 p-2">
-      {#if providerOptions.length > 0}
+      {#if showProviderFilters}
         <div class="grid grid-cols-[1fr_1fr_auto] gap-2 items-start">
           <div class="form-control w-full">
             <span class="label-text text-xs opacity-80 mb-1">{textOrFallback('sourceProviderFilter', 'Source provider filter')}</span>
-            <ComboInput
-              value={getRowProviderFilter(index, 'source')}
-              options={providerFilterOptions}
-              allowCustom={false}
-              placeholder={textOrFallback('allProviders', 'All providers')}
-              on:change={(event) => updateRowProviderFilter(index, 'source', String(event.detail ?? ''))}
-              on:select={(event) => updateRowProviderFilter(index, 'source', String(event.detail?.value ?? ''))}
-            />
+            {#if normalizedSourceCatalogProvider}
+              <div class="input input-bordered flex items-center bg-base-200/60 text-base-content/80">{normalizedSourceCatalogProvider}</div>
+            {:else}
+              <ComboInput
+                value={getRowProviderFilter(index, 'source')}
+                options={providerFilterOptions}
+                allowCustom={false}
+                placeholder={textOrFallback('allProviders', 'All providers')}
+                on:change={(event) => updateRowProviderFilter(index, 'source', String(event.detail ?? ''))}
+                on:select={(event) => updateRowProviderFilter(index, 'source', String(event.detail?.value ?? ''))}
+              />
+            {/if}
           </div>
 
           <div class="form-control w-full">
             <span class="label-text text-xs opacity-80 mb-1">{textOrFallback('targetProviderFilter', 'Target provider filter')}</span>
-            <ComboInput
-              value={getRowProviderFilter(index, 'target')}
-              options={providerFilterOptions}
-              allowCustom={false}
-              placeholder={textOrFallback('allProviders', 'All providers')}
-              on:change={(event) => updateRowProviderFilter(index, 'target', String(event.detail ?? ''))}
-              on:select={(event) => updateRowProviderFilter(index, 'target', String(event.detail?.value ?? ''))}
-            />
+            {#if normalizedTargetCatalogProvider}
+              <div class="input input-bordered flex items-center bg-base-200/60 text-base-content/80">{normalizedTargetCatalogProvider}</div>
+            {:else}
+              <ComboInput
+                value={getRowProviderFilter(index, 'target')}
+                options={providerFilterOptions}
+                allowCustom={false}
+                placeholder={textOrFallback('allProviders', 'All providers')}
+                on:change={(event) => updateRowProviderFilter(index, 'target', String(event.detail ?? ''))}
+                on:select={(event) => updateRowProviderFilter(index, 'target', String(event.detail?.value ?? ''))}
+              />
+            {/if}
           </div>
 
           <button class="btn btn-sm btn-ghost invisible pointer-events-none" type="button" aria-hidden="true">

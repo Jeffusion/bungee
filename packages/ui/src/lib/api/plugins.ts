@@ -71,7 +71,17 @@ export interface PluginSchema {
 export interface PluginModelCatalogResponse {
   provider: string;
   models: Array<{ value: string; label?: string; description?: string; provider?: string }>;
-  source?: 'fresh' | 'static';
+  source?: 'stored' | 'static';
+  fetchedAt?: number;
+}
+
+export interface ModelMappingCatalogStatus {
+  source: 'stored' | 'static';
+  fetchedAt: number | null;
+  modelCount: number;
+  providerCount: number;
+  models: Array<{ value: string; label: string; description: string; provider?: string }>;
+  providers: string[];
 }
 
 export const PluginsAPI = {
@@ -93,6 +103,9 @@ export const PluginsAPI = {
     const query = normalizedProvider ? `?provider=${encodeURIComponent(normalizedProvider)}` : '';
     return api.get<PluginModelCatalogResponse>(`/plugins/${encodeURIComponent(normalizedPluginName)}/models${query}`);
   },
+
+  getModelMappingCatalogStatus: () => api.get<ModelMappingCatalogStatus>('/plugins/model-mapping/catalog'),
+  refreshModelMappingCatalog: () => api.post<ModelMappingCatalogStatus>('/plugins/model-mapping/catalog/refresh', {}),
 
   enable: (name: string) => api.post(`/plugins/${name}/enable`, {}),
   disable: (name: string) => api.post(`/plugins/${name}/disable`, {}),

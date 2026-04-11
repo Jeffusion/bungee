@@ -6,7 +6,7 @@ import { LogsHandler } from './handlers/logs';
 import { RoutesHandler } from './handlers/routes';
 import { UpstreamControlHandler } from './handlers/upstreams';
 import { AuthHandler } from './handlers/auth';
-import { handleGetPlugins, handleGetPluginModels, handleTogglePlugin, handleGetPluginSandbox, handleGetPluginSchemas, handleGetPluginTranslations, handlePluginApiRequest } from './handlers/plugins';
+import { handleGetPlugins, handleGetPluginModels, handleTogglePlugin, handleGetPluginSandbox, handleGetPluginSchemas, handleGetPluginTranslations, handlePluginApiRequest, handleGetModelMappingCatalogStatus, handleRefreshModelMappingCatalog } from './handlers/plugins';
 import { loadConfig } from '../config';
 import { authenticateRequest } from '../auth';
 
@@ -160,6 +160,14 @@ export async function handleAPIRequest(req: Request, path: string): Promise<Resp
 
     if (path === '/api/plugin-translations' && method === 'GET') {
       return await handleGetPluginTranslations(req);
+    }
+
+    if (path === '/api/plugins/model-mapping/catalog' && method === 'GET') {
+      return await handleGetModelMappingCatalogStatus();
+    }
+
+    if (path === '/api/plugins/model-mapping/catalog/refresh' && method === 'POST') {
+      return await handleRefreshModelMappingCatalog();
     }
 
     const pluginModelsMatch = path.match(/^\/api\/plugins\/([^\/]+)\/models$/);

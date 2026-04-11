@@ -8,6 +8,7 @@ type ManifestData = {
   configSchema?: ManifestSchemaField[];
   contributes?: {
     api?: ManifestApiField[];
+    settings?: string;
   };
 };
 
@@ -19,7 +20,7 @@ async function loadManifest(): Promise<ManifestData> {
 }
 
 describe('model-mapping manifest contract', () => {
-  test('should expose standalone model mapping schema and model catalog api', async () => {
+  test('should expose standalone model mapping schema and management settings page', async () => {
     const manifest = await loadManifest();
     const fields = manifest.configSchema ?? [];
     const fieldNames = new Set(fields.map((field) => field.name).filter(Boolean));
@@ -32,7 +33,7 @@ describe('model-mapping manifest contract', () => {
     expect(modelMappingField?.type).toBe('model_mapping');
     expect(modelMappingField?.catalogPlugin).toBe('model-mapping');
 
-    const apiDeclarations = manifest.contributes?.api ?? [];
-    expect(apiDeclarations.some((item) => item.path === '/models' && item.handler === 'getModels')).toBe(true);
+    expect(manifest.contributes?.settings).toBe('/catalog');
+    expect((manifest.contributes?.api ?? []).length).toBe(0);
   });
 });

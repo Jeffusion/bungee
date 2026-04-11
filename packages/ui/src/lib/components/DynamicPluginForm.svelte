@@ -190,6 +190,16 @@
     }
     return pluginName || 'model-mapping';
   }
+
+  function resolveModelCatalogProvider(field: any, key: 'sourceCatalogProviderField' | 'targetCatalogProviderField'): string {
+    const providerField = field?.[key];
+    if (typeof providerField !== 'string' || providerField.length === 0) {
+      return '';
+    }
+
+    const providerValue = showIfContext[providerField];
+    return typeof providerValue === 'string' ? providerValue.trim() : '';
+  }
 </script>
 
 <div class="space-y-4">
@@ -307,6 +317,8 @@
             value={Array.isArray(formattedValues[field.name]) ? formattedValues[field.name] : []}
             pluginName={pluginName}
             catalogPlugin={resolveModelCatalogPlugin(field)}
+            sourceCatalogProvider={resolveModelCatalogProvider(field, 'sourceCatalogProviderField')}
+            targetCatalogProvider={resolveModelCatalogProvider(field, 'targetCatalogProviderField')}
             on:change={(event) => {
               handleChange(field.name, event.detail);
               handleBlur(field);

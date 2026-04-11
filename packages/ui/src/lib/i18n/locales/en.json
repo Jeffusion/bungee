@@ -723,6 +723,29 @@
     "notFound": "Plugin Not Found",
     "backToPlugins": "Back to Plugins",
     "moreInfo": "More info",
-    "noDescription": "No description provided."
+    "noDescription": "No description provided.",
+    "modelMappingCatalog": {
+      "title": "Model Catalog",
+      "description": "Refresh and persist the model catalog for the Model Mapping plugin. The editor uses stored data after a manual refresh, and falls back to Tokenlens offline data before the first refresh.",
+      "refreshAction": "Fetch model list",
+      "refreshSuccess": "Model catalog refreshed successfully",
+      "refreshFailed": "Failed to refresh model catalog",
+      "catalogSource": "Data source",
+      "sourceStored": "Online data",
+      "sourceStatic": "Local data",
+      "modelCount": "Models",
+      "providerCount": "Providers",
+      "lastRefresh": "Last refresh",
+      "neverRefreshed": "Never refreshed",
+      "staticHint": "No stored catalog is available yet. The editor is currently using Tokenlens offline data.",
+      "storedHint": "The editor is currently using the catalog saved by the latest manual refresh.",
+      "searchModels": "Search models...",
+      "allProviders": "All Providers",
+      "showingModels": "Showing {count} of {total} models",
+      "provider": "Provider",
+      "modelId": "Model ID",
+      "modelName": "Name",
+      "noModelsFound": "No models match your search"
+    }
   }
 }
