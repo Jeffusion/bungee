@@ -1,9 +1,11 @@
-import type { Plugin } from '../../../packages/core/src/plugin.types';
+import type { Plugin, PluginServiceContext } from '../../../packages/core/src/plugin.types';
 import { definePlugin } from '../../../packages/core/src/plugin.types';
 import type { MutableRequestContext, PluginHooks } from '../../../packages/core/src/hooks';
 import { fetchModels, listModels } from 'tokenlens';
 import type { ModelCatalog, ProviderInfo, ProviderModel } from 'tokenlens';
 import { logger } from '../../../packages/core/src/logger';
+import { SQLitePluginStorage } from '../../../packages/core/src/plugin-storage';
+import { getPluginRuntimeOrchestrator } from '../../../packages/core/src/worker/state/plugin-manager';
 
 interface ModelMappingOptions {
   modelMappings?: Array<{
@@ -12,14 +14,25 @@ interface ModelMappingOptions {
   }> | Record<string, string>;
 }
 
-type ModelOption = { value: string; label: string; description: string; provider?: string };
-type ModelCatalogSource = 'fresh' | 'static';
-type ModelCatalogResponse = { provider: string; models: ModelOption[]; source: ModelCatalogSource };
-type ModelCatalogCacheEntry = ModelCatalogResponse & { expiresAt: number };
+export type ModelOption = { value: string; label: string; description: string; provider?: string };
+export type ModelCatalogSource = 'stored' | 'static';
+export type ModelCatalogResponse = { provider: string; models: ModelOption[]; source: ModelCatalogSource; fetchedAt?: number };
+export type ModelCatalogStatus = {
+  source: ModelCatalogSource;
+  fetchedAt: number | null;
+  modelCount: number;
+  providerCount: number;
+  models: ModelOption[];
+  providers: string[];
+};
 
-const MODEL_CATALOG_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-const MODEL_CATALOG_SHARED_CACHE_TTL_SECONDS = 10 * 60;
+type StoredModelCatalog = {
+  fetchedAt: number;
+  models: ModelOption[];
+};
 
+const MODEL_MAPPING_PLUGIN_NAME = 'model-mapping';
+const MODEL_CATALOG_STORAGE_KEY = 'catalog:v1:data';
 const STATIC_MODEL_CATALOG = listModels({});
 const KNOWN_PROVIDER_PREFIXES = new Set(
   STATIC_MODEL_CATALOG
@@ -33,106 +46,96 @@ const KNOWN_PROVIDER_PREFIXES = new Set(
     .filter((provider) => provider.length > 0)
 );
 
-let modelCatalogCache: ModelCatalogCacheEntry | null = null;
-let modelCatalogInflight: Promise<ModelCatalogResponse> | null = null;
-
 export function resetModelMappingCatalogCache(): void {
-  modelCatalogCache = null;
-  modelCatalogInflight = null;
 }
 
-class ModelMappingPluginImpl implements Plugin {
-    static readonly name = 'model-mapping';
-    static readonly version = '1.0.0';
+function getModelMappingStorage(): SQLitePluginStorage | null {
+  const db = getPluginRuntimeOrchestrator()?.getDatabase();
+  if (!db) {
+    return null;
+  }
 
-    static async getEditorModels(req: Request): Promise<Response> {
-      return await new ModelMappingPluginImpl({}).getModels(req);
-    }
+  return new SQLitePluginStorage(db, MODEL_MAPPING_PLUGIN_NAME);
+}
 
-    static getEditorModelsCacheTTLSeconds(): number {
-      return MODEL_CATALOG_SHARED_CACHE_TTL_SECONDS;
-    }
+async function loadStoredModelCatalog(storage: SQLitePluginStorage | null = getModelMappingStorage()): Promise<StoredModelCatalog | null> {
+  if (!storage) {
+    return null;
+  }
 
-    options: ModelMappingOptions;
-    modelMappingMap = new Map<string, string>();
+  const stored = await storage.get<StoredModelCatalog>(MODEL_CATALOG_STORAGE_KEY);
+  if (!stored || !Array.isArray(stored.models) || typeof stored.fetchedAt !== 'number') {
+    return null;
+  }
 
-    constructor(options?: ModelMappingOptions) {
-      this.options = options ?? {};
-      this.modelMappingMap = this.buildModelMappingMap(this.options.modelMappings);
-    }
+  return stored;
+}
 
-    register(hooks: PluginHooks): void {
-      hooks.onBeforeRequest.tapPromise(
-        { name: 'model-mapping', stage: -10 },
-        async (ctx) => {
-          this.applyModelMapping(ctx);
-          return ctx;
-        }
-      );
-    }
+async function saveStoredModelCatalog(models: ModelOption[], storage: SQLitePluginStorage | null = getModelMappingStorage()): Promise<StoredModelCatalog> {
+  if (!storage) {
+    throw new Error('Plugin storage is not initialized');
+  }
 
-    async reset(): Promise<void> {
-    }
+  const payload: StoredModelCatalog = {
+    fetchedAt: Date.now(),
+    models,
+  };
+  await storage.set(MODEL_CATALOG_STORAGE_KEY, payload);
+  return payload;
+}
 
-    async getModels(_req: Request): Promise<Response> {
-      const payload = await this.resolveCachedModelCatalog();
-      return new Response(JSON.stringify(payload), {
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
+function summarizeCatalog(source: ModelCatalogSource, models: ModelOption[], fetchedAt: number | null): ModelCatalogStatus {
+  const providers = [...new Set(models.map((model) => model.provider).filter((provider): provider is string => typeof provider === 'string' && provider.length > 0))].sort();
+  return {
+    source,
+    fetchedAt,
+    modelCount: models.length,
+    providerCount: providers.length,
+    models,
+    providers,
+  };
+}
 
-    private async resolveCachedModelCatalog(): Promise<ModelCatalogResponse> {
-      const cached = modelCatalogCache;
-      if (cached && cached.expiresAt > Date.now()) {
-        return {
-          provider: cached.provider,
-          models: cached.models,
-          source: cached.source
-        };
-      }
+export async function getModelMappingCatalogStatus(storage: SQLitePluginStorage | null = getModelMappingStorage()): Promise<ModelCatalogStatus> {
+  const stored = await loadStoredModelCatalog(storage);
+  if (stored) {
+    return summarizeCatalog('stored', stored.models, stored.fetchedAt);
+  }
 
-      if (modelCatalogInflight) {
-        return await modelCatalogInflight;
-      }
+  const fallbackModels = buildStaticAllModels();
+  return summarizeCatalog('static', fallbackModels, null);
+}
 
-      modelCatalogInflight = (async () => {
-        try {
-          const payload: ModelCatalogResponse = {
-            provider: '',
-            models: await this.getFreshAllModels(),
-            source: 'fresh'
-          };
-          modelCatalogCache = {
-            ...payload,
-            expiresAt: Date.now() + MODEL_CATALOG_CACHE_TTL_MS
-          };
-          return payload;
-        } catch (error: unknown) {
-          logger.warn({ error }, 'Failed to fetch online tokenlens catalog, using static fallback');
-          const payload: ModelCatalogResponse = {
-            provider: '',
-            models: this.getStaticAllModels(),
-            source: 'static'
-          };
-          modelCatalogCache = {
-            ...payload,
-            expiresAt: Date.now() + MODEL_CATALOG_CACHE_TTL_MS
-          };
-          return payload;
-        } finally {
-          modelCatalogInflight = null;
-        }
-      })();
+export async function refreshStoredModelMappingCatalog(storage: SQLitePluginStorage | null = getModelMappingStorage()): Promise<ModelCatalogStatus> {
+  const models = await buildFreshAllModels();
+  const stored = await saveStoredModelCatalog(models, storage);
+  return summarizeCatalog('stored', stored.models, stored.fetchedAt);
+}
 
-      return await modelCatalogInflight;
-    }
+export async function getModelCatalogResponse(storage: SQLitePluginStorage | null = getModelMappingStorage()): Promise<ModelCatalogResponse> {
+  const stored = await loadStoredModelCatalog(storage);
+  if (stored) {
+    return {
+      provider: '',
+      models: stored.models,
+      source: 'stored',
+      fetchedAt: stored.fetchedAt,
+    };
+  }
 
-    private async getFreshAllModels(): Promise<ModelOption[]> {
-      const catalog = await fetchModels();
-      return this.flattenFreshCatalog(catalog);
-    }
+  return {
+    provider: '',
+    models: buildStaticAllModels(),
+    source: 'static',
+  };
+}
 
-    private flattenFreshCatalog(catalog: ModelCatalog): ModelOption[] {
+async function buildFreshAllModels(): Promise<ModelOption[]> {
+  const catalog = await fetchModels();
+  return flattenFreshCatalog(catalog);
+}
+
+function flattenFreshCatalog(catalog: ModelCatalog): ModelOption[] {
       const rows: Array<{ dedupeKey: string; value: string; label: string; description: string; provider: string; sortKey: string }> = [];
 
       for (const [provider, providerInfo] of Object.entries(catalog)) {
@@ -143,29 +146,29 @@ class ModelMappingPluginImpl implements Plugin {
 
         KNOWN_PROVIDER_PREFIXES.add(normalizedProvider);
 
-        const modelEntries = this.getProviderModelEntries(providerInfo);
+        const modelEntries = getProviderModelEntries(providerInfo);
         for (const [modelKey, model] of modelEntries) {
-          const modelId = this.resolveFreshModelId(model, modelKey);
+          const modelId = resolveFreshModelId(model, modelKey);
           if (!modelId) {
             continue;
           }
 
           const canonicalModelId = modelId.includes(':') ? modelId : `${normalizedProvider}:${modelId}`;
-          const canonicalParsed = this.parseCanonicalModelId(canonicalModelId);
+          const canonicalParsed = parseCanonicalModelId(canonicalModelId);
           const canonicalProvider = canonicalParsed?.provider || normalizedProvider;
           const bareModelId = canonicalParsed?.model || modelId;
-          const selectableModelId = this.toSelectableModelId(canonicalModelId, normalizedProvider);
+          const selectableModelId = toSelectableModelId(canonicalModelId, normalizedProvider);
 
           KNOWN_PROVIDER_PREFIXES.add(canonicalProvider);
 
           const context = typeof model.limit?.context === 'number' ? model.limit.context : undefined;
           const descriptionParts = [canonicalProvider, context ? `ctx ${context}` : ''].filter(Boolean);
-          const sortKey = this.resolveFreshModelSortKey(model);
+          const sortKey = resolveFreshModelSortKey(model);
 
           rows.push({
             dedupeKey: canonicalModelId,
             value: selectableModelId,
-            label: this.resolveFreshModelLabel(model, bareModelId),
+            label: resolveFreshModelLabel(model, bareModelId),
             description: descriptionParts.join(' · '),
             provider: canonicalProvider,
             sortKey
@@ -194,9 +197,9 @@ class ModelMappingPluginImpl implements Plugin {
       }
 
       return Array.from(dedup.values());
-    }
+}
 
-    private getProviderModelEntries(providerInfo: ProviderInfo | undefined): Array<[string, ProviderModel]> {
+function getProviderModelEntries(providerInfo: ProviderInfo | undefined): Array<[string, ProviderModel]> {
       if (!providerInfo || typeof providerInfo !== 'object') {
         return [];
       }
@@ -210,9 +213,9 @@ class ModelMappingPluginImpl implements Plugin {
         const model = entry[1];
         return Boolean(model && typeof model === 'object');
       });
-    }
+}
 
-    private resolveFreshModelId(model: ProviderModel, modelKey: string): string {
+function resolveFreshModelId(model: ProviderModel, modelKey: string): string {
       const fromModelId = typeof model.id === 'string' ? model.id.trim() : '';
       if (fromModelId) {
         return fromModelId;
@@ -220,14 +223,14 @@ class ModelMappingPluginImpl implements Plugin {
 
       const fromModelKey = modelKey.trim();
       return fromModelKey;
-    }
+}
 
-    private resolveFreshModelLabel(model: ProviderModel, fallback: string): string {
+function resolveFreshModelLabel(model: ProviderModel, fallback: string): string {
       const name = typeof model.name === 'string' ? model.name.trim() : '';
       return name || fallback;
-    }
+}
 
-    private resolveFreshModelSortKey(model: ProviderModel): string {
+function resolveFreshModelSortKey(model: ProviderModel): string {
       const lastUpdated = typeof model.last_updated === 'string' ? model.last_updated : '';
       if (lastUpdated) {
         return lastUpdated;
@@ -235,9 +238,45 @@ class ModelMappingPluginImpl implements Plugin {
 
       const releaseDate = typeof model.release_date === 'string' ? model.release_date : '';
       return releaseDate;
-    }
+}
 
-    private getStaticAllModels(): ModelOption[] {
+function toSelectableModelId(modelId: string, providerHint: string): string {
+      const trimmedModelId = modelId.trim();
+      const trimmedProviderHint = providerHint.trim();
+
+      if (trimmedProviderHint && trimmedModelId.startsWith(`${trimmedProviderHint}:`) && trimmedModelId.length > trimmedProviderHint.length + 1) {
+        return trimmedModelId.slice(trimmedProviderHint.length + 1);
+      }
+
+      const canonical = parseCanonicalModelId(trimmedModelId);
+      if (!canonical) {
+        return trimmedModelId;
+      }
+
+      if (KNOWN_PROVIDER_PREFIXES.has(canonical.provider)) {
+        return canonical.model;
+      }
+
+      return trimmedModelId;
+}
+
+function parseCanonicalModelId(model: string): { provider: string; model: string } | null {
+      const trimmed = model.trim();
+      const separatorIndex = trimmed.indexOf(':');
+      if (separatorIndex <= 0 || separatorIndex >= trimmed.length - 1) {
+        return null;
+      }
+
+      const provider = trimmed.slice(0, separatorIndex).trim();
+      const modelId = trimmed.slice(separatorIndex + 1).trim();
+      if (!provider || !modelId) {
+        return null;
+      }
+
+      return { provider, model: modelId };
+}
+
+function buildStaticAllModels(): ModelOption[] {
       const dedup = new Map<string, ModelOption>();
       for (const model of STATIC_MODEL_CATALOG) {
         const canonicalModelId = model.id.trim();
@@ -256,7 +295,7 @@ class ModelMappingPluginImpl implements Plugin {
 
         const contextMax = model.context?.combinedMax ?? model.context?.inputMax;
         const descriptionParts = [provider, contextMax ? `ctx ${contextMax}` : ''].filter(Boolean);
-        const selectableModelId = this.toSelectableModelId(canonicalModelId, provider);
+        const selectableModelId = toSelectableModelId(canonicalModelId, provider);
         dedup.set(canonicalModelId, {
           value: selectableModelId,
           label: model.displayName || bareModelId,
@@ -266,6 +305,44 @@ class ModelMappingPluginImpl implements Plugin {
       }
 
       return Array.from(dedup.values());
+}
+
+class ModelMappingPluginImpl implements Plugin {
+    static readonly name = MODEL_MAPPING_PLUGIN_NAME;
+    static readonly version = '1.0.0';
+
+    static async getEditorModels(_req: Request, context: PluginServiceContext): Promise<Response> {
+      const storage = context.db ? new SQLitePluginStorage(context.db, MODEL_MAPPING_PLUGIN_NAME) : null;
+      return new Response(JSON.stringify(await getModelCatalogResponse(storage)), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    options: ModelMappingOptions;
+    modelMappingMap = new Map<string, string>();
+
+    constructor(options?: ModelMappingOptions) {
+      this.options = options ?? {};
+      this.modelMappingMap = this.buildModelMappingMap(this.options.modelMappings);
+    }
+
+    register(hooks: PluginHooks): void {
+      hooks.onBeforeRequest.tapPromise(
+        { name: 'model-mapping', stage: -10 },
+        async (ctx) => {
+          this.applyModelMapping(ctx);
+          return ctx;
+        }
+      );
+    }
+
+    async reset(): Promise<void> {
+    }
+
+    async getModels(_req: Request): Promise<Response> {
+      return new Response(JSON.stringify(await getModelCatalogResponse()), {
+        headers: { 'Content-Type': 'application/json' }
+      });
     }
 
     private buildModelMappingMap(input: ModelMappingOptions['modelMappings']): Map<string, string> {

@@ -3,6 +3,7 @@
   import { location, replace } from 'svelte-spa-router';
   import { _ } from '../lib/i18n';
   import { PluginsAPI, type Plugin } from '../lib/api/plugins';
+  import ModelMappingCatalogManager from '../lib/components/ModelMappingCatalogManager.svelte';
   import PluginHost from '../lib/components/PluginHost.svelte';
   import { toast } from '../lib/stores/toast';
   import { getPluginText } from '../lib/utils/plugin-i18n';
@@ -103,32 +104,13 @@
       </div>
     </div>
 
-    <!-- Tabs (Management Context) -->
-    <div role="tablist" class="tabs tabs-boxed mb-6 bg-base-100 border border-base-200 p-1 gap-1">
-      {#if plugin.metadata?.contributes?.settings || plugin.metadata?.ui?.settings}
-        {@const settingsPath = plugin.metadata?.contributes?.settings || plugin.metadata?.ui?.settings}
-        <a
-           role="tab"
-           class="tab transition-all duration-200"
-           class:tab-active={activeTabPath === settingsPath}
-           href={`/__ui/#/plugins/${plugin.name}${settingsPath}`}
-        >
-           <span class="material-icons text-sm mr-2">settings</span>
-           {$_('plugins.settings')}
-        </a>
-      {/if}
-
-      <!-- Placeholder for future management tabs like 'Logs' or 'Permissions' -->
-      <button role="tab" class="tab transition-all duration-200" disabled>
-         {$_('plugins.moreInfo')}
-      </button>
-    </div>
-
     <!-- Content -->
     <div class="bg-base-100 rounded-box shadow-xl border border-base-200 min-h-[500px] overflow-hidden">
-       {#if activeTabPath}
-         <PluginHost pluginName={plugin.name} path={activeTabPath} />
-       {:else}
+       {#if plugin.name === 'model-mapping' && activeTabPath === '/catalog'}
+         <ModelMappingCatalogManager />
+       {:else if activeTabPath}
+          <PluginHost pluginName={plugin.name} path={activeTabPath} />
+        {:else}
          <div class="flex justify-center items-center h-64 text-gray-400">
            Select a tab to view content
          </div>
