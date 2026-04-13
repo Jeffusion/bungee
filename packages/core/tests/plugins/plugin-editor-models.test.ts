@@ -1,9 +1,44 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeAll, describe, expect, mock, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { handleAPIRequest } from '../../src/api/router';
 import { cleanupPluginRegistry, initializePluginRuntime } from '../../src/worker/state/plugin-manager';
 import { getScopedPluginRegistry } from '../../src/scoped-plugin-registry';
 import { resetModelMappingCatalogCache } from '../../../../plugins/model-mapping/server/index';
+
+// CI copies config.example.json (which has auth.enabled: true) to config.json.
+// loadConfig() reads from disk inside handleAPIRequest, so we point CONFIG_PATH
+// at a minimal config without auth so the API router doesn't return 401.
+let configDir: string;
+let originalConfigPath: string | undefined;
+
+beforeAll(() => {
+  originalConfigPath = process.env.CONFIG_PATH;
+  configDir = mkdtempSync(join(tmpdir(), 'bungee-plugin-editor-models-'));
+  writeFileSync(join(configDir, 'config.json'), JSON.stringify({ routes: [] }));
+  process.env.CONFIG_PATH = join(configDir, 'config.json');
+});
+
+afterEach(async () => {
+  globalThis.fetch = originalFetch;
+  resetModelMappingCatalogCache();
+  await cleanupPluginRegistry();
+  db?.close();
+  db = null;
+});
+
+process.on('exit', () => {
+  if (configDir) {
+    try { rmSync(configDir, { recursive: true, force: true }); } catch {}
+  }
+  if (originalConfigPath === undefined) {
+    delete process.env.CONFIG_PATH;
+  } else {
+    process.env.CONFIG_PATH = originalConfigPath;
+  }
+});
 
 const originalFetch = globalThis.fetch;
 let db: Database | null = null;
@@ -20,14 +55,6 @@ function createPluginStorageTable(database: Database): void {
     );
   `);
 }
-
-afterEach(async () => {
-  globalThis.fetch = originalFetch;
-  resetModelMappingCatalogCache();
-  await cleanupPluginRegistry();
-  db?.close();
-  db = null;
-});
 
 describe('plugin editor model catalog API', () => {
   test('serves offline model catalog for upstream-scoped model-mapping without requiring a global runtime instance', async () => {
