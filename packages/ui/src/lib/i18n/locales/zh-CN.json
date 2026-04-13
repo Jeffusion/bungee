@@ -25,7 +25,8 @@
     "expandAll": "全部展开",
     "collapseAll": "全部折叠",
     "yes": "是",
-    "no": "否"
+    "no": "否",
+    "select": "请选择"
   },
   "nav": {
     "dashboard": "仪表板",

@@ -25,7 +25,8 @@
     "expandAll": "Expand all",
     "collapseAll": "Collapse all",
     "yes": "Yes",
-    "no": "No"
+    "no": "No",
+    "select": "Select"
   },
   "nav": {
     "dashboard": "Dashboard",
