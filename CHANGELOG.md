@@ -1,3 +1,38 @@
+# [3.3.0](https://github.com/jeffusion/bungee/compare/v3.2.1...v3.3.0) (2026-04-13)
+
+
+### Bug Fixes
+
+* **ai-transformer:** stop injecting stream_options during anthropic conversion ([8c0df80](https://github.com/jeffusion/bungee/commit/8c0df80b6660cacd5d2cab1b3df44358730d2c87))
+* **build:** rewrite built plugin manifest entrypoints ([73796c6](https://github.com/jeffusion/bungee/commit/73796c629cd7054629e797c2c5bf2a811272bee9))
+* **ci:** add build:llms step before running tests ([8feb1b7](https://github.com/jeffusion/bungee/commit/8feb1b77b99e2422ffa4a21b9d6fc8fa79ab79f7))
+* **ci:** add build:llms step to release workflow ([57c85d7](https://github.com/jeffusion/bungee/commit/57c85d7a971f61abddafd4de635adb0caa459882))
+* **core:** limit dev plugin discovery to project plugins ([aa44903](https://github.com/jeffusion/bungee/commit/aa449032e7a56b0c6d386827f5f7a888516ca9ab))
+* **core:** load named plugins from cached manifests ([58ac632](https://github.com/jeffusion/bungee/commit/58ac6320b26ad6be7752a76c203efee8f3cc57a0))
+* **core:** share editor model catalogs across workers ([b8a4347](https://github.com/jeffusion/bungee/commit/b8a43477846e1dde7e5ba2e646f523475a392c5e))
+* **i18n:** add missing common.select translation key ([12d3970](https://github.com/jeffusion/bungee/commit/12d3970ff04af3495b802bb37e9defd64671f431))
+* **test:** isolate plugin-editor-models from CI auth config ([01e3e9f](https://github.com/jeffusion/bungee/commit/01e3e9fe34fefffd73e957b70ae05944c3e60383))
+* **token-stats:** keep streaming token tracking side-effect free ([34e18fb](https://github.com/jeffusion/bungee/commit/34e18fbc39207d5b6e03ecbca523bac43a4b2b1a))
+* **ui:** localize dynamic plugin form copy ([f80b067](https://github.com/jeffusion/bungee/commit/f80b067242f27d2816e636f0954fbfa61e890f61))
+* **ui:** restore plugin metadata translations ([447f94b](https://github.com/jeffusion/bungee/commit/447f94bb22a7b0500837dae2d20ab55ceb2da799))
+* **ui:** translate plugin detail and editor metadata ([50e021a](https://github.com/jeffusion/bungee/commit/50e021a007f25a6ceeff0b6e6114bd31dcadfde9))
+
+
+### Features
+
+* **core:** add multi-worker plugin convergence ([9a0dc36](https://github.com/jeffusion/bungee/commit/9a0dc362ffc21253653292cbd3239d07dff0f8fa))
+* **core:** add plugin artifact contract validation ([e10ce2d](https://github.com/jeffusion/bungee/commit/e10ce2d98b8ed89f7b708bd950c6ec25de067fcc))
+* **core:** add plugin runtime orchestrator ([71ea3de](https://github.com/jeffusion/bungee/commit/71ea3de7417d44d202febf4c490293da58089cec))
+* **core:** add plugin runtime state machine ([47e3295](https://github.com/jeffusion/bungee/commit/47e3295c7266160ded9edec16ccd7df022093ed1))
+* **core:** enforce scoped plugin rollback semantics ([0591b4e](https://github.com/jeffusion/bungee/commit/0591b4ef9764dcd7324ba462e5abb9aa6df55cf5))
+* **core:** finalize plugin hooks after stream completion ([a1566f6](https://github.com/jeffusion/bungee/commit/a1566f6e5c1dba000347f91c3c62bf35643f7edf))
+* **core:** gate sandbox plugin assets by runtime state ([1f6078a](https://github.com/jeffusion/bungee/commit/1f6078a36a283229cccb16567a6518805b2c3719))
+* **core:** reconcile plugin API control plane ([e52295d](https://github.com/jeffusion/bungee/commit/e52295d7b2bde04406aafc1f90cfc9aaa7141005))
+* **llms:** add canonical token accounting primitives ([38310bd](https://github.com/jeffusion/bungee/commit/38310bd394e5f39ee92a0936c3a06636bf0f65b3))
+* **model-mapping:** manual catalog management with searchable UI ([6dc2ffb](https://github.com/jeffusion/bungee/commit/6dc2ffbc504935ebe95dddd92cd51720a877ed06))
+* **plugins:** migrate built-in plugin manifests to vnext ([6959fbf](https://github.com/jeffusion/bungee/commit/6959fbfdabaee30c5450d005a5f51dbd6a54b4e4))
+* **token-stats:** add v2 aggregate stats pipeline ([ef799c8](https://github.com/jeffusion/bungee/commit/ef799c8cb0b825386f10506572a4f34ab43e6a42))
+
 ## [3.2.1](https://github.com/jeffusion/bungee/compare/v3.2.0...v3.2.1) (2026-04-08)
 
 
