@@ -2,4 +2,525 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Custom Global Styles are discouraged. Use Tailwind Utilities or Components where possible. */
+/* =============================================================
+ *  Bungee Industrial Console — global primitives (v2)
+ *  Orange accent. Tab bar style headers. Mono-key numerics.
+ * ============================================================= */
+
+@layer base {
+  :root {
+    color-scheme: dark;
+    --nx-bg: #0a0b0e;
+    --nx-panel: #15171c;
+    --nx-panel-2: #1a1d24;
+    --nx-edge: #2a2f3a;
+    --nx-edge-strong: #373d4a;
+    --nx-text: #e5e7eb;
+    --nx-text-dim: #a1a1aa;
+    --nx-text-mute: #71717a;
+    --nx-accent: #f97316;
+    --nx-accent-soft: rgba(249, 115, 22, 0.18);
+    --nx-warn: #f59e0b;
+    --nx-danger: #ef4444;
+    --nx-ok: #10b981;
+  }
+
+  html {
+    font-size: 14px;
+  }
+
+  body {
+    background-color: var(--nx-bg);
+    color: var(--nx-text);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11', 'ss01';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Faint dot grid across the entire app, slightly warmer */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background-image:
+      radial-gradient(circle, rgba(148, 163, 184, 0.045) 1px, transparent 1px);
+    background-size: 28px 28px;
+    pointer-events: none;
+  }
+
+  ::selection {
+    background: rgba(249, 115, 22, 0.25);
+    color: #fff7ed;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #2a2f3a;
+    border-radius: 0;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #4a5160;
+  }
+}
+
+@layer components {
+  /* ---------------------------------------------------------------
+   * Surfaces / Panels
+   * --------------------------------------------------------------- */
+  .nx-panel {
+    @apply relative border border-carbon-600 bg-carbon-800;
+  }
+  .nx-panel-raised {
+    @apply nx-panel shadow-industrial;
+  }
+  .nx-panel-sunken {
+    @apply border border-carbon-600 bg-carbon-950;
+  }
+
+  /* Panel head — orange short bar + uppercase title + right-side tag.
+   * Used by the PanelCard component. */
+  .nx-panel-head {
+    @apply flex items-center justify-between border-b border-carbon-600 px-4 py-3;
+  }
+  .nx-panel-head-title {
+    @apply flex items-center gap-2.5 text-[12px] font-bold uppercase tracking-command text-zinc-100;
+  }
+  /* The signature orange short stripe */
+  .nx-stripe {
+    @apply inline-block h-3 w-1 bg-nexus-500;
+  }
+  /* Variants — use !important to defeat any class-ordering issue with
+   * the base `.nx-stripe` rule when both classes are applied together. */
+  .nx-stripe-amber   { @apply !bg-amber-500; }
+  .nx-stripe-red     { @apply !bg-red-500; }
+  .nx-stripe-emerald { @apply !bg-emerald-500; }
+  .nx-stripe-zinc    { @apply !bg-zinc-500; }
+
+  .nx-panel-head-tag {
+    @apply font-mono text-[9px] uppercase tracking-chiseled text-zinc-500;
+  }
+  .nx-panel-body {
+    @apply p-4;
+  }
+
+  /* ---------------------------------------------------------------
+   * Typography Utilities
+   * --------------------------------------------------------------- */
+  .nx-label {
+    @apply text-[10px] font-mono uppercase tracking-chiseled text-zinc-500;
+  }
+  .nx-label-sm {
+    @apply text-[9px] font-mono uppercase tracking-chiseled text-zinc-500;
+  }
+  /* Display-style metric (used by KpiCard) — bigger, bolder, slightly extended */
+  .nx-display {
+    font-family: 'Orbitron', 'DM Mono', monospace;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1;
+  }
+  .nx-metric {
+    @apply nx-display text-3xl text-zinc-50;
+  }
+  .nx-metric-lg {
+    @apply nx-display text-4xl text-zinc-50;
+  }
+  .nx-mono {
+    @apply font-mono tabular-nums;
+  }
+  .nx-caps {
+    @apply uppercase tracking-command;
+  }
+
+  /* ---------------------------------------------------------------
+   * Status Badges & Dots
+   * --------------------------------------------------------------- */
+  .nx-badge {
+    @apply inline-flex items-center gap-1.5 border px-2 py-0.5 font-mono;
+    @apply text-[10px] uppercase tracking-chiseled;
+  }
+  .nx-badge-active {
+    @apply nx-badge border-emerald-500/60 bg-emerald-500/10 text-emerald-300;
+  }
+  .nx-badge-standby {
+    @apply nx-badge border-amber-500/60 bg-amber-500/5 text-amber-300;
+  }
+  .nx-badge-online {
+    @apply nx-badge border-nexus-500/60 bg-nexus-500/10 text-nexus-300;
+  }
+  .nx-badge-fault {
+    @apply nx-badge border-red-500/60 bg-red-500/10 text-red-300;
+  }
+  .nx-badge-muted {
+    @apply nx-badge border-carbon-500 bg-carbon-900 text-zinc-400;
+  }
+  .nx-badge-info {
+    @apply nx-badge border-sky-500/60 bg-sky-500/10 text-sky-300;
+  }
+
+  .nx-pill-active {
+    @apply inline-flex items-center gap-1.5 bg-emerald-500 px-2.5 py-1 text-[10px] font-mono;
+    @apply font-bold uppercase tracking-chiseled text-black;
+  }
+  .nx-pill-standby {
+    @apply inline-flex items-center gap-1.5 border border-amber-500 px-2.5 py-1 text-[10px] font-mono;
+    @apply font-bold uppercase tracking-chiseled text-amber-300;
+  }
+  .nx-pill-accent {
+    @apply inline-flex items-center gap-1.5 bg-nexus-500 px-2.5 py-1 text-[10px] font-mono;
+    @apply font-bold uppercase tracking-chiseled text-black;
+  }
+
+  .nx-dot {
+    @apply inline-block h-2 w-2 rounded-full;
+  }
+  .nx-dot-ok {
+    @apply nx-dot bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.6)];
+  }
+  .nx-dot-warn {
+    @apply nx-dot bg-amber-400 shadow-[0_0_8px_rgba(245,158,11,0.6)];
+  }
+  .nx-dot-danger {
+    @apply nx-dot bg-red-400 shadow-[0_0_8px_rgba(239,68,68,0.7)] animate-pulse;
+  }
+  .nx-dot-idle {
+    @apply nx-dot bg-zinc-600;
+  }
+  .nx-dot-accent {
+    @apply nx-dot bg-nexus-500 shadow-glow-orange;
+  }
+
+  /* ---------------------------------------------------------------
+   * Buttons — hardware-key feel
+   * --------------------------------------------------------------- */
+  .nx-btn {
+    @apply inline-flex items-center justify-center gap-2 border-2 px-3.5 py-1.5;
+    @apply text-[11px] font-bold uppercase tracking-command;
+    @apply transition-all duration-150 ease-out cursor-pointer;
+    @apply disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none;
+  }
+  .nx-btn-primary {
+    @apply nx-btn border-nexus-400 bg-nexus-500 text-black;
+    @apply hover:bg-nexus-400 hover:shadow-glow-orange;
+    @apply active:translate-y-px active:shadow-inner;
+  }
+  .nx-btn-ghost {
+    @apply nx-btn border-carbon-500 bg-transparent text-zinc-300;
+    @apply hover:border-nexus-500 hover:text-nexus-300;
+    @apply active:translate-y-px;
+  }
+  .nx-btn-outline {
+    @apply nx-btn border-zinc-300 bg-transparent text-zinc-100;
+    @apply hover:border-nexus-500 hover:text-nexus-300;
+  }
+  .nx-btn-danger {
+    @apply nx-btn border-red-500 bg-red-500/10 text-red-300;
+    @apply hover:bg-red-500/20 hover:text-red-200;
+    @apply active:translate-y-px active:shadow-inner;
+  }
+  .nx-btn-warn {
+    @apply nx-btn border-amber-500 bg-amber-500/10 text-amber-300;
+    @apply hover:bg-amber-500/20 hover:text-amber-200;
+  }
+  .nx-btn-sm {
+    @apply px-2.5 py-1 text-[10px];
+  }
+
+  /* ---------------------------------------------------------------
+   * Industrial Toggle — A flat, hard-edged on/off switch with explicit
+   * ON / OFF text labels. Replaces daisyUI's round `.toggle` whose
+   * disabled state is nearly invisible against the carbon surfaces.
+   *
+   * Apply by wrapping a hidden checkbox + the visual track:
+   *   <label class="nx-toggle">
+   *     <input type="checkbox" bind:checked />
+   *     <span class="nx-toggle-track">
+   *       <span class="nx-toggle-knob"></span>
+   *     </span>
+   *   </label>
+   *
+   * Or use the helper `<IndustrialToggle>` component (lib/components/industrial).
+   * --------------------------------------------------------------- */
+  .nx-toggle {
+    @apply inline-flex items-center cursor-pointer select-none;
+  }
+  .nx-toggle > input[type='checkbox'] {
+    @apply nx-sr-only;
+  }
+  .nx-toggle-track {
+    position: relative;
+    width: 52px;
+    height: 24px;
+    background-color: #15171c; /* carbon-900 */
+    border: 1px solid #2a2f3a; /* carbon-600 */
+    transition: background-color 0.15s ease-out, border-color 0.15s ease-out;
+    overflow: hidden;
+  }
+  /* OFF / ON pseudo labels live inside the track on either side */
+  .nx-toggle-track::before,
+  .nx-toggle-track::after {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    font-family: 'DM Mono', 'JetBrains Mono', monospace;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    pointer-events: none;
+  }
+  .nx-toggle-track::before {
+    content: 'OFF';
+    right: 6px;
+    color: #71717a; /* zinc-500 */
+  }
+  .nx-toggle-track::after {
+    content: 'ON';
+    left: 6px;
+    color: #0a0b0e; /* visible only when checked */
+    opacity: 0;
+  }
+  .nx-toggle-knob {
+    position: absolute;
+    top: 1px;
+    left: 1px;
+    width: 20px;
+    height: 20px;
+    background-color: #373d4a; /* carbon-500 */
+    transition: transform 0.15s ease-out, background-color 0.15s ease-out;
+  }
+  /* Checked state — background flips to orange, knob slides right, labels swap visibility */
+  .nx-toggle > input[type='checkbox']:checked + .nx-toggle-track {
+    background-color: #f97316; /* nexus-500 */
+    border-color: #fb923c; /* nexus-400 */
+  }
+  .nx-toggle > input[type='checkbox']:checked + .nx-toggle-track .nx-toggle-knob {
+    transform: translateX(28px);
+    background-color: #0a0b0e; /* near-black knob on orange track */
+  }
+  .nx-toggle > input[type='checkbox']:checked + .nx-toggle-track::before {
+    opacity: 0;
+  }
+  .nx-toggle > input[type='checkbox']:checked + .nx-toggle-track::after {
+    opacity: 1;
+  }
+  /* Hover & focus accent */
+  .nx-toggle:hover .nx-toggle-track {
+    border-color: #f97316;
+  }
+  .nx-toggle > input[type='checkbox']:focus-visible + .nx-toggle-track {
+    outline: 2px solid #f97316;
+    outline-offset: 2px;
+  }
+  /* Disabled state */
+  .nx-toggle > input[type='checkbox']:disabled + .nx-toggle-track {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  /* ---------------------------------------------------------------
+   * Pager — segmented pagination buttons used by Logs.svelte and
+   * any table that needs prev/next controls. Same hard-edged look as
+   * SegmentedControl.
+   * --------------------------------------------------------------- */
+  .nx-pager-btn {
+    @apply px-3 py-1 font-mono text-[11px] uppercase tracking-command;
+    @apply text-zinc-300 bg-transparent border-r border-carbon-500;
+    @apply transition-colors duration-150;
+  }
+  .nx-pager-btn:last-child {
+    @apply border-r-0;
+  }
+  .nx-pager-btn:hover:not(:disabled):not(.pointer-events-none) {
+    @apply text-nexus-300 bg-carbon-700;
+  }
+  .nx-pager-btn:disabled {
+    @apply text-zinc-600 cursor-not-allowed;
+  }
+
+  /* ---------------------------------------------------------------
+   * Feature tag — compact uppercase chip used to mark *capabilities*
+   * (auth, cors, rateLimit, plugins, etc.). Distinct from a status
+   * badge because it's just a label, not a state. Clickable variant
+   * brightens to orange on hover; non-clickable stays muted.
+   * --------------------------------------------------------------- */
+  .nx-feature-tag {
+    @apply inline-flex items-center border border-carbon-600 bg-carbon-900/60 text-zinc-400;
+    @apply px-2 py-0.5 font-mono text-[9px] uppercase tracking-command;
+    @apply transition-colors duration-150;
+  }
+  .nx-feature-tag-interactive {
+    @apply nx-feature-tag cursor-pointer;
+    @apply hover:border-nexus-500 hover:text-nexus-300 hover:bg-nexus-500/10;
+    @apply focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-nexus-500;
+  }
+
+  /* ---------------------------------------------------------------
+   * Hazard Stripes — for risk cards, danger borders
+   * --------------------------------------------------------------- */
+  .nx-stripes-orange {
+    background-image: repeating-linear-gradient(
+      -45deg,
+      #15171c 0 8px,
+      #f97316 8px 16px
+    );
+  }
+  .nx-stripes-amber {
+    background-image: repeating-linear-gradient(
+      -45deg,
+      #15171c 0 8px,
+      #f59e0b 8px 16px
+    );
+  }
+  .nx-stripes-red {
+    background-image: repeating-linear-gradient(
+      -45deg,
+      #15171c 0 8px,
+      #ef4444 8px 16px
+    );
+  }
+
+  /* ---------------------------------------------------------------
+   * Grid backgrounds
+   * --------------------------------------------------------------- */
+  .nx-grid-bg {
+    background-image:
+      linear-gradient(rgba(148, 163, 184, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(148, 163, 184, 0.05) 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+  .nx-grid-bg-dense {
+    background-image:
+      linear-gradient(rgba(148, 163, 184, 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(148, 163, 184, 0.06) 1px, transparent 1px);
+    background-size: 12px 12px;
+  }
+
+  /* ---------------------------------------------------------------
+   * Command Row (list items)
+   * --------------------------------------------------------------- */
+  .nx-row {
+    @apply flex items-center justify-between border-b border-carbon-600 px-4 py-2.5;
+    @apply transition-colors duration-150 hover:bg-carbon-700;
+  }
+  .nx-row:last-child {
+    @apply border-b-0;
+  }
+  .nx-row-active {
+    @apply border-l-[3px] border-l-nexus-500 bg-carbon-700;
+  }
+
+  /* ---------------------------------------------------------------
+   * Form inputs
+   * --------------------------------------------------------------- */
+  .nx-input {
+    @apply h-9 w-full border border-carbon-500 bg-carbon-900 px-3 font-mono text-sm text-zinc-200;
+    @apply placeholder:text-zinc-600;
+    @apply focus:border-nexus-500 focus:outline-none focus:ring-1 focus:ring-nexus-500/40;
+    @apply transition-colors duration-100;
+  }
+
+  /* ---------------------------------------------------------------
+   * Marker — the orange triangle/caret active-tab indicator
+   * --------------------------------------------------------------- */
+  .nx-caret-left {
+    width: 0; height: 0;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    border-left: 5px solid var(--nx-accent);
+  }
+
+  /* ---------------------------------------------------------------
+   * Corner brackets — the "device chassis" L-shaped indicators in the
+   * 4 corners of a panel. Default state is a muted orange (60%), and on
+   * hover (when wrapped in `.nx-bracketed`) the brackets brighten and
+   * expand slightly, and the panel border shifts to orange. This gives
+   * panels the feel of a piece of machined hardware that "responds" when
+   * the operator focuses on it.
+   * --------------------------------------------------------------- */
+  .nx-corner {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border: 0 solid var(--nx-accent);
+    opacity: 0.6;
+    pointer-events: none;
+    z-index: 2;
+    transition:
+      width 0.18s ease-out,
+      height 0.18s ease-out,
+      opacity 0.18s ease-out,
+      border-color 0.18s ease-out;
+  }
+  .nx-corner-tl {
+    top: -2px; left: -2px;
+    border-top-width: 2px;
+    border-left-width: 2px;
+  }
+  .nx-corner-tr {
+    top: -2px; right: -2px;
+    border-top-width: 2px;
+    border-right-width: 2px;
+  }
+  .nx-corner-bl {
+    bottom: -2px; left: -2px;
+    border-bottom-width: 2px;
+    border-left-width: 2px;
+  }
+  .nx-corner-br {
+    bottom: -2px; right: -2px;
+    border-bottom-width: 2px;
+    border-right-width: 2px;
+  }
+
+  /* Hover state — applied automatically when the panel wrapper carries
+   * `.nx-bracketed`. The brackets brighten + grow, the outer border
+   * shifts to orange. Click affordance for interactive cards. */
+  .nx-bracketed {
+    transition: border-color 0.18s ease-out, box-shadow 0.18s ease-out;
+  }
+  .nx-bracketed:hover {
+    border-color: rgba(249, 115, 22, 0.55);
+  }
+  .nx-bracketed:hover .nx-corner {
+    opacity: 1;
+    width: 14px;
+    height: 14px;
+  }
+  /* When the panel is focus-visible (keyboard nav), give the brackets the
+   * same active treatment so keyboard users see the focus state too. */
+  .nx-bracketed:focus-visible {
+    outline: none;
+    border-color: rgba(249, 115, 22, 0.7);
+  }
+  .nx-bracketed:focus-visible .nx-corner {
+    opacity: 1;
+    width: 14px;
+    height: 14px;
+  }
+}
+
+@layer utilities {
+  .nx-ch-6 { width: 6ch; }
+  .nx-ch-8 { width: 8ch; }
+  .nx-ch-12 { width: 12ch; }
+
+  .nx-sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+}
