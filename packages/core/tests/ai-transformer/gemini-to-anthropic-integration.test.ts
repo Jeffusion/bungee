@@ -13,7 +13,7 @@ const mockConfig: AppConfig = {
   routes: [
     {
       path: '/v1/gemini-to-anthropic',
-      pathRewrite: { '^/v1/gemini-to-anthropic': '/v1' },
+      path_rewrite: { '^/v1/gemini-to-anthropic': '/v1' },
       plugins: [
         {
           name: 'ai-transformer',
@@ -23,7 +23,7 @@ const mockConfig: AppConfig = {
           }
         }
       ],
-      upstreams: [{ target: 'http://mock-anthropic.com', weight: 100, priority: 1 }]
+      endpoints: [{ target: 'http://mock-anthropic.com', weight: 100, priority: 1 }]
     }
   ]
 };
@@ -109,7 +109,7 @@ describe('Gemini to Anthropic - Integration Tests', () => {
     setMockEnv();
     mockedFetch.mockClear();
     initializeRuntimeState(mockConfig);
-    await initializePluginRegistryForTests(mockConfig);
+    await initializePluginRegistryForTests(mockConfig, process.cwd());
   });
 
   afterEach(async () => {

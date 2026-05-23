@@ -14,7 +14,7 @@ const mockConfig: AppConfig = {
   routes: [
     {
       path: '/v1/openai-to-gemini',
-      pathRewrite: { '^/v1/openai-to-gemini': '/v1' },
+      path_rewrite: { '^/v1/openai-to-gemini': '/v1' },
       plugins: [
         {
           name: 'ai-transformer',
@@ -24,7 +24,7 @@ const mockConfig: AppConfig = {
           }
         }
       ],
-      upstreams: [{ target: 'http://mock-gemini.com', weight: 100, priority: 1 }]
+      endpoints: [{ target: 'http://mock-gemini.com', weight: 100, priority: 1 }]
     }
   ]
 };
@@ -107,7 +107,7 @@ describe('OpenAI to Gemini - Integration Tests', () => {
     setMockEnv();
     mockedFetch.mockClear();
     initializeRuntimeState(mockConfig);
-    await initializePluginRegistryForTests(mockConfig);
+    await initializePluginRegistryForTests(mockConfig, process.cwd());
   });
 
   afterEach(async () => {

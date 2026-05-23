@@ -13,8 +13,9 @@ function createTempPluginRoot(): string {
   const pluginDir = join(root, 'plugins', TEST_PLUGIN_NAME, 'server');
   mkdirSync(pluginDir, { recursive: true });
 
-  const pluginTypesPath = JSON.stringify(join(process.cwd(), 'packages/core/src/plugin.types'));
-  const hooksPath = JSON.stringify(join(process.cwd(), 'packages/core/src/hooks'));
+  const coreSrcPath = join(import.meta.dir, '..', 'src');
+  const pluginTypesPath = JSON.stringify(join(coreSrcPath, 'plugin.types'));
+  const hooksPath = JSON.stringify(join(coreSrcPath, 'hooks'));
 
   writeFileSync(
     join(pluginDir, 'index.ts'),
@@ -61,7 +62,7 @@ const createSameTargetConfig = (target: string): AppConfig => ({
   routes: [
     {
       path: '/same-target',
-      upstreams: [
+      endpoints: [
         {
           target,
           priority: 1,
@@ -89,7 +90,6 @@ const createSameTargetConfig = (target: string): AppConfig => ({
           ]
         }
       ],
-      failover: { enabled: false, retryOn: [] },
     },
   ],
 });
@@ -98,7 +98,7 @@ const createDisabledConfig = (target: string): AppConfig => ({
   routes: [
     {
       path: '/same-target-disabled',
-      upstreams: [
+      endpoints: [
         {
           target,
           priority: 1,
@@ -115,7 +115,7 @@ const createDisabledConfig = (target: string): AppConfig => ({
         {
           target,
           priority: 2,
-          disabled: true,
+          is_disabled: true,
           plugins: [
             {
               name: TEST_PLUGIN_NAME,
@@ -127,7 +127,6 @@ const createDisabledConfig = (target: string): AppConfig => ({
           ]
         }
       ],
-      failover: { enabled: false, retryOn: [] },
     },
   ],
 });
@@ -142,6 +141,17 @@ const runScenario = async (
 
   try {
     const config = configBuilder('http://mock-upstream-a.com');
+    const pluginPath = join(pluginRoot, 'plugins', TEST_PLUGIN_NAME, 'server', 'index.ts');
+    for (const route of config.routes) {
+      for (const endpoint of route.endpoints ?? []) {
+        for (const plugin of endpoint.plugins ?? []) {
+          if (typeof plugin !== 'string' && plugin.name === TEST_PLUGIN_NAME) {
+            plugin.path = pluginPath;
+          }
+        }
+      }
+    }
+
     const { failed } = await registry.initializeFromConfig(config);
     expect(failed).toBe(0);
 

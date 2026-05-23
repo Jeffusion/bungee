@@ -1,35 +1,34 @@
 import { describe, it, expect } from 'bun:test';
 import { FailoverCoordinator } from '../../src/worker/upstream/failover-coordinator';
-import type { RuntimeUpstream } from '../../src/worker/types';
-import type { RouteConfig } from '@jeffusion/bungee-types';
+import { runtimeState } from '../../src/worker/state/runtime-state';
+import type { EffectiveRouteConfig, RuntimeUpstream } from '../../src/worker/types';
 import type { ExpressionContext } from '../../src/expression-engine';
 
 function createMockUpstream(overrides: Partial<RuntimeUpstream> = {}): RuntimeUpstream {
-  const upstreamId = overrides.upstreamId ?? (typeof overrides.target === 'string' ? overrides.target : 'upstream-default');
+  const upstream_id = overrides.upstream_id ?? (typeof overrides.target === 'string' ? overrides.target : 'upstream-default');
 
   return {
     target: 'http://example.com',
     weight: 100,
     priority: 1,
-    disabled: false,
+    is_disabled: false,
     status: 'HEALTHY',
-    consecutiveFailures: 0,
-    consecutiveSuccesses: 0,
-    recoveryAttemptCount: 0,
+    consecutive_failures: 0,
+    consecutive_successes: 0,
+    recovery_attempt_count: 0,
     ...overrides,
-    upstreamId
+    upstream_id
   };
 }
 
-function createMockRoute(overrides: Partial<RouteConfig> = {}): RouteConfig {
+function createMockRoute(overrides: Partial<EffectiveRouteConfig> = {}): EffectiveRouteConfig {
   return {
-    configVersion: 2,
     path: '/test',
-    upstreams: [],
+    endpoints: [],
     failover: {
       enabled: true,
-      retryOn: [502, 503, 504],
-      slowStart: {
+      retry_on: [502, 503, 504],
+      slow_start: {
         enabled: false
       }
     },
@@ -38,12 +37,12 @@ function createMockRoute(overrides: Partial<RouteConfig> = {}): RouteConfig {
 }
 
 describe('FailoverCoordinator', () => {
-  it('should initialize with upstreams', () => {
-    const upstreams = [
+  it('should initialize with endpoints', () => {
+    const endpoints = [
       createMockUpstream({ target: 'http://s1.com', status: 'HEALTHY' }),
       createMockUpstream({ target: 'http://s2.com', status: 'HEALTHY' })
     ];
-    const coordinator = new FailoverCoordinator(upstreams, createMockRoute(), 5000);
+    const coordinator = new FailoverCoordinator(endpoints, createMockRoute(), 5000);
 
     const stats = coordinator.getStats();
     expect(stats.total).toBe(2);
@@ -51,37 +50,37 @@ describe('FailoverCoordinator', () => {
     expect(stats.skipped).toBe(0);
   });
 
-  it('should skip disabled upstreams', () => {
-    const upstreams = [
-      createMockUpstream({ target: 'http://s1.com', disabled: false }),
-      createMockUpstream({ target: 'http://s2.com', disabled: true }),
+  it('should skip is_disabled endpoints', () => {
+    const endpoints = [
+      createMockUpstream({ target: 'http://s1.com', is_disabled: false }),
+      createMockUpstream({ target: 'http://s2.com', is_disabled: true }),
     ];
-    const coordinator = new FailoverCoordinator(upstreams, createMockRoute(), 5000);
+    const coordinator = new FailoverCoordinator(endpoints, createMockRoute(), 5000);
     expect(coordinator.getStats().total).toBe(1);
   });
 
   it('should fallback to lower priority when higher priority is exhausted', () => {
-    const upstreams = [
+    const endpoints = [
       createMockUpstream({ target: 'http://p1.com', priority: 1, status: 'HEALTHY' }),
       createMockUpstream({ target: 'http://p2.com', priority: 2, status: 'HEALTHY' })
     ];
-    const coordinator = new FailoverCoordinator(upstreams, createMockRoute(), 5000);
+    const coordinator = new FailoverCoordinator(endpoints, createMockRoute(), 5000);
 
     expect(coordinator.selectNext()!.upstream.target).toBe('http://p1.com');
     expect(coordinator.selectNext()!.upstream.target).toBe('http://p2.com');
   });
 
-  it('should skip unhealthy upstreams within recovery interval', () => {
-    const upstreams = [
+  it('should skip unhealthy endpoints within recovery interval', () => {
+    const endpoints = [
       createMockUpstream({
         target: 'http://unhealthy.com',
         status: 'UNHEALTHY',
-        lastFailureTime: Date.now() - 1000,
+        last_failure_time: Date.now() - 1000,
         priority: 1
       }),
       createMockUpstream({ target: 'http://healthy.com', status: 'HEALTHY', priority: 2 })
     ];
-    const coordinator = new FailoverCoordinator(upstreams, createMockRoute(), 5000);
+    const coordinator = new FailoverCoordinator(endpoints, createMockRoute(), 5000);
 
     const first = coordinator.selectNext();
     expect(first!.upstream.target).toBe('http://healthy.com');
@@ -89,31 +88,34 @@ describe('FailoverCoordinator', () => {
   });
 
   it('should attempt unhealthy upstream after recovery interval', () => {
-    const upstreams = [
+    const endpoints = [
       createMockUpstream({
         target: 'http://recovering.com',
         status: 'UNHEALTHY',
-        lastFailureTime: Date.now() - 6000,
+        last_failure_time: Date.now() - 6000,
         priority: 1
       })
     ];
-    const coordinator = new FailoverCoordinator(upstreams, createMockRoute(), 5000);
+    const coordinator = new FailoverCoordinator(endpoints, createMockRoute(), 5000);
     const result = coordinator.selectNext();
     expect(result).not.toBeNull();
     expect(result!.shouldTransitionToHalfOpen).toBe(true);
   });
 
   it('should keep sticky selection deterministic for same context', () => {
-    const upstreams = [
-      createMockUpstream({ target: 'http://sticky-a.com', priority: 1, status: 'HEALTHY', upstreamId: 'sticky-a' }),
-      createMockUpstream({ target: 'http://sticky-b.com', priority: 1, status: 'HEALTHY', upstreamId: 'sticky-b' })
+    const endpoints = [
+      createMockUpstream({ target: 'http://sticky-a.com', priority: 1, status: 'HEALTHY', upstream_id: 'sticky-a' }),
+      createMockUpstream({ target: 'http://sticky-b.com', priority: 1, status: 'HEALTHY', upstream_id: 'sticky-b' })
     ];
 
-    const route = createMockRoute({
-      stickySession: {
+    const route = createMockRoute({ service: 'sticky-service' });
+    runtimeState.clear();
+    runtimeState.set('sticky-service', {
+      upstreams: endpoints,
+      sticky_session: {
         enabled: true,
-        keyExpression: "{{ headers['x-session-id'] }}"
-      }
+        key_expression: "{{ headers['x-session-id'] }}"
+      },
     });
 
     const context: ExpressionContext = {
@@ -124,8 +126,8 @@ describe('FailoverCoordinator', () => {
       env: {}
     };
 
-    const first = new FailoverCoordinator(upstreams, route, 5000, context).selectNext();
-    const second = new FailoverCoordinator(upstreams, route, 5000, context).selectNext();
+    const first = new FailoverCoordinator(endpoints, route, 5000, context).selectNext();
+    const second = new FailoverCoordinator(endpoints, route, 5000, context).selectNext();
 
     expect(first).not.toBeNull();
     expect(second).not.toBeNull();

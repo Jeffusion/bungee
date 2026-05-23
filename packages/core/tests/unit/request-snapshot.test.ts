@@ -18,7 +18,7 @@ describe('createRequestSnapshot', () => {
     expect(snapshot.headers['user-agent']).toBe('test');
     expect(snapshot.headers['accept']).toBe('application/json');
     expect(snapshot.body).toBeNull();
-    expect(snapshot.isJsonBody).toBe(false);
+    expect(snapshot.is_json_body).toBe(false);
   });
 
   it('should capture JSON body correctly', async () => {
@@ -39,9 +39,9 @@ describe('createRequestSnapshot', () => {
     const snapshot = await createRequestSnapshot(req);
 
     expect(snapshot.method).toBe('POST');
-    expect(snapshot.isJsonBody).toBe(true);
+    expect(snapshot.is_json_body).toBe(true);
     expect(snapshot.body).toEqual(testData);
-    expect(snapshot.contentType).toBe('application/json');
+    expect(snapshot.content_type).toBe('application/json');
 
     // Verify deep clone
     expect(snapshot.body).not.toBe(testData);
@@ -63,9 +63,9 @@ describe('createRequestSnapshot', () => {
     const snapshot = await createRequestSnapshot(req);
 
     expect(snapshot.method).toBe('POST');
-    expect(snapshot.isJsonBody).toBe(false);
+    expect(snapshot.is_json_body).toBe(false);
     expect(snapshot.body).toBeInstanceOf(ArrayBuffer);
-    expect(snapshot.contentType).toBe('application/octet-stream');
+    expect(snapshot.content_type).toBe('application/octet-stream');
 
     // Verify ArrayBuffer content
     const view = new Uint8Array(snapshot.body);
@@ -112,7 +112,7 @@ describe('createRequestSnapshot', () => {
 
     const snapshot = await createRequestSnapshot(req);
 
-    expect(snapshot.isJsonBody).toBe(true);
+    expect(snapshot.is_json_body).toBe(true);
     expect(snapshot.body).toEqual(testData);
   });
 
@@ -144,7 +144,7 @@ describe('createRequestSnapshot', () => {
 
     const snapshot = await createRequestSnapshot(req);
 
-    expect(snapshot.isJsonBody).toBe(true);
+    expect(snapshot.is_json_body).toBe(true);
     expect(snapshot.body).toEqual({});
   });
 
@@ -160,7 +160,7 @@ describe('createRequestSnapshot', () => {
 
     const snapshot = await createRequestSnapshot(req);
 
-    expect(snapshot.isJsonBody).toBe(false);
+    expect(snapshot.is_json_body).toBe(false);
     expect(snapshot.body).toBeInstanceOf(ArrayBuffer);
     expect(snapshot.body.byteLength).toBeGreaterThan(0);
   });

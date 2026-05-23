@@ -66,7 +66,7 @@ function createBaseConfig(): AppConfig {
     routes: [
       {
         path: '/api',
-        upstreams: [
+        endpoints: [
           { id: 'primary', target: 'http://primary.test' },
         ],
       },
@@ -283,17 +283,23 @@ describe('plugin onFinally lifecycle', () => {
     });
 
     const config: AppConfig = {
-      routes: [
+      services: [
         {
-          path: '/api',
+          name: 'api-service',
           failover: {
             enabled: true,
-            retryOn: [503],
+            retry_on: [503],
           },
-          upstreams: [
+          endpoints: [
             { id: 'primary', target: 'http://primary.test' },
             { id: 'secondary', target: 'http://secondary.test' },
           ],
+        },
+      ],
+      routes: [
+        {
+          path: '/api',
+          service: 'api-service',
         },
       ],
     };
@@ -332,15 +338,21 @@ describe('plugin onFinally lifecycle', () => {
     });
 
     const config: AppConfig = {
-      routes: [
+      services: [
         {
-          path: '/api',
+          name: 'api-service',
           failover: {
             enabled: true,
           },
-          upstreams: [
+          endpoints: [
             { id: 'primary', target: 'http://primary.test' },
           ],
+        },
+      ],
+      routes: [
+        {
+          path: '/api',
+          service: 'api-service',
         },
       ],
     };

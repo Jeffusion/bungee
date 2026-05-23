@@ -15,7 +15,7 @@ const mockConfig: AppConfig = {
   routes: [
     {
       path: '/v1/openai-to-anthropic',
-      pathRewrite: { '^/v1/openai-to-anthropic': '/v1' },
+      path_rewrite: { '^/v1/openai-to-anthropic': '/v1' },
       plugins: [
         {
           name: 'ai-transformer',
@@ -25,7 +25,7 @@ const mockConfig: AppConfig = {
           }
         }
       ],
-      upstreams: [{ target: 'http://mock-anthropic.com', weight: 100, priority: 1 }]
+      endpoints: [{ target: 'http://mock-anthropic.com', weight: 100, priority: 1 }]
     }
   ]
 };
@@ -146,7 +146,7 @@ describe('OpenAI to Anthropic - Enhanced Integration Tests', () => {
     setMockEnv();
     mockedFetch.mockClear();
     initializeRuntimeState(mockConfig);
-    await initializePluginRegistryForTests(mockConfig);
+    await initializePluginRegistryForTests(mockConfig, process.cwd());
   });
 
   afterEach(async () => {
@@ -205,7 +205,7 @@ describe('OpenAI to Anthropic - Enhanced Integration Tests', () => {
       routes: [
         {
           path: '/v1/openai-to-anthropic-mapped',
-          pathRewrite: { '^/v1/openai-to-anthropic-mapped': '/v1' },
+          path_rewrite: { '^/v1/openai-to-anthropic-mapped': '/v1' },
           plugins: [
             {
               name: 'model-mapping',
@@ -226,14 +226,14 @@ describe('OpenAI to Anthropic - Enhanced Integration Tests', () => {
               }
             }
           ],
-          upstreams: [{ target: 'http://mock-anthropic.com', weight: 100, priority: 1 }]
+          endpoints: [{ target: 'http://mock-anthropic.com', weight: 100, priority: 1 }]
         }
       ]
     };
 
     await cleanupPluginRegistry();
     initializeRuntimeState(mappedConfig);
-    await initializePluginRegistryForTests(mappedConfig);
+    await initializePluginRegistryForTests(mappedConfig, process.cwd());
 
     const openaiRequest = {
       model: 'gpt-4o-mini',

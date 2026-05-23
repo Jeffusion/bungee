@@ -16,9 +16,9 @@ describe('Request Snapshot', () => {
 
       expect(snapshot.method).toBe('POST');
       expect(snapshot.url).toBe('https://example.com/api');
-      expect(snapshot.isJsonBody).toBe(true);
+      expect(snapshot.is_json_body).toBe(true);
       expect(snapshot.body).toEqual(body);
-      expect(snapshot.isBodyCloned).toBe(false); // 延迟克隆：首次不克隆
+      expect(snapshot.is_body_cloned).toBe(false); // 延迟克隆：首次不克隆
     });
 
     test('应该正确创建非 JSON body 快照（ArrayBuffer）', async () => {
@@ -32,9 +32,9 @@ describe('Request Snapshot', () => {
       const snapshot = await createRequestSnapshot(req);
 
       expect(snapshot.method).toBe('POST');
-      expect(snapshot.isJsonBody).toBe(false);
+      expect(snapshot.is_json_body).toBe(false);
       expect(snapshot.body).toBeInstanceOf(ArrayBuffer);
-      expect(snapshot.isBodyCloned).toBe(false);
+      expect(snapshot.is_body_cloned).toBe(false);
     });
 
     test('应该正确捕获请求头', async () => {
@@ -73,7 +73,7 @@ describe('Request Snapshot', () => {
       const snapshot = await createRequestSnapshot(req);
 
       expect(snapshot.body).toBeNull();
-      expect(snapshot.isBodyCloned).toBe(false);
+      expect(snapshot.is_body_cloned).toBe(false);
     });
   });
 
@@ -85,15 +85,15 @@ describe('Request Snapshot', () => {
         url: 'https://example.com',
         headers: {},
         body: originalBody,
-        contentType: 'application/json',
-        isJsonBody: true,
-        isBodyCloned: false
+        content_type: 'application/json',
+        is_json_body: true,
+        is_body_cloned: false
       };
 
       // 执行克隆
       ensureSnapshotBodyCloned(snapshot);
 
-      expect(snapshot.isBodyCloned).toBe(true);
+      expect(snapshot.is_body_cloned).toBe(true);
       expect(snapshot.body).toEqual(originalBody);
       // 验证是深度克隆（修改原对象不影响快照）
       originalBody.nested.value = 999;
@@ -107,9 +107,9 @@ describe('Request Snapshot', () => {
         url: 'https://example.com',
         headers: {},
         body,
-        contentType: 'application/json',
-        isJsonBody: true,
-        isBodyCloned: true // 已标记为克隆
+        content_type: 'application/json',
+        is_json_body: true,
+        is_body_cloned: true // 已标记为克隆
       };
 
       // 保存原始引用
@@ -127,9 +127,9 @@ describe('Request Snapshot', () => {
         url: 'https://example.com',
         headers: {},
         body: new ArrayBuffer(10),
-        contentType: 'application/octet-stream',
-        isJsonBody: false,
-        isBodyCloned: false
+        content_type: 'application/octet-stream',
+        is_json_body: false,
+        is_body_cloned: false
       };
 
       const originalRef = snapshot.body;
@@ -137,7 +137,7 @@ describe('Request Snapshot', () => {
       ensureSnapshotBodyCloned(snapshot);
 
       expect(snapshot.body).toBe(originalRef); // ArrayBuffer 不需要克隆
-      expect(snapshot.isBodyCloned).toBe(false); // 保持原状态
+      expect(snapshot.is_body_cloned).toBe(false); // 保持原状态
     });
 
     test('应该跳过空 body', () => {
@@ -146,15 +146,15 @@ describe('Request Snapshot', () => {
         url: 'https://example.com',
         headers: {},
         body: null,
-        contentType: '',
-        isJsonBody: true,
-        isBodyCloned: false
+        content_type: '',
+        is_json_body: true,
+        is_body_cloned: false
       };
 
       ensureSnapshotBodyCloned(snapshot);
 
       expect(snapshot.body).toBeNull();
-      expect(snapshot.isBodyCloned).toBe(false);
+      expect(snapshot.is_body_cloned).toBe(false);
     });
 
     test('应该正确处理复杂嵌套对象的深度克隆', () => {
@@ -181,14 +181,14 @@ describe('Request Snapshot', () => {
         url: 'https://example.com',
         headers: {},
         body: complexBody,
-        contentType: 'application/json',
-        isJsonBody: true,
-        isBodyCloned: false
+        content_type: 'application/json',
+        is_json_body: true,
+        is_body_cloned: false
       };
 
       ensureSnapshotBodyCloned(snapshot);
 
-      expect(snapshot.isBodyCloned).toBe(true);
+      expect(snapshot.is_body_cloned).toBe(true);
 
       // 修改原对象的各层嵌套
       complexBody.messages[0].content = 'MODIFIED';
@@ -213,7 +213,7 @@ describe('Request Snapshot', () => {
       const snapshot = await createRequestSnapshot(req);
 
       // 首次请求直接使用，不需要克隆
-      expect(snapshot.isBodyCloned).toBe(false);
+      expect(snapshot.is_body_cloned).toBe(false);
       expect(snapshot.body.model).toBe('gpt-4');
 
       // 模拟请求成功，不调用 ensureSnapshotBodyCloned
@@ -230,11 +230,11 @@ describe('Request Snapshot', () => {
       const snapshot = await createRequestSnapshot(req);
 
       // 模拟首次请求失败
-      expect(snapshot.isBodyCloned).toBe(false);
+      expect(snapshot.is_body_cloned).toBe(false);
 
       // 模拟 failover 重试前调用
       ensureSnapshotBodyCloned(snapshot);
-      expect(snapshot.isBodyCloned).toBe(true);
+      expect(snapshot.is_body_cloned).toBe(true);
 
       // 第二次、第三次重试不会重复克隆
       const bodyRef = snapshot.body;

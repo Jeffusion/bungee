@@ -83,7 +83,7 @@ describe('plugin editor model catalog API', () => {
       plugins: [],
       routes: [{
         path: '/chat',
-        upstreams: [{
+        endpoints: [{
           id: 'u1',
           target: 'http://mock-openai.com',
           plugins: [{ name: 'model-mapping', enabled: true }]
@@ -135,7 +135,7 @@ describe('plugin editor model catalog API', () => {
       plugins: [],
       routes: [{
         path: '/chat',
-        upstreams: [{
+        endpoints: [{
           id: 'u1',
           target: 'http://mock-openai.com',
           plugins: [{ name: 'model-mapping', enabled: true }]

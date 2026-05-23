@@ -242,9 +242,9 @@ function createConfig(plugins: PluginConfig[]): AppConfig {
     routes: [
       {
         path: '/v1/openai-compat',
-        pathRewrite: { '^/v1/openai-compat': '/v1' },
+        path_rewrite: { '^/v1/openai-compat': '/v1' },
         plugins,
-        upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }]
+        endpoints: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }]
       }
     ]
   };
@@ -255,9 +255,9 @@ function createShortPathConfig(plugins: PluginConfig[]): AppConfig {
     routes: [
       {
         path: '/openai-compat-short',
-        pathRewrite: { '^/openai-compat-short': '' },
+        path_rewrite: { '^/openai-compat-short': '' },
         plugins,
-        upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }]
+        endpoints: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }]
       }
     ]
   };
@@ -290,7 +290,7 @@ async function readForwardedBody(options: RequestInit): Promise<Record<string, u
 async function reinitialize(config: AppConfig): Promise<void> {
   await cleanupPluginRegistry();
   initializeRuntimeState(config);
-  await initializePluginRegistryForTests(config);
+  await initializePluginRegistryForTests(config, process.cwd());
   mockedFetch.mockClear();
 }
 

@@ -5,23 +5,11 @@ import type { AppConfig } from '@jeffusion/bungee-types';
 import { handleRequest, initializeRuntimeState, initializePluginRegistryForTests, cleanupPluginRegistry } from '../src/worker';
 
 const mockConfig: AppConfig = {
-  configVersion: 2,
-  routes: [
+  config_version: 4,
+  services: [
     {
-      path: '/api',
-      // Route-level rules
-      headers: {
-        add: { 'x-route-header': 'route', 'x-shared-header': 'route' },
-        replace: { 'x-replace-header': 'route-replaced' },
-        remove: ['x-remove-route'],
-      },
-      body: {
-        add: { route_field: 'route', shared_field: 'route' },
-        replace: { replace_field: 'route-replaced' },
-        remove: ['remove_route'],
-        default: { route_default: 'default' },
-      },
-      upstreams: [
+      name: 'api-service',
+      endpoints: [
         {
           target: 'http://mock-target.com',
           weight: 100,
@@ -39,46 +27,80 @@ const mockConfig: AppConfig = {
           },
         },
       ],
-      failover: { enabled: false, retryOn: [] },
+      failover: { enabled: false, retry_on: [] },
     },
     {
-      path: '/load-balance',
-      upstreams: [
+      name: 'load-balance-service',
+      endpoints: [
         { target: 'http://service-a.com', weight: 20, priority: 1 },
         { target: 'http://service-b.com', weight: 80, priority: 1 },
       ],
-      failover: { enabled: true, retryOn: [500] },
+      failover: { enabled: true, retry_on: [500] },
     },
     {
-      path: '/failover-path',
-      upstreams: [
+      name: 'failover-path-service',
+      endpoints: [
         // 设置高权重以确保 fails.com 总是被优先选择（加权随机算法）
         { target: 'http://fails.com', weight: 99, priority: 1 },
         { target: 'http://works.com', weight: 1, priority: 1 },
       ],
       failover: {
         enabled: true,
-        retryOn: [500],
-        healthCheck: { enabled: false, intervalMs: 10000 }
+        retry_on: [500],
+        health_check: { enabled: false, interval_ms: 10000 }
       },
     },
     {
-      path: '/priority-test',
-      upstreams: [
+      name: 'priority-test-service',
+      endpoints: [
         { target: 'http://priority1-a.com', weight: 50, priority: 1 },
         { target: 'http://priority1-b.com', weight: 50, priority: 1 },
         { target: 'http://priority2.com', weight: 100, priority: 2 },
         { target: 'http://priority3.com', weight: 100, priority: 3 },
       ],
-      failover: { enabled: false, retryOn: [] },
+      failover: { enabled: false, retry_on: [] },
     },
     {
-      path: '/default-weight-test',
-      upstreams: [
+      name: 'default-weight-test-service',
+      endpoints: [
         { target: 'http://no-weight.com', weight: 100, priority: 1 }, // 模拟配置验证后的默认值
         { target: 'http://with-weight.com', weight: 200, priority: 1 },
       ],
-      failover: { enabled: false, retryOn: [] },
+      failover: { enabled: false, retry_on: [] },
+    },
+  ],
+  routes: [
+    {
+      path: '/api',
+      service: 'api-service',
+      // Route-level rules
+      headers: {
+        add: { 'x-route-header': 'route', 'x-shared-header': 'route' },
+        replace: { 'x-replace-header': 'route-replaced' },
+        remove: ['x-remove-route'],
+      },
+      body: {
+        add: { route_field: 'route', shared_field: 'route' },
+        replace: { replace_field: 'route-replaced' },
+        remove: ['remove_route'],
+        default: { route_default: 'default' },
+      },
+    },
+    {
+      path: '/load-balance',
+      service: 'load-balance-service',
+    },
+    {
+      path: '/failover-path',
+      service: 'failover-path-service',
+    },
+    {
+      path: '/priority-test',
+      service: 'priority-test-service',
+    },
+    {
+      path: '/default-weight-test',
+      service: 'default-weight-test-service',
     },
   ],
 };
@@ -104,7 +126,7 @@ describe('Server Request Handler', () => {
     mockedFetch.mockClear();
     // Initialize the state before each test based on the mocked config
     initializeRuntimeState(mockConfig);
-    await initializePluginRegistryForTests(mockConfig);
+    await initializePluginRegistryForTests(mockConfig, process.cwd());
   });
 
   afterEach(async () => {
@@ -452,7 +474,7 @@ describe('Server Request Handler', () => {
     const dynamicConfig = {
       routes: [{
         path: '/api/dynamic',
-        upstreams: [{
+        endpoints: [{
           target: 'http://mock-target.com',
           weight: 100,
           priority: 1,
@@ -465,7 +487,6 @@ describe('Server Request Handler', () => {
             }
           }
         }],
-        failover: { enabled: false, retryOn: [] },
       }]
     };
 
@@ -490,7 +511,7 @@ describe('Server Request Handler', () => {
     const dynamicConfig = {
       routes: [{
         path: '/api/dynamic',
-        upstreams: [{
+        endpoints: [{
           target: 'http://mock-target.com',
           weight: 100,
           priority: 1,
@@ -502,7 +523,6 @@ describe('Server Request Handler', () => {
             }
           }
         }],
-        failover: { enabled: false, retryOn: [] },
       }]
     };
 
@@ -533,7 +553,7 @@ describe('Server Request Handler', () => {
     const dynamicConfig = {
       routes: [{
         path: '/api/functions',
-        upstreams: [{
+        endpoints: [{
           target: 'http://mock-target.com',
           weight: 100,
           priority: 1,
@@ -544,7 +564,6 @@ describe('Server Request Handler', () => {
             }
           }
         }],
-        failover: { enabled: false, retryOn: [] },
       }]
     };
 
@@ -569,7 +588,7 @@ describe('Server Request Handler', () => {
     const dynamicConfig = {
       routes: [{
         path: '/api/error',
-        upstreams: [{
+        endpoints: [{
           target: 'http://mock-target.com',
           weight: 100,
           priority: 1,
@@ -581,7 +600,6 @@ describe('Server Request Handler', () => {
             }
           }
         }],
-        failover: { enabled: false, retryOn: [] },
       }]
     };
 

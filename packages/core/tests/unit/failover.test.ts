@@ -12,29 +12,29 @@ import { selectUpstream } from '../../src/worker/upstream/selector';
 // =============================================================================
 
 describe('Failover - Field Name Correctness', () => {
-  test('should use lastFailureTime instead of lastFailure', () => {
-    const upstreams: RuntimeUpstream[] = [
+  test('should use last_failure_time instead of lastFailure', () => {
+    const upstreams = [
       {
         target: 'http://server1.com',
         weight: 100,
         status: 'HEALTHY',
-        lastFailureTime: undefined,
-        consecutiveFailures: 0,
-        consecutiveSuccesses: 0,
+        last_failure_time: undefined,
+        consecutive_failures: 0,
+        consecutive_successes: 0,
       },
       {
         target: 'http://server2.com',
         weight: 100,
         status: 'UNHEALTHY',
-        lastFailureTime: Date.now() - 10000, // 10 seconds ago
-        consecutiveFailures: 3,
-        consecutiveSuccesses: 0,
+        last_failure_time: Date.now() - 10000, // 10 seconds ago
+        consecutive_failures: 3,
+        consecutive_successes: 0,
       },
     ];
 
     // Verify type compliance
-    expect(upstreams[0].lastFailureTime).toBeUndefined();
-    expect(upstreams[1].lastFailureTime).toBeTypeOf('number');
+    expect(upstreams[0].last_failure_time).toBeUndefined();
+    expect(upstreams[1].last_failure_time).toBeTypeOf('number');
 
     // Should not have lastFailure field
     expect((upstreams[0] as any).lastFailure).toBeUndefined();
@@ -44,29 +44,29 @@ describe('Failover - Field Name Correctness', () => {
 
 describe('Failover - Recovery Candidate Isolation', () => {
   test('should prioritize healthy upstreams over recovery candidates', () => {
-    const healthyUpstream: RuntimeUpstream = {
+    const healthyUpstream = {
       target: 'http://healthy.com',
       weight: 50, // Lower weight
       status: 'HEALTHY',
-      consecutiveFailures: 0,
-      consecutiveSuccesses: 0,
+      consecutive_failures: 0,
+      consecutive_successes: 0,
     };
 
-    const recoveryCandidate: RuntimeUpstream = {
+    const recoveryCandidate = {
       target: 'http://recovery.com',
       weight: 200, // Higher weight
       status: 'UNHEALTHY',
-      lastFailureTime: Date.now() - 10000,
-      consecutiveFailures: 3,
-      consecutiveSuccesses: 0,
+      last_failure_time: Date.now() - 10000,
+      consecutive_failures: 3,
+      consecutive_successes: 0,
     };
 
     // When selecting from healthy only, should choose the healthy one
-    const selectedFromHealthy = selectUpstream([healthyUpstream]);
+    const selectedFromHealthy = selectUpstream([healthyUpstream as RuntimeUpstream]);
     expect(selectedFromHealthy?.target).toBe('http://healthy.com');
 
     // When selecting from recovery only, should choose the recovery candidate
-    const selectedFromRecovery = selectUpstream([recoveryCandidate]);
+    const selectedFromRecovery = selectUpstream([recoveryCandidate as RuntimeUpstream]);
     expect(selectedFromRecovery?.target).toBe('http://recovery.com');
 
     // When both available, healthy should be preferred in normal operation
@@ -74,10 +74,10 @@ describe('Failover - Recovery Candidate Isolation', () => {
   });
 
   test('should sort upstreams by priority and weight', () => {
-    const upstreams: RuntimeUpstream[] = [
-      { target: 'http://low-priority.com', weight: 100, priority: 2, status: 'HEALTHY', consecutiveFailures: 0, consecutiveSuccesses: 0 },
-      { target: 'http://high-priority-low-weight.com', weight: 50, priority: 1, status: 'HEALTHY', consecutiveFailures: 0, consecutiveSuccesses: 0 },
-      { target: 'http://high-priority-high-weight.com', weight: 200, priority: 1, status: 'HEALTHY', consecutiveFailures: 0, consecutiveSuccesses: 0 },
+    const upstreams = [
+      { target: 'http://low-priority.com', weight: 100, priority: 2, status: 'HEALTHY', consecutive_failures: 0, consecutive_successes: 0 },
+      { target: 'http://high-priority-low-weight.com', weight: 50, priority: 1, status: 'HEALTHY', consecutive_failures: 0, consecutive_successes: 0 },
+      { target: 'http://high-priority-high-weight.com', weight: 200, priority: 1, status: 'HEALTHY', consecutive_failures: 0, consecutive_successes: 0 },
     ];
 
     // Run selection 100 times to verify priority/weight distribution
@@ -88,7 +88,7 @@ describe('Failover - Recovery Candidate Isolation', () => {
     };
 
     for (let i = 0; i < 100; i++) {
-      const selected = selectUpstream(upstreams);
+      const selected = selectUpstream(upstreams as RuntimeUpstream[]);
       if (selected) {
         counts[selected.target]++;
       }
@@ -124,10 +124,10 @@ describe('Failover - Retry Logic', () => {
   });
 
   test('should determine if last upstream correctly', () => {
-    const upstreams: RuntimeUpstream[] = [
-      { target: 'http://server1.com', status: 'HEALTHY', weight: 100, consecutiveFailures: 0, consecutiveSuccesses: 0 },
-      { target: 'http://server2.com', status: 'HEALTHY', weight: 100, consecutiveFailures: 0, consecutiveSuccesses: 0 },
-      { target: 'http://server3.com', status: 'HEALTHY', weight: 100, consecutiveFailures: 0, consecutiveSuccesses: 0 },
+    const upstreams = [
+      { target: 'http://server1.com', status: 'HEALTHY', weight: 100, consecutive_failures: 0, consecutive_successes: 0 },
+      { target: 'http://server2.com', status: 'HEALTHY', weight: 100, consecutive_failures: 0, consecutive_successes: 0 },
+      { target: 'http://server3.com', status: 'HEALTHY', weight: 100, consecutive_failures: 0, consecutive_successes: 0 },
     ];
 
     const attemptQueue = upstreams;
@@ -145,21 +145,21 @@ describe('Failover - Retry Logic', () => {
 
 describe('Failover - Recovery Behavior', () => {
   test('should mark upstream as HEALTHY when recovery succeeds', () => {
-    const upstream: RuntimeUpstream = {
+    let upstream: any = {
       target: 'http://server.com',
       weight: 100,
       status: 'UNHEALTHY',
-      lastFailureTime: Date.now() - 10000,
-      consecutiveFailures: 3,
-      consecutiveSuccesses: 0,
+      last_failure_time: Date.now() - 10000,
+      consecutive_failures: 3,
+      consecutive_successes: 0,
     };
 
     // Simulate successful recovery
     upstream.status = 'HEALTHY';
-    upstream.lastFailureTime = undefined;
+    upstream.last_failure_time = undefined;
 
     expect(upstream.status).toBe('HEALTHY');
-    expect(upstream.lastFailureTime).toBeUndefined();
+    expect(upstream.last_failure_time).toBeUndefined();
   });
 
   test('should only mark as HEALTHY for successful responses (< 400)', () => {
@@ -182,14 +182,14 @@ describe('Failover - Recovery Behavior', () => {
     const now = Date.now();
 
     const scenarios = [
-      { lastFailureTime: now - 6000, shouldRecover: true },  // 6s ago
-      { lastFailureTime: now - 5000, shouldRecover: true },  // 5s ago (boundary)
-      { lastFailureTime: now - 4000, shouldRecover: false }, // 4s ago
-      { lastFailureTime: now - 1000, shouldRecover: false }, // 1s ago
+      { last_failure_time: now - 6000, shouldRecover: true },  // 6s ago
+      { last_failure_time: now - 5000, shouldRecover: true },  // 5s ago (boundary)
+      { last_failure_time: now - 4000, shouldRecover: false }, // 4s ago
+      { last_failure_time: now - 1000, shouldRecover: false }, // 1s ago
     ];
 
-    scenarios.forEach(({ lastFailureTime, shouldRecover }) => {
-      const elapsed = now - lastFailureTime;
+    scenarios.forEach(({ last_failure_time, shouldRecover }) => {
+      const elapsed = now - last_failure_time;
       const canRecover = elapsed >= recoveryIntervalMs;
       expect(canRecover).toBe(shouldRecover);
     });
@@ -203,30 +203,30 @@ describe('Failover - Edge Cases', () => {
   });
 
   test('should handle single upstream', () => {
-    const upstreams: RuntimeUpstream[] = [
-      { target: 'http://only-server.com', weight: 100, status: 'HEALTHY', consecutiveFailures: 0, consecutiveSuccesses: 0 },
+    const upstreams = [
+      { target: 'http://only-server.com', weight: 100, status: 'HEALTHY', consecutive_failures: 0, consecutive_successes: 0 },
     ];
 
-    const selected = selectUpstream(upstreams);
+    const selected = selectUpstream(upstreams as RuntimeUpstream[]);
     expect(selected?.target).toBe('http://only-server.com');
   });
 
   test('should handle all UNHEALTHY upstreams', () => {
-    const upstreams: RuntimeUpstream[] = [
-      { target: 'http://server1.com', weight: 100, status: 'UNHEALTHY', lastFailureTime: Date.now(), consecutiveFailures: 3, consecutiveSuccesses: 0 },
-      { target: 'http://server2.com', weight: 100, status: 'UNHEALTHY', lastFailureTime: Date.now(), consecutiveFailures: 3, consecutiveSuccesses: 0 },
+    const upstreams = [
+      { target: 'http://server1.com', weight: 100, status: 'UNHEALTHY', last_failure_time: Date.now(), consecutive_failures: 3, consecutive_successes: 0 },
+      { target: 'http://server2.com', weight: 100, status: 'UNHEALTHY', last_failure_time: Date.now(), consecutive_failures: 3, consecutive_successes: 0 },
     ];
 
     // Selector should still select one (it doesn't check health status)
-    const selected = selectUpstream(upstreams);
+    const selected = selectUpstream(upstreams as RuntimeUpstream[]);
     expect(selected).toBeDefined();
     expect(['http://server1.com', 'http://server2.com']).toContain(selected?.target as string);
   });
 
   test('should handle missing priority (defaults to 1)', () => {
-    const upstreams: RuntimeUpstream[] = [
-      { target: 'http://no-priority.com', weight: 100, status: 'HEALTHY', consecutiveFailures: 0, consecutiveSuccesses: 0 },
-      { target: 'http://explicit-priority.com', weight: 100, priority: 1, status: 'HEALTHY', consecutiveFailures: 0, consecutiveSuccesses: 0 },
+    const upstreams = [
+      { target: 'http://no-priority.com', weight: 100, status: 'HEALTHY', consecutive_failures: 0, consecutive_successes: 0 },
+      { target: 'http://explicit-priority.com', weight: 100, priority: 1, status: 'HEALTHY', consecutive_failures: 0, consecutive_successes: 0 },
     ];
 
     // Both should be treated equally (both priority 1)
@@ -236,7 +236,7 @@ describe('Failover - Edge Cases', () => {
     };
 
     for (let i = 0; i < 100; i++) {
-      const selected = selectUpstream(upstreams);
+      const selected = selectUpstream(upstreams as RuntimeUpstream[]);
       if (selected) {
         counts[selected.target]++;
       }
@@ -248,9 +248,9 @@ describe('Failover - Edge Cases', () => {
   });
 
   test('should handle missing weight (defaults to 100)', () => {
-    const upstreams: RuntimeUpstream[] = [
-      { target: 'http://no-weight.com', status: 'HEALTHY', consecutiveFailures: 0, consecutiveSuccesses: 0 },
-      { target: 'http://explicit-weight.com', weight: 100, status: 'HEALTHY', consecutiveFailures: 0, consecutiveSuccesses: 0 },
+    const upstreams = [
+      { target: 'http://no-weight.com', status: 'HEALTHY', consecutive_failures: 0, consecutive_successes: 0 },
+      { target: 'http://explicit-weight.com', weight: 100, status: 'HEALTHY', consecutive_failures: 0, consecutive_successes: 0 },
     ];
 
     // Both should be treated equally (both weight 100)
@@ -260,7 +260,7 @@ describe('Failover - Edge Cases', () => {
     };
 
     for (let i = 0; i < 100; i++) {
-      const selected = selectUpstream(upstreams);
+      const selected = selectUpstream(upstreams as RuntimeUpstream[]);
       if (selected) {
         counts[selected.target]++;
       }
@@ -277,28 +277,28 @@ describe('Failover - Edge Cases', () => {
 // =============================================================================
 
 describe('Failover - Type Extensions', () => {
-  test('should support consecutiveFailures and consecutiveSuccesses fields', () => {
-    const upstream: RuntimeUpstream = {
+  test('should support consecutive_failures and consecutive_successes fields', () => {
+    let upstream: any = {
       target: 'http://server.com',
       weight: 100,
       status: 'HEALTHY',
-      lastFailureTime: undefined,
-      consecutiveFailures: 0,
-      consecutiveSuccesses: 0,
+      last_failure_time: undefined,
+      consecutive_failures: 0,
+      consecutive_successes: 0,
     };
 
-    expect(upstream.consecutiveFailures).toBe(0);
-    expect(upstream.consecutiveSuccesses).toBe(0);
+    expect(upstream.consecutive_failures).toBe(0);
+    expect(upstream.consecutive_successes).toBe(0);
   });
 
   test('should support HALF_OPEN status', () => {
-    const upstream: RuntimeUpstream = {
+    let upstream: any = {
       target: 'http://server.com',
       weight: 100,
       status: 'HALF_OPEN',
-      lastFailureTime: Date.now() - 5000,
-      consecutiveFailures: 3,
-      consecutiveSuccesses: 0,
+      last_failure_time: Date.now() - 5000,
+      consecutive_failures: 3,
+      consecutive_successes: 0,
     };
 
     expect(upstream.status).toBe('HALF_OPEN');
@@ -308,108 +308,108 @@ describe('Failover - Type Extensions', () => {
 
 describe('Failover - Consecutive Failure Threshold', () => {
   test('should not mark as UNHEALTHY until threshold is reached', () => {
-    const upstream: RuntimeUpstream = {
+    let upstream: any = {
       target: 'http://server.com',
       weight: 100,
       status: 'HEALTHY',
-      lastFailureTime: undefined,
-      consecutiveFailures: 0,
-      consecutiveSuccesses: 0,
+      last_failure_time: undefined,
+      consecutive_failures: 0,
+      consecutive_successes: 0,
     };
 
     const failureThreshold = 3;
 
     // Failure 1: Still HEALTHY
-    upstream.consecutiveFailures = 1;
-    if (upstream.consecutiveFailures >= failureThreshold) {
+    upstream.consecutive_failures = 1;
+    if (upstream.consecutive_failures >= failureThreshold) {
       upstream.status = 'UNHEALTHY';
     }
     expect(upstream.status).toBe('HEALTHY');
 
     // Failure 2: Still HEALTHY
-    upstream.consecutiveFailures = 2;
-    if (upstream.consecutiveFailures >= failureThreshold) {
+    upstream.consecutive_failures = 2;
+    if (upstream.consecutive_failures >= failureThreshold) {
       upstream.status = 'UNHEALTHY';
     }
     expect(upstream.status).toBe('HEALTHY');
 
     // Failure 3: Now UNHEALTHY
-    upstream.consecutiveFailures = 3;
-    if (upstream.consecutiveFailures >= failureThreshold) {
+    upstream.consecutive_failures = 3;
+    if (upstream.consecutive_failures >= failureThreshold) {
       upstream.status = 'UNHEALTHY';
-      upstream.lastFailureTime = Date.now();
+      upstream.last_failure_time = Date.now();
     }
     expect(upstream.status).toBe('UNHEALTHY');
-    expect(upstream.lastFailureTime).toBeDefined();
+    expect(upstream.last_failure_time).toBeDefined();
   });
 
   test('should reset consecutive failures on success', () => {
-    const upstream: RuntimeUpstream = {
+    let upstream: any = {
       target: 'http://server.com',
       weight: 100,
       status: 'HEALTHY',
-      lastFailureTime: undefined,
-      consecutiveFailures: 2, // Had 2 failures
-      consecutiveSuccesses: 0,
+      last_failure_time: undefined,
+      consecutive_failures: 2, // Had 2 failures
+      consecutive_successes: 0,
     };
 
     // Success resets failure counter
-    upstream.consecutiveFailures = 0;
-    upstream.consecutiveSuccesses++;
+    upstream.consecutive_failures = 0;
+    upstream.consecutive_successes++;
 
-    expect(upstream.consecutiveFailures).toBe(0);
-    expect(upstream.consecutiveSuccesses).toBe(1);
+    expect(upstream.consecutive_failures).toBe(0);
+    expect(upstream.consecutive_successes).toBe(1);
     expect(upstream.status).toBe('HEALTHY');
   });
 
   test('should reset consecutive successes on failure', () => {
-    const upstream: RuntimeUpstream = {
+    let upstream: any = {
       target: 'http://server.com',
       weight: 100,
       status: 'UNHEALTHY',
-      lastFailureTime: Date.now() - 6000,
-      consecutiveFailures: 0,
-      consecutiveSuccesses: 1, // Had 1 success
+      last_failure_time: Date.now() - 6000,
+      consecutive_failures: 0,
+      consecutive_successes: 1, // Had 1 success
     };
 
     // Failure resets success counter
-    upstream.consecutiveSuccesses = 0;
-    upstream.consecutiveFailures++;
+    upstream.consecutive_successes = 0;
+    upstream.consecutive_failures++;
 
-    expect(upstream.consecutiveSuccesses).toBe(0);
-    expect(upstream.consecutiveFailures).toBe(1);
+    expect(upstream.consecutive_successes).toBe(0);
+    expect(upstream.consecutive_failures).toBe(1);
   });
 });
 
 describe('Failover - Healthy Threshold', () => {
   test('should not mark as HEALTHY until threshold is reached', () => {
-    const upstream: RuntimeUpstream = {
+    let upstream: any = {
       target: 'http://server.com',
       weight: 100,
       status: 'UNHEALTHY',
-      lastFailureTime: Date.now() - 10000,
-      consecutiveFailures: 0,
-      consecutiveSuccesses: 0,
+      last_failure_time: Date.now() - 10000,
+      consecutive_failures: 0,
+      consecutive_successes: 0,
     };
 
     const healthyThreshold = 2;
 
     // Success 1: Still UNHEALTHY
-    upstream.consecutiveSuccesses = 1;
-    if (upstream.consecutiveSuccesses >= healthyThreshold) {
+    upstream.consecutive_successes = 1;
+    if (upstream.consecutive_successes >= healthyThreshold) {
       upstream.status = 'HEALTHY';
-      upstream.lastFailureTime = undefined;
+      upstream.last_failure_time = undefined;
     }
     expect(upstream.status).toBe('UNHEALTHY');
 
     // Success 2: Now HEALTHY
-    upstream.consecutiveSuccesses = 2;
-    if (upstream.consecutiveSuccesses >= healthyThreshold) {
+    upstream.consecutive_successes = 2;
+    if (upstream.consecutive_successes >= healthyThreshold) {
       upstream.status = 'HEALTHY';
-      upstream.lastFailureTime = undefined;
+      upstream.last_failure_time = undefined;
     }
     expect(upstream.status).toBe('HEALTHY');
-    expect(upstream.lastFailureTime).toBeUndefined();
+    expect(upstream.last_failure_time).toBeUndefined();
   });
 
   test('should handle different healthy threshold values', () => {
@@ -433,19 +433,19 @@ describe('Failover - Circuit Breaker States', () => {
     const recoveryIntervalMs = 5000;
     const now = Date.now();
 
-    const upstream: RuntimeUpstream = {
+    let upstream: any = {
       target: 'http://server.com',
       weight: 100,
       status: 'UNHEALTHY',
-      lastFailureTime: now - 6000, // 6 seconds ago
-      consecutiveFailures: 3,
-      consecutiveSuccesses: 0,
+      last_failure_time: now - 6000, // 6 seconds ago
+      consecutive_failures: 3,
+      consecutive_successes: 0,
     };
 
     // Check if recovery interval has passed
     if (upstream.status === 'UNHEALTHY' &&
-        upstream.lastFailureTime !== undefined &&
-        (now - upstream.lastFailureTime) >= recoveryIntervalMs) {
+        upstream.last_failure_time !== undefined &&
+        (now - upstream.last_failure_time) >= recoveryIntervalMs) {
       upstream.status = 'HALF_OPEN';
     }
 
@@ -456,19 +456,19 @@ describe('Failover - Circuit Breaker States', () => {
     const recoveryIntervalMs = 5000;
     const now = Date.now();
 
-    const upstream: RuntimeUpstream = {
+    let upstream: any = {
       target: 'http://server.com',
       weight: 100,
       status: 'UNHEALTHY',
-      lastFailureTime: now - 3000, // Only 3 seconds ago
-      consecutiveFailures: 3,
-      consecutiveSuccesses: 0,
+      last_failure_time: now - 3000, // Only 3 seconds ago
+      consecutive_failures: 3,
+      consecutive_successes: 0,
     };
 
     // Check if recovery interval has passed
     if (upstream.status === 'UNHEALTHY' &&
-        upstream.lastFailureTime !== undefined &&
-        (now - upstream.lastFailureTime) >= recoveryIntervalMs) {
+        upstream.last_failure_time !== undefined &&
+        (now - upstream.last_failure_time) >= recoveryIntervalMs) {
       upstream.status = 'HALF_OPEN';
     }
 
@@ -476,80 +476,80 @@ describe('Failover - Circuit Breaker States', () => {
   });
 
   test('should transition HALF_OPEN → HEALTHY on success', () => {
-    const upstream: RuntimeUpstream = {
+    let upstream: any = {
       target: 'http://server.com',
       weight: 100,
       status: 'HALF_OPEN',
-      lastFailureTime: Date.now() - 6000,
-      consecutiveFailures: 0,
-      consecutiveSuccesses: 0,
+      last_failure_time: Date.now() - 6000,
+      consecutive_failures: 0,
+      consecutive_successes: 0,
     };
 
     // Simulate successful test request
     const responseStatus = 200;
     if (upstream.status === 'HALF_OPEN' && responseStatus < 400) {
       upstream.status = 'HEALTHY';
-      upstream.lastFailureTime = undefined;
-      upstream.consecutiveSuccesses = 0;
+      upstream.last_failure_time = undefined;
+      upstream.consecutive_successes = 0;
     }
 
     expect(upstream.status).toBe('HEALTHY');
-    expect(upstream.lastFailureTime).toBeUndefined();
+    expect(upstream.last_failure_time).toBeUndefined();
   });
 
   test('should transition HALF_OPEN → UNHEALTHY on failure', () => {
-    const upstream: RuntimeUpstream = {
+    let upstream: any = {
       target: 'http://server.com',
       weight: 100,
       status: 'HALF_OPEN',
-      lastFailureTime: Date.now() - 6000,
-      consecutiveFailures: 0,
-      consecutiveSuccesses: 0,
+      last_failure_time: Date.now() - 6000,
+      consecutive_failures: 0,
+      consecutive_successes: 0,
     };
 
     // Simulate failed test request
     const responseStatus = 502;
     if (upstream.status === 'HALF_OPEN' && responseStatus >= 400) {
       upstream.status = 'UNHEALTHY';
-      upstream.lastFailureTime = Date.now();
+      upstream.last_failure_time = Date.now();
     }
 
     expect(upstream.status).toBe('UNHEALTHY');
-    expect(upstream.lastFailureTime).toBeGreaterThan(Date.now() - 1000);
+    expect(upstream.last_failure_time).toBeGreaterThan(Date.now() - 1000);
   });
 
   test('should handle complete circuit breaker cycle', () => {
-    const upstream: RuntimeUpstream = {
+    let upstream: any = {
       target: 'http://server.com',
       weight: 100,
       status: 'HEALTHY',
-      lastFailureTime: undefined,
-      consecutiveFailures: 0,
-      consecutiveSuccesses: 0,
+      last_failure_time: undefined,
+      consecutive_failures: 0,
+      consecutive_successes: 0,
     };
 
     const failureThreshold = 3;
     const recoveryIntervalMs = 5000;
 
     // Step 1: HEALTHY → UNHEALTHY (after 3 failures)
-    upstream.consecutiveFailures = 3;
-    if (upstream.consecutiveFailures >= failureThreshold) {
+    upstream.consecutive_failures = 3;
+    if (upstream.consecutive_failures >= failureThreshold) {
       upstream.status = 'UNHEALTHY';
-      upstream.lastFailureTime = Date.now();
+      upstream.last_failure_time = Date.now();
     }
     expect(upstream.status).toBe('UNHEALTHY');
 
     // Step 2: UNHEALTHY → HALF_OPEN (after recovery interval)
     const afterInterval = Date.now() + recoveryIntervalMs + 1000;
-    if (upstream.lastFailureTime && (afterInterval - upstream.lastFailureTime) >= recoveryIntervalMs) {
+    if (upstream.last_failure_time && (afterInterval - upstream.last_failure_time) >= recoveryIntervalMs) {
       upstream.status = 'HALF_OPEN';
     }
     expect(upstream.status).toBe('HALF_OPEN');
 
     // Step 3: HALF_OPEN → HEALTHY (on success)
     upstream.status = 'HEALTHY';
-    upstream.lastFailureTime = undefined;
-    upstream.consecutiveFailures = 0;
+    upstream.last_failure_time = undefined;
+    upstream.consecutive_failures = 0;
     expect(upstream.status).toBe('HEALTHY');
   });
 });
@@ -595,14 +595,14 @@ describe('Failover - Timeout Control', () => {
 describe('Failover - Configuration Validation', () => {
   test('should have sensible default values', () => {
     const defaults = {
-      consecutiveFailuresThreshold: 3,
+      consecutive_failuresThreshold: 3,
       recoveryIntervalMs: 5000,
       recoveryTimeoutMs: 3000,
       healthyThreshold: 2,
       requestTimeoutMs: 30000,
     };
 
-    expect(defaults.consecutiveFailuresThreshold).toBeGreaterThan(0);
+    expect(defaults.consecutive_failuresThreshold).toBeGreaterThan(0);
     expect(defaults.healthyThreshold).toBeGreaterThan(0);
     expect(defaults.recoveryIntervalMs).toBeGreaterThan(defaults.recoveryTimeoutMs);
     expect(defaults.requestTimeoutMs).toBeGreaterThan(defaults.recoveryTimeoutMs);
@@ -611,18 +611,18 @@ describe('Failover - Configuration Validation', () => {
   test('should handle configuration edge cases', () => {
     // Minimum thresholds
     const minConfig = {
-      consecutiveFailuresThreshold: 1,
+      consecutive_failuresThreshold: 1,
       healthyThreshold: 1,
     };
-    expect(minConfig.consecutiveFailuresThreshold).toBe(1);
+    expect(minConfig.consecutive_failuresThreshold).toBe(1);
     expect(minConfig.healthyThreshold).toBe(1);
 
     // High thresholds
     const highConfig = {
-      consecutiveFailuresThreshold: 10,
+      consecutive_failuresThreshold: 10,
       healthyThreshold: 5,
     };
-    expect(highConfig.consecutiveFailuresThreshold).toBe(10);
+    expect(highConfig.consecutive_failuresThreshold).toBe(10);
     expect(highConfig.healthyThreshold).toBe(5);
   });
 });
@@ -634,10 +634,10 @@ describe('Failover - Configuration Validation', () => {
 describe('Failover - Unified Selection with Status Check', () => {
   test('should remove unavailable upstream from candidate pool and reselect', () => {
     const now = Date.now();
-    const upstreams: RuntimeUpstream[] = [
-      { target: 'http://p1-healthy.com', priority: 1, weight: 100, status: 'HEALTHY', consecutiveFailures: 0, consecutiveSuccesses: 0 },
-      { target: 'http://p1-unhealthy-recent.com', priority: 1, weight: 100, status: 'UNHEALTHY', lastFailureTime: now - 2000, consecutiveFailures: 3, consecutiveSuccesses: 0 },
-      { target: 'http://p2-healthy.com', priority: 2, weight: 100, status: 'HEALTHY', consecutiveFailures: 0, consecutiveSuccesses: 0 },
+    const upstreams = [
+      { target: 'http://p1-healthy.com', priority: 1, weight: 100, status: 'HEALTHY', consecutive_failures: 0, consecutive_successes: 0 },
+      { target: 'http://p1-unhealthy-recent.com', priority: 1, weight: 100, status: 'UNHEALTHY', last_failure_time: now - 2000, consecutive_failures: 3, consecutive_successes: 0 },
+      { target: 'http://p2-healthy.com', priority: 2, weight: 100, status: 'HEALTHY', consecutive_failures: 0, consecutive_successes: 0 },
     ];
 
     const recoveryIntervalMs = 5000;
@@ -653,7 +653,7 @@ describe('Failover - Unified Selection with Status Check', () => {
 
     // If p1-unhealthy-recent is selected, it should be skipped
     const unhealthyUpstream = upstreams[1];
-    const elapsed = now - (unhealthyUpstream.lastFailureTime || 0);
+    const elapsed = now - (unhealthyUpstream.last_failure_time || 0);
     const canAttempt = elapsed >= recoveryIntervalMs;
     expect(canAttempt).toBe(false); // 2s < 5s
 
@@ -670,9 +670,9 @@ describe('Failover - Unified Selection with Status Check', () => {
 
   test('should respect priority order when removing unavailable upstreams', () => {
     const now = Date.now();
-    const upstreams: RuntimeUpstream[] = [
-      { target: 'http://p1-unhealthy.com', priority: 1, weight: 100, status: 'UNHEALTHY', lastFailureTime: now - 2000, consecutiveFailures: 3, consecutiveSuccesses: 0 },
-      { target: 'http://p2-healthy.com', priority: 2, weight: 100, status: 'HEALTHY', consecutiveFailures: 0, consecutiveSuccesses: 0 },
+    const upstreams = [
+      { target: 'http://p1-unhealthy.com', priority: 1, weight: 100, status: 'UNHEALTHY', last_failure_time: now - 2000, consecutive_failures: 3, consecutive_successes: 0 },
+      { target: 'http://p2-healthy.com', priority: 2, weight: 100, status: 'HEALTHY', consecutive_failures: 0, consecutive_successes: 0 },
     ];
 
     const recoveryIntervalMs = 5000;
@@ -680,7 +680,7 @@ describe('Failover - Unified Selection with Status Check', () => {
 
     // Priority 1 upstream is unavailable (within recovery interval)
     const p1Upstream = upstreams[0];
-    const elapsed = now - (p1Upstream.lastFailureTime || 0);
+    const elapsed = now - (p1Upstream.last_failure_time || 0);
     expect(elapsed < recoveryIntervalMs).toBe(true);
 
     // Skip priority 1
@@ -690,23 +690,23 @@ describe('Failover - Unified Selection with Status Check', () => {
     const availableUpstreams = upstreams.filter(
       up => !skippedUpstreams.has(up.target)
     );
-    const selected = selectUpstream(availableUpstreams);
+    const selected = selectUpstream(availableUpstreams as RuntimeUpstream[]);
     expect(selected?.priority).toBe(2);
     expect(selected?.target).toBe('http://p2-healthy.com');
   });
 
   test('should allow UNHEALTHY upstream to participate in selection if recovery interval met', () => {
     const now = Date.now();
-    const upstreams: RuntimeUpstream[] = [
-      { target: 'http://healthy.com', priority: 1, weight: 100, status: 'HEALTHY', consecutiveFailures: 0, consecutiveSuccesses: 0 },
-      { target: 'http://unhealthy-ready.com', priority: 1, weight: 100, status: 'UNHEALTHY', lastFailureTime: now - 6000, consecutiveFailures: 3, consecutiveSuccesses: 0 },
+    const upstreams = [
+      { target: 'http://healthy.com', priority: 1, weight: 100, status: 'HEALTHY', consecutive_failures: 0, consecutive_successes: 0 },
+      { target: 'http://unhealthy-ready.com', priority: 1, weight: 100, status: 'UNHEALTHY', last_failure_time: now - 6000, consecutive_failures: 3, consecutive_successes: 0 },
     ];
 
     const recoveryIntervalMs = 5000;
 
     // Check if unhealthy upstream can be attempted
     const unhealthyUpstream = upstreams[1];
-    const elapsed = now - (unhealthyUpstream.lastFailureTime || 0);
+    const elapsed = now - (unhealthyUpstream.last_failure_time || 0);
     const canAttempt = elapsed >= recoveryIntervalMs;
     expect(canAttempt).toBe(true); // 6s > 5s
 
@@ -715,16 +715,16 @@ describe('Failover - Unified Selection with Status Check', () => {
     expect(availableUpstreams.length).toBe(2);
 
     // Selector should be able to choose either one
-    const selected = selectUpstream(availableUpstreams);
+    const selected = selectUpstream(availableUpstreams as RuntimeUpstream[]);
     expect(selected).toBeDefined();
     expect(['http://healthy.com', 'http://unhealthy-ready.com']).toContain(selected!.target);
   });
 
   test('should handle all upstreams UNHEALTHY within recovery interval', () => {
     const now = Date.now();
-    const upstreams: RuntimeUpstream[] = [
-      { target: 'http://server1.com', priority: 1, weight: 100, status: 'UNHEALTHY', lastFailureTime: now - 2000, consecutiveFailures: 3, consecutiveSuccesses: 0 },
-      { target: 'http://server2.com', priority: 1, weight: 100, status: 'UNHEALTHY', lastFailureTime: now - 3000, consecutiveFailures: 3, consecutiveSuccesses: 0 },
+    const upstreams = [
+      { target: 'http://server1.com', priority: 1, weight: 100, status: 'UNHEALTHY', last_failure_time: now - 2000, consecutive_failures: 3, consecutive_successes: 0 },
+      { target: 'http://server2.com', priority: 1, weight: 100, status: 'UNHEALTHY', last_failure_time: now - 3000, consecutive_failures: 3, consecutive_successes: 0 },
     ];
 
     const recoveryIntervalMs = 5000;
@@ -732,7 +732,7 @@ describe('Failover - Unified Selection with Status Check', () => {
 
     // Both upstreams should be skipped
     upstreams.forEach(up => {
-      const elapsed = now - (up.lastFailureTime || 0);
+      const elapsed = now - (up.last_failure_time || 0);
       if (elapsed < recoveryIntervalMs) {
         skippedUpstreams.add(up.target);
       }
@@ -749,20 +749,20 @@ describe('Failover - Unified Selection with Status Check', () => {
 
   test('should transition UNHEALTHY to HALF_OPEN when selected and recovery interval met', () => {
     const now = Date.now();
-    const upstream: RuntimeUpstream = {
+    let upstream: any = {
       target: 'http://server.com',
       priority: 1,
       weight: 100,
       status: 'UNHEALTHY',
-      lastFailureTime: now - 6000,
-      consecutiveFailures: 3,
-      consecutiveSuccesses: 0,
+      last_failure_time: now - 6000,
+      consecutive_failures: 3,
+      consecutive_successes: 0,
     };
 
     const recoveryIntervalMs = 5000;
 
     // Check if can attempt
-    const elapsed = now - (upstream.lastFailureTime || 0);
+    const elapsed = now - (upstream.last_failure_time || 0);
     const shouldTransitionToHalfOpen = elapsed >= recoveryIntervalMs;
     expect(shouldTransitionToHalfOpen).toBe(true);
 
@@ -776,13 +776,12 @@ describe('Failover - Unified Selection with Status Check', () => {
 
   test('should maintain priority order across multiple selection rounds', () => {
     const now = Date.now();
-    const upstreams: RuntimeUpstream[] = [
-      { target: 'http://p1-a.com', priority: 1, weight: 100, status: 'HEALTHY', consecutiveFailures: 0, consecutiveSuccesses: 0 },
-      { target: 'http://p1-b.com', priority: 1, weight: 100, status: 'UNHEALTHY', lastFailureTime: now - 2000, consecutiveFailures: 3, consecutiveSuccesses: 0 },
-      { target: 'http://p2-a.com', priority: 2, weight: 100, status: 'HEALTHY', consecutiveFailures: 0, consecutiveSuccesses: 0 },
+    const upstreams = [
+      { target: 'http://p1-a.com', priority: 1, weight: 100, status: 'HEALTHY', consecutive_failures: 0, consecutive_successes: 0 },
+      { target: 'http://p1-b.com', priority: 1, weight: 100, status: 'UNHEALTHY', last_failure_time: now - 2000, consecutive_failures: 3, consecutive_successes: 0 },
+      { target: 'http://p2-a.com', priority: 2, weight: 100, status: 'HEALTHY', consecutive_failures: 0, consecutive_successes: 0 },
     ];
 
-    const recoveryIntervalMs = 5000;
     const attemptedUpstreams = new Set<string>();
     const skippedUpstreams = new Set<string>();
 
@@ -799,7 +798,7 @@ describe('Failover - Unified Selection with Status Check', () => {
     expect(availableUpstreams.length).toBe(1);
     expect(availableUpstreams[0].priority).toBe(2);
 
-    const selected = selectUpstream(availableUpstreams);
+    const selected = selectUpstream(availableUpstreams as RuntimeUpstream[]);
     expect(selected?.priority).toBe(2);
     expect(selected?.target).toBe('http://p2-a.com');
   });
@@ -807,92 +806,92 @@ describe('Failover - Unified Selection with Status Check', () => {
 
 describe('Failover - Integration Scenarios', () => {
   test('should handle flapping upstream (alternating success/failure)', () => {
-    const upstream: RuntimeUpstream = {
+    let upstream: any = {
       target: 'http://flapping.com',
       weight: 100,
       status: 'HEALTHY',
-      lastFailureTime: undefined,
-      consecutiveFailures: 0,
-      consecutiveSuccesses: 0,
+      last_failure_time: undefined,
+      consecutive_failures: 0,
+      consecutive_successes: 0,
     };
 
     // Failure 1
-    upstream.consecutiveFailures++;
-    upstream.consecutiveSuccesses = 0;
+    upstream.consecutive_failures++;
+    upstream.consecutive_successes = 0;
     expect(upstream.status).toBe('HEALTHY');
 
     // Success 1 - resets counter
-    upstream.consecutiveFailures = 0;
-    upstream.consecutiveSuccesses++;
+    upstream.consecutive_failures = 0;
+    upstream.consecutive_successes++;
     expect(upstream.status).toBe('HEALTHY');
 
     // Failure 2
-    upstream.consecutiveFailures++;
-    upstream.consecutiveSuccesses = 0;
+    upstream.consecutive_failures++;
+    upstream.consecutive_successes = 0;
     expect(upstream.status).toBe('HEALTHY');
 
     // Success 2 - resets counter again
-    upstream.consecutiveFailures = 0;
-    upstream.consecutiveSuccesses++;
+    upstream.consecutive_failures = 0;
+    upstream.consecutive_successes++;
     expect(upstream.status).toBe('HEALTHY');
 
     // Upstream stays HEALTHY because consecutive failures never reached threshold
-    expect(upstream.consecutiveFailures).toBe(0);
+    expect(upstream.consecutive_failures).toBe(0);
   });
 
   test('should handle slow recovery (multiple attempts needed)', () => {
-    const upstream: RuntimeUpstream = {
+    let upstream: any = {
       target: 'http://slow-recovery.com',
       weight: 100,
       status: 'UNHEALTHY',
-      lastFailureTime: Date.now() - 10000,
-      consecutiveFailures: 0,
-      consecutiveSuccesses: 0,
+      last_failure_time: Date.now() - 10000,
+      consecutive_failures: 0,
+      consecutive_successes: 0,
     };
 
     const healthyThreshold = 3;
 
     // Attempt 1: Success but not enough
-    upstream.consecutiveSuccesses = 1;
-    if (upstream.consecutiveSuccesses >= healthyThreshold) {
+    upstream.consecutive_successes = 1;
+    if (upstream.consecutive_successes >= healthyThreshold) {
       upstream.status = 'HEALTHY';
     }
     expect(upstream.status).toBe('UNHEALTHY');
 
     // Attempt 2: Success but still not enough
-    upstream.consecutiveSuccesses = 2;
-    if (upstream.consecutiveSuccesses >= healthyThreshold) {
+    upstream.consecutive_successes = 2;
+    if (upstream.consecutive_successes >= healthyThreshold) {
       upstream.status = 'HEALTHY';
     }
     expect(upstream.status).toBe('UNHEALTHY');
 
     // Attempt 3: Success, now recovered
-    upstream.consecutiveSuccesses = 3;
-    if (upstream.consecutiveSuccesses >= healthyThreshold) {
+    upstream.consecutive_successes = 3;
+    if (upstream.consecutive_successes >= healthyThreshold) {
       upstream.status = 'HEALTHY';
-      upstream.lastFailureTime = undefined;
+      upstream.last_failure_time = undefined;
     }
     expect(upstream.status).toBe('HEALTHY');
   });
 
   test('should handle recovery failure (HALF_OPEN → UNHEALTHY)', () => {
-    const upstream: RuntimeUpstream = {
+    let upstream: any = {
       target: 'http://still-broken.com',
       weight: 100,
       status: 'HALF_OPEN',
-      lastFailureTime: Date.now() - 6000,
-      consecutiveFailures: 0,
-      consecutiveSuccesses: 0,
+      last_failure_time: Date.now() - 6000,
+      consecutive_failures: 0,
+      consecutive_successes: 0,
     };
 
     // Test request fails
     upstream.status = 'UNHEALTHY';
-    upstream.lastFailureTime = Date.now();
-    upstream.consecutiveFailures++;
-    upstream.consecutiveSuccesses = 0;
+    upstream.last_failure_time = Date.now();
+    upstream.consecutive_failures++;
+    upstream.consecutive_successes = 0;
 
     expect(upstream.status).toBe('UNHEALTHY');
-    expect(upstream.consecutiveFailures).toBe(1);
-    expect(upstream.lastFailureTime).toBeGreaterThan(Date.now() - 1000);
+    expect(upstream.consecutive_failures).toBe(1);
+    expect(upstream.last_failure_time).toBeGreaterThan(Date.now() - 1000);
   });
 });

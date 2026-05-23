@@ -64,7 +64,7 @@ describe('Auth Integration - Global Auth Config', () => {
       routes: [
         {
           path: '/api',
-          upstreams: [{ target: `http://localhost:${mockUpstreamPort}` }],
+          endpoints: [{ target: `http://localhost:${mockUpstreamPort}` }],
         },
       ],
     };
@@ -90,7 +90,7 @@ describe('Auth Integration - Global Auth Config', () => {
       routes: [
         {
           path: '/api',
-          upstreams: [{ target: `http://localhost:${mockUpstreamPort}` }],
+          endpoints: [{ target: `http://localhost:${mockUpstreamPort}` }],
         },
       ],
     };
@@ -115,7 +115,7 @@ describe('Auth Integration - Global Auth Config', () => {
       routes: [
         {
           path: '/api',
-          upstreams: [{ target: `http://localhost:${mockUpstreamPort}` }],
+          endpoints: [{ target: `http://localhost:${mockUpstreamPort}` }],
         },
       ],
     };
@@ -138,7 +138,7 @@ describe('Auth Integration - Global Auth Config', () => {
       routes: [
         {
           path: '/api',
-          upstreams: [{ target: `http://localhost:${mockUpstreamPort}` }],
+          endpoints: [{ target: `http://localhost:${mockUpstreamPort}` }],
         },
       ],
     };
@@ -167,7 +167,7 @@ describe('Auth Integration - Route-Level Auth Config', () => {
             enabled: true,
             tokens: ['admin-token-only'],
           },
-          upstreams: [{ target: `http://localhost:${mockUpstreamPort}` }],
+          endpoints: [{ target: `http://localhost:${mockUpstreamPort}` }],
         },
       ],
     };
@@ -201,7 +201,7 @@ describe('Auth Integration - Route-Level Auth Config', () => {
         {
           path: '/public',
           auth: { enabled: false, tokens: [] },
-          upstreams: [{ target: `http://localhost:${mockUpstreamPort}` }],
+          endpoints: [{ target: `http://localhost:${mockUpstreamPort}` }],
         },
       ],
     };
@@ -224,7 +224,7 @@ describe('Auth Integration - Route-Level Auth Config', () => {
         {
           path: '/api',
           // No auth config - should inherit global
-          upstreams: [{ target: `http://localhost:${mockUpstreamPort}` }],
+          endpoints: [{ target: `http://localhost:${mockUpstreamPort}` }],
         },
       ],
     };
@@ -257,7 +257,7 @@ describe('Auth Integration - Automatic Header Removal', () => {
             enabled: true,
             tokens: ['test-token'],
           },
-          upstreams: [{ target: `http://localhost:${mockUpstreamPort}` }],
+          endpoints: [{ target: `http://localhost:${mockUpstreamPort}` }],
         },
       ],
     };
@@ -284,7 +284,7 @@ describe('Auth Integration - Automatic Header Removal', () => {
             enabled: false,
             tokens: [],
           },
-          upstreams: [{ target: `http://localhost:${mockUpstreamPort}` }],
+          endpoints: [{ target: `http://localhost:${mockUpstreamPort}` }],
         },
       ],
     };
@@ -311,7 +311,7 @@ describe('Auth Integration - Automatic Header Removal', () => {
             enabled: true,
             tokens: ['test-token'],
           },
-          upstreams: [{ target: `http://localhost:${mockUpstreamPort}` }],
+          endpoints: [{ target: `http://localhost:${mockUpstreamPort}` }],
         },
       ],
     };
@@ -343,7 +343,7 @@ describe('Auth Integration - Automatic Header Removal', () => {
         {
           path: '/api',
           // No route-level auth
-          upstreams: [{ target: `http://localhost:${mockUpstreamPort}` }],
+          endpoints: [{ target: `http://localhost:${mockUpstreamPort}` }],
         },
       ],
     };
@@ -372,7 +372,7 @@ describe('Auth Integration - Multiple Tokens', () => {
             enabled: true,
             tokens: ['token-1', 'token-2', 'token-3'],
           },
-          upstreams: [{ target: `http://localhost:${mockUpstreamPort}` }],
+          endpoints: [{ target: `http://localhost:${mockUpstreamPort}` }],
         },
       ],
     };
@@ -399,7 +399,7 @@ describe('Auth Integration - Multiple Tokens', () => {
             enabled: true,
             tokens: ['token-1', 'token-2'],
           },
-          upstreams: [{ target: `http://localhost:${mockUpstreamPort}` }],
+          endpoints: [{ target: `http://localhost:${mockUpstreamPort}` }],
         },
       ],
     };
@@ -422,7 +422,7 @@ describe('Auth Integration - Multiple Tokens', () => {
             enabled: true,
             tokens: ['bearer-format-token', 'direct-format-token'],
           },
-          upstreams: [{ target: `http://localhost:${mockUpstreamPort}` }],
+          endpoints: [{ target: `http://localhost:${mockUpstreamPort}` }],
         },
       ],
     };
@@ -453,7 +453,7 @@ describe('Auth Integration - No Auth Config', () => {
         {
           path: '/api',
           // No route-level auth
-          upstreams: [{ target: `http://localhost:${mockUpstreamPort}` }],
+          endpoints: [{ target: `http://localhost:${mockUpstreamPort}` }],
         },
       ],
     };
@@ -470,7 +470,7 @@ describe('Auth Integration - No Auth Config', () => {
       routes: [
         {
           path: '/api',
-          upstreams: [{ target: `http://localhost:${mockUpstreamPort}` }],
+          endpoints: [{ target: `http://localhost:${mockUpstreamPort}` }],
         },
       ],
     };
@@ -505,7 +505,7 @@ describe('Auth Integration - Environment Variables', () => {
             enabled: true,
             tokens: ['{{ env.TEST_API_TOKEN }}'],
           },
-          upstreams: [{ target: `http://localhost:${mockUpstreamPort}` }],
+          endpoints: [{ target: `http://localhost:${mockUpstreamPort}` }],
         },
       ],
     };
@@ -540,7 +540,7 @@ describe('Auth Integration - Environment Variables', () => {
               '{{ env.TENANT_C }}',
             ],
           },
-          upstreams: [{ target: `http://localhost:${mockUpstreamPort}` }],
+          endpoints: [{ target: `http://localhost:${mockUpstreamPort}` }],
         },
       ],
     };

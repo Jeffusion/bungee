@@ -15,7 +15,7 @@ const mockConfig: AppConfig = {
   routes: [
     {
       path: '/v1/anthropic-to-openai',
-      pathRewrite: { '^/v1/anthropic-to-openai': '/v1' },
+      path_rewrite: { '^/v1/anthropic-to-openai': '/v1' },
       plugins: [
         {
           name: 'ai-transformer',
@@ -25,7 +25,7 @@ const mockConfig: AppConfig = {
           }
         }
       ],
-      upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }]
+      endpoints: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }]
     }
   ]
 };
@@ -117,7 +117,7 @@ describe('Anthropic to OpenAI - Integration Tests', () => {
     setMockEnv();
     mockedFetch.mockClear();
     initializeRuntimeState(mockConfig);
-    await initializePluginRegistryForTests(mockConfig);
+    await initializePluginRegistryForTests(mockConfig, process.cwd());
   });
 
   afterEach(async () => {
@@ -246,7 +246,7 @@ describe('Anthropic to OpenAI - Integration Tests', () => {
       routes: [
         {
           path: '/v1/anthropic-to-openai-mapped',
-          pathRewrite: { '^/v1/anthropic-to-openai-mapped': '/v1' },
+          path_rewrite: { '^/v1/anthropic-to-openai-mapped': '/v1' },
           plugins: [
             {
               name: 'model-mapping',
@@ -268,14 +268,14 @@ describe('Anthropic to OpenAI - Integration Tests', () => {
               }
             }
           ],
-          upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }]
+          endpoints: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }]
         }
       ]
     };
 
     await cleanupPluginRegistry();
     initializeRuntimeState(mappedConfig);
-    await initializePluginRegistryForTests(mappedConfig);
+    await initializePluginRegistryForTests(mappedConfig, process.cwd());
 
     const anthropicRequest = {
       model: 'claude-sonnet-4-5-20250929',
@@ -1246,7 +1246,7 @@ describe('Anthropic to OpenAI - Integration Tests', () => {
       routes: [
         {
           path: '/v1/anthropic-to-openai-responses',
-          pathRewrite: { '^/v1/anthropic-to-openai-responses': '/v1' },
+          path_rewrite: { '^/v1/anthropic-to-openai-responses': '/v1' },
           plugins: [
             {
               name: 'ai-transformer',
@@ -1257,14 +1257,14 @@ describe('Anthropic to OpenAI - Integration Tests', () => {
               }
             }
           ],
-          upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }]
+          endpoints: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }]
         }
       ]
     };
 
     await cleanupPluginRegistry();
     initializeRuntimeState(responsesConfig);
-    await initializePluginRegistryForTests(responsesConfig);
+    await initializePluginRegistryForTests(responsesConfig, process.cwd());
 
     const req = new Request('http://localhost/v1/anthropic-to-openai-responses/messages', {
       method: 'POST',
@@ -2363,7 +2363,7 @@ describe('Anthropic to OpenAI - Integration Tests', () => {
 
     await cleanupPluginRegistry();
     initializeRuntimeState(configWithPluginMode);
-    await initializePluginRegistryForTests(configWithPluginMode);
+    await initializePluginRegistryForTests(configWithPluginMode, process.cwd());
 
     mockedFetch.mockImplementationOnce(async () => {
       return new Response(JSON.stringify({
