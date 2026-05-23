@@ -78,20 +78,19 @@
 
     {#if enabled}
       <!-- Tokens List -->
-      <div class="collapse collapse-arrow bg-base-200 collapse-open">
-        <input type="checkbox" checked />
-        <div class="collapse-title text-sm font-medium">
+      <div class="collapse collapse-arrow bg-carbon-950/60 collapse-open">
+        <div class="px-3 py-2 font-mono text-[11px] uppercase tracking-command text-zinc-200 border-b border-carbon-600">
           {$_('auth.tokens')} ({tokens.length})
         </div>
-        <div class="collapse-content space-y-2">
-          <div class="text-xs text-base-content/60 bg-base-200 rounded p-3 flex gap-2">
+        <div class="p-3 space-y-2">
+          <div class="text-xs text-base-content/60 bg-carbon-950/60 rounded p-3 flex gap-2">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-4 h-4 opacity-60">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
             </svg>
             <div>
               <div>{$_('auth.expressionSupport')}</div>
               <div class="mt-1">
-                <code class="text-xs bg-base-300 px-1 rounded">{'{{ env.API_TOKEN }}'}</code>
+                <code class="text-xs bg-carbon-700 px-1 rounded">{'{{ env.API_TOKEN }}'}</code>
               </div>
             </div>
           </div>
@@ -108,7 +107,7 @@
               </div>
               <button
                 type="button"
-                class="btn btn-sm btn-error btn-square"
+                class="inline-flex items-center justify-center h-9 w-9 border-2 border-red-500 bg-red-500/10 text-red-300 hover:bg-red-500/20 transition-colors"
                 on:click={() => removeToken(index)}
               >
                 ✕
@@ -118,7 +117,7 @@
 
           <button
             type="button"
-            class="btn btn-sm btn-ghost"
+            class="nx-btn-ghost nx-btn-sm"
             on:click={addToken}
           >
             + {$_('auth.addToken')}

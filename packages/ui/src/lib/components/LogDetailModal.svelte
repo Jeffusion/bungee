@@ -346,18 +346,25 @@
 </script>
 
 <div
-  class="modal modal-open"
+  class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
   role="presentation"
   on:click={handleBackdropClick}
   on:keydown={(e) => e.key === 'Escape' && onClose()}
 >
-  <div class="modal-box max-w-6xl h-[90vh] flex flex-col p-0" role="dialog" aria-labelledby="modal-title" aria-modal="true">
+  <div class="nx-panel-raised nx-bracketed relative w-full max-w-6xl h-[90vh] flex flex-col p-0" role="dialog" aria-labelledby="modal-title" aria-modal="true">
+    <span class="nx-corner nx-corner-tl" aria-hidden="true"></span>
+    <span class="nx-corner nx-corner-tr" aria-hidden="true"></span>
+    <span class="nx-corner nx-corner-bl" aria-hidden="true"></span>
+    <span class="nx-corner nx-corner-br" aria-hidden="true"></span>
     <!-- Header with actions -->
-    <div class="flex items-center justify-between px-6 py-4 border-b border-base-300">
-      <h3 id="modal-title" class="font-bold text-xl">{$_('logs.detail.title')}</h3>
+    <div class="flex items-center justify-between px-6 py-3 border-b border-carbon-600 bg-carbon-900">
+      <h3 id="modal-title" class="flex items-center gap-2.5 font-mono text-sm font-bold uppercase tracking-command text-zinc-100">
+        <span class="nx-stripe" aria-hidden="true"></span>
+        {$_('logs.detail.title')}
+      </h3>
       <div class="flex items-center gap-2">
         <button
-          class="btn btn-sm btn-ghost"
+          class="nx-btn-ghost nx-btn-sm"
           on:click={copyToClipboard}
           title={$_('logs.detail.copyToClipboard')}
         >
@@ -371,7 +378,7 @@
           {/if}
         </button>
         <button
-          class="btn btn-sm btn-ghost"
+          class="nx-btn-ghost nx-btn-sm"
           on:click={downloadJson}
           title={$_('logs.detail.downloadJson')}
         >
@@ -380,7 +387,7 @@
           </svg>
           <span class="hidden md:inline">{$_('logs.detail.downloadJson')}</span>
         </button>
-        <button class="btn btn-sm btn-circle btn-ghost" on:click={onClose}>
+        <button class="inline-flex items-center justify-center h-7 w-7 border-2 border-carbon-500 hover:border-nexus-500 hover:text-nexus-300 transition-colors" on:click={onClose}>
           <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
           </svg>
@@ -391,7 +398,7 @@
     <!-- Scrollable content -->
     <div class="flex-1 overflow-y-auto px-6 py-4 space-y-6">
       <!-- Overview Card -->
-      <div class="card bg-base-200">
+      <div class="card bg-carbon-950/60">
         <div class="card-body p-4">
           <h4 class="card-title text-base mb-3">{$_('logs.detail.overview')}</h4>
           <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -444,7 +451,7 @@
       {#if log.processingSteps && log.processingSteps.length > 0}
         {@const timelineData = getTimelineData()}
 
-        <div class="card bg-base-200">
+        <div class="card bg-carbon-950/60">
           <div class="card-body p-4">
             <!-- 标题和控制 -->
             <div class="flex items-center justify-between mb-2">
@@ -456,7 +463,7 @@
                 </p>
               </div>
               <button
-                class="btn btn-sm btn-ghost"
+                class="nx-btn-ghost nx-btn-sm"
                 on:click={() => showTimeline = !showTimeline}
               >
                 {showTimeline ? $_('logs.detail.hideTimeline') : $_('logs.detail.showTimeline')}
@@ -518,7 +525,7 @@
 
                     <!-- 中间：Waterfall 条形图 -->
                     <div class="flex-1 flex items-center">
-                      <div class="w-full h-7 relative bg-base-300/30 rounded overflow-hidden">
+                      <div class="w-full h-7 relative bg-carbon-700/30 rounded overflow-hidden">
                         <div
                           class="absolute h-full {color} opacity-70 group-hover:opacity-90 transition-all cursor-pointer"
                           style="left: {leftPercent}%; width: {Math.max(widthPercent, 1)}%;"
@@ -542,7 +549,7 @@
               </div>
 
               <!-- 图例 -->
-              <div class="mt-6 pt-4 border-t border-base-300">
+              <div class="mt-6 pt-4 border-t border-carbon-600">
                 <div class="flex flex-wrap gap-4 text-xs">
                   <div class="flex items-center gap-2">
                     <div class="w-3 h-3 rounded-full bg-blue-500"></div>
@@ -576,7 +583,7 @@
       {/if}
 
       <!-- Path & Query -->
-      <div class="card bg-base-200">
+      <div class="card bg-carbon-950/60">
         <div class="card-body p-4">
           <h4 class="card-title text-base mb-3">{$_('logs.detail.requestInfo')}</h4>
           <div class="space-y-2">
@@ -584,23 +591,23 @@
               <!-- 显示原始路径和转换后的路径 -->
               <div>
                 <div class="text-xs opacity-60 mb-1">{$_('logs.detail.originalPath')}</div>
-                <div class="font-mono text-sm bg-base-300 p-2 rounded break-all">{log.path}</div>
+                <div class="font-mono text-sm bg-carbon-700 p-2 rounded break-all">{log.path}</div>
               </div>
               <div>
                 <div class="text-xs opacity-60 mb-1">{$_('logs.detail.transformedPath')}</div>
-                <div class="font-mono text-sm bg-base-300 p-2 rounded break-all">{log.transformedPath}</div>
+                <div class="font-mono text-sm bg-carbon-700 p-2 rounded break-all">{log.transformedPath}</div>
               </div>
             {:else}
               <!-- 只显示一个路径 -->
               <div>
                 <div class="text-xs opacity-60 mb-1">{$_('logs.detail.path')}</div>
-                <div class="font-mono text-sm bg-base-300 p-2 rounded break-all">{log.path}</div>
+                <div class="font-mono text-sm bg-carbon-700 p-2 rounded break-all">{log.path}</div>
               </div>
             {/if}
             {#if log.query}
               <div>
                 <div class="text-xs opacity-60 mb-1">{$_('logs.detail.query')}</div>
-                <div class="font-mono text-sm bg-base-300 p-2 rounded break-all">{log.query}</div>
+                <div class="font-mono text-sm bg-carbon-700 p-2 rounded break-all">{log.query}</div>
               </div>
             {/if}
           </div>
@@ -610,7 +617,7 @@
       <!-- Route & Upstream -->
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         {#if log.routePath}
-          <div class="card bg-base-200">
+          <div class="card bg-carbon-950/60">
             <div class="card-body p-4">
               <h4 class="card-title text-base mb-2">{$_('logs.detail.routePath')}</h4>
               <div class="font-mono text-sm">{log.routePath}</div>
@@ -618,7 +625,7 @@
           </div>
         {/if}
         {#if log.upstream}
-          <div class="card bg-base-200">
+          <div class="card bg-carbon-950/60">
             <div class="card-body p-4">
               <h4 class="card-title text-base mb-2">{$_('logs.detail.upstream')}</h4>
               <div class="font-mono text-sm mb-2">{log.upstream}</div>
@@ -632,7 +639,7 @@
 
       <!-- Error Info -->
       {#if log.errorMessage}
-        <div class="alert alert-error">
+        <div class="border-l-2 border-l-red-500 bg-red-500/5 px-3 py-2 font-mono text-[11px] uppercase tracking-command text-red-300">
           <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
@@ -644,9 +651,9 @@
       {/if}
 
       <!-- Request Data Tabs -->
-      <div class="card bg-base-200">
+      <div class="card bg-carbon-950/60">
         <div class="card-body p-0">
-          <div class="p-2 border-b border-base-300 flex justify-center">
+          <div class="p-2 border-b border-carbon-600 flex justify-center">
             <div class="inline-flex gap-1 p-1 bg-white dark:bg-gray-800 rounded-lg shadow-sm">
               <label class="cursor-pointer">
                 <input
@@ -662,7 +669,7 @@
                   class:text-primary-content={activeTab === 'original'}
                   class:shadow={activeTab === 'original'}
                   class:text-gray-700={activeTab !== 'original'}
-                  class:dark:text-gray-300={activeTab !== 'original'}
+                  class:dark:text-zinc-300={activeTab !== 'original'}
                   class:hover:text-gray-900={activeTab !== 'original'}
                   class:dark:hover:text-gray-100={activeTab !== 'original'}
                 >
@@ -683,7 +690,7 @@
                   class:text-primary-content={activeTab === 'transformed'}
                   class:shadow={activeTab === 'transformed'}
                   class:text-gray-700={activeTab !== 'transformed'}
-                  class:dark:text-gray-300={activeTab !== 'transformed'}
+                  class:dark:text-zinc-300={activeTab !== 'transformed'}
                   class:hover:text-gray-900={activeTab !== 'transformed'}
                   class:dark:hover:text-gray-100={activeTab !== 'transformed'}
                 >
@@ -704,7 +711,7 @@
                   class:text-primary-content={activeTab === 'response'}
                   class:shadow={activeTab === 'response'}
                   class:text-gray-700={activeTab !== 'response'}
-                  class:dark:text-gray-300={activeTab !== 'response'}
+                  class:dark:text-zinc-300={activeTab !== 'response'}
                   class:hover:text-gray-900={activeTab !== 'response'}
                   class:dark:hover:text-gray-100={activeTab !== 'response'}
                 >
@@ -729,7 +736,7 @@
                           <span class="text-sm">{$_('common.loading')}</span>
                         </div>
                       {:else if originalRequestHeadersError}
-                        <div class="alert alert-error">
+                        <div class="border-l-2 border-l-red-500 bg-red-500/5 px-3 py-2 font-mono text-[11px] uppercase tracking-command text-red-300">
                           <span class="text-sm">{originalRequestHeadersError}</span>
                         </div>
                       {:else if originalRequestHeaders !== null}
@@ -767,7 +774,7 @@
                           <span class="text-sm">{$_('common.loading')}</span>
                         </div>
                       {:else if originalRequestBodyError}
-                        <div class="alert alert-error">
+                        <div class="border-l-2 border-l-red-500 bg-red-500/5 px-3 py-2 font-mono text-[11px] uppercase tracking-command text-red-300">
                           <span class="text-sm">{originalRequestBodyError}</span>
                         </div>
                       {:else if originalRequestBody !== undefined}
@@ -808,7 +815,7 @@
                           <span class="text-sm">{$_('common.loading')}</span>
                         </div>
                       {:else if requestHeadersError}
-                        <div class="alert alert-error">
+                        <div class="border-l-2 border-l-red-500 bg-red-500/5 px-3 py-2 font-mono text-[11px] uppercase tracking-command text-red-300">
                           <span class="text-sm">{requestHeadersError}</span>
                         </div>
                       {:else if requestHeaders !== null}
@@ -846,7 +853,7 @@
                           <span class="text-sm">{$_('common.loading')}</span>
                         </div>
                       {:else if requestBodyError}
-                        <div class="alert alert-error">
+                        <div class="border-l-2 border-l-red-500 bg-red-500/5 px-3 py-2 font-mono text-[11px] uppercase tracking-command text-red-300">
                           <span class="text-sm">{requestBodyError}</span>
                         </div>
                       {:else if requestBody !== undefined}
@@ -887,7 +894,7 @@
                           <span class="text-sm">{$_('common.loading')}</span>
                         </div>
                       {:else if responseHeadersError}
-                        <div class="alert alert-error">
+                        <div class="border-l-2 border-l-red-500 bg-red-500/5 px-3 py-2 font-mono text-[11px] uppercase tracking-command text-red-300">
                           <span class="text-sm">{responseHeadersError}</span>
                         </div>
                       {:else if responseHeaders !== null}
@@ -925,7 +932,7 @@
                           <span class="text-sm">{$_('common.loading')}</span>
                         </div>
                       {:else if responseBodyError}
-                        <div class="alert alert-error">
+                        <div class="border-l-2 border-l-red-500 bg-red-500/5 px-3 py-2 font-mono text-[11px] uppercase tracking-command text-red-300">
                           <span class="text-sm">{responseBodyError}</span>
                         </div>
                       {:else if responseBody !== undefined}
@@ -958,7 +965,7 @@
 
       <!-- Auth Info -->
       {#if log.authLevel}
-        <div class="card bg-base-200">
+        <div class="card bg-carbon-950/60">
           <div class="card-body p-4">
             <h4 class="card-title text-base mb-2">{$_('logs.detail.authInfo')}</h4>
             <div class="grid grid-cols-2 gap-4">

@@ -19,19 +19,16 @@
   let isDragOver = false;
 
   function handleDragOver(event: DragEvent) {
-    event.preventDefault(); // Allow drop
+    event.preventDefault();
     event.dataTransfer!.dropEffect = 'move';
     isDragOver = true;
   }
-
-  function handleDragLeave(event: DragEvent) {
+  function handleDragLeave() {
     isDragOver = false;
   }
-
   function handleDrop(event: DragEvent) {
     event.preventDefault();
     isDragOver = false;
-    
     const data = event.dataTransfer?.getData('application/json');
     if (data) {
       const { originalIndex } = JSON.parse(data);
@@ -40,26 +37,29 @@
   }
 </script>
 
-<div 
-  class="bg-base-200/50 rounded-lg p-3 border-2 transition-colors relative"
-  class:border-primary={isDragOver}
-  class:bg-primary-content={isDragOver}
-  class:border-transparent={!isDragOver}
+<div
+  class="border-2 transition-colors relative p-3 {isDragOver ? 'border-nexus-500 bg-nexus-500/5' : 'border-carbon-600 bg-carbon-950/60'}"
   on:dragover={handleDragOver}
   on:dragleave={handleDragLeave}
   on:drop={handleDrop}
   role="group"
 >
-  <!-- Group Header -->
-  <div class="flex items-center gap-2 mb-2 px-1">
-    <div class="badge badge-primary font-bold">{$_('upstream.priorityGroup', { values: { priority } })}</div>
-    <div class="text-xs text-gray-500 uppercase tracking-wide">{$_('upstream.loadBalancingGroup')}</div>
+  <!-- Group header -->
+  <div class="flex items-center gap-2.5 mb-3">
+    <span class="nx-pill-accent">P{priority}</span>
+    <span class="font-mono text-[11px] uppercase tracking-command text-zinc-200">
+      {$_('upstream.priorityGroup', { values: { priority } })}
+    </span>
+    <span class="font-mono text-[10px] uppercase tracking-command text-zinc-500">·</span>
+    <span class="font-mono text-[10px] uppercase tracking-command text-zinc-500">
+      {$_('upstream.loadBalancingGroup')}
+    </span>
   </div>
 
   <!-- Items -->
   <div class="flex flex-col gap-0">
     {#each upstreams as upstream (upstream._uid || upstream.originalIndex)}
-      <DraggableUpstreamItem 
+      <DraggableUpstreamItem
         {upstream}
         on:edit={() => dispatch('edit', { originalIndex: upstream.originalIndex })}
         on:remove={() => dispatch('remove', { originalIndex: upstream.originalIndex })}
@@ -69,10 +69,12 @@
       />
     {/each}
   </div>
-  
+
   {#if upstreams.length === 0}
-      <div class="text-center py-8 text-gray-400 border-2 border-dashed border-base-300 rounded-lg">
-          {$_('upstream.dragToMerge')}
-      </div>
+    <div class="text-center py-8 border border-dashed border-carbon-500">
+      <span class="font-mono text-[11px] uppercase tracking-command text-zinc-500">
+        {$_('upstream.dragToMerge')}
+      </span>
+    </div>
   {/if}
 </div>

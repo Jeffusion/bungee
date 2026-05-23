@@ -184,17 +184,17 @@
 
 <div class="space-y-2">
   {#if rows.length === 0}
-    <div class="text-sm text-gray-500">{$_(i18nKey('empty'))}</div>
+    <div class="text-sm text-zinc-500">{$_(i18nKey('empty'))}</div>
   {/if}
 
   {#each rows as row, index}
-    <div class="space-y-2 rounded-lg border border-base-300 p-2">
+    <div class="space-y-2 rounded-lg border border-carbon-600 p-2">
       {#if showProviderFilters}
         <div class="grid grid-cols-[1fr_1fr_auto] gap-2 items-start">
           <div class="form-control w-full">
             <span class="label-text text-xs opacity-80 mb-1">{textOrFallback('sourceProviderFilter', 'Source provider filter')}</span>
             {#if normalizedSourceCatalogProvider}
-              <div class="input input-bordered flex items-center bg-base-200/60 text-base-content/80">{normalizedSourceCatalogProvider}</div>
+              <div class="nx-input flex items-center bg-carbon-950/60/60 text-base-content/80">{normalizedSourceCatalogProvider}</div>
             {:else}
               <ComboInput
                 value={getRowProviderFilter(index, 'source')}
@@ -210,7 +210,7 @@
           <div class="form-control w-full">
             <span class="label-text text-xs opacity-80 mb-1">{textOrFallback('targetProviderFilter', 'Target provider filter')}</span>
             {#if normalizedTargetCatalogProvider}
-              <div class="input input-bordered flex items-center bg-base-200/60 text-base-content/80">{normalizedTargetCatalogProvider}</div>
+              <div class="nx-input flex items-center bg-carbon-950/60/60 text-base-content/80">{normalizedTargetCatalogProvider}</div>
             {:else}
               <ComboInput
                 value={getRowProviderFilter(index, 'target')}
@@ -258,7 +258,7 @@
   {/each}
 
   <div class="flex items-center justify-between gap-2">
-    <button class="btn btn-sm btn-outline" type="button" on:click={addRow}>
+    <button class="nx-btn-outline nx-btn-sm" type="button" on:click={addRow}>
       {$_(i18nKey('addRow'))}
     </button>
 

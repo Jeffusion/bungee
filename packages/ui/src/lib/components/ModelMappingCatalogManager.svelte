@@ -118,9 +118,9 @@
       <p class="text-sm text-base-content/70 mt-1">{$_('plugins.modelMappingCatalog.description')}</p>
     </div>
 
-    <button class="btn btn-primary btn-sm" on:click={refreshCatalog} disabled={refreshing || loading}>
+    <button class="nx-btn-primary nx-btn-sm" on:click={refreshCatalog} disabled={refreshing || loading}>
       {#if refreshing}
-        <span class="loading loading-spinner loading-xs"></span>
+        <span class="inline-block h-2.5 w-2.5 border border-current border-t-transparent animate-spin"></span>
       {/if}
       {$_('plugins.modelMappingCatalog.refreshAction')}
     </button>
@@ -128,12 +128,12 @@
 
   {#if loading}
     <div class="flex justify-center items-center h-48">
-      <span class="loading loading-spinner loading-lg"></span>
+      <span class="inline-block h-8 w-8 border-2 border-current border-t-transparent animate-spin"></span>
     </div>
   {:else if status}
     <!-- Summary Stats -->
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-      <div class="card bg-base-200">
+      <div class="card bg-carbon-950/60">
         <div class="card-body p-4">
           <div class="text-sm text-base-content/60">{$_('plugins.modelMappingCatalog.catalogSource')}</div>
           <div class="mt-2">
@@ -146,21 +146,21 @@
         </div>
       </div>
 
-      <div class="card bg-base-200">
+      <div class="card bg-carbon-950/60">
         <div class="card-body p-4">
           <div class="text-sm text-base-content/60">{$_('plugins.modelMappingCatalog.modelCount')}</div>
           <div class="text-3xl font-semibold mt-2">{status.modelCount}</div>
         </div>
       </div>
 
-      <div class="card bg-base-200">
+      <div class="card bg-carbon-950/60">
         <div class="card-body p-4">
           <div class="text-sm text-base-content/60">{$_('plugins.modelMappingCatalog.providerCount')}</div>
           <div class="text-3xl font-semibold mt-2">{status.providerCount}</div>
         </div>
       </div>
 
-      <div class="card bg-base-200">
+      <div class="card bg-carbon-950/60">
         <div class="card-body p-4">
           <div class="text-sm text-base-content/60">{$_('plugins.modelMappingCatalog.lastRefresh')}</div>
           <div class="font-medium mt-2">{formatTime(status.fetchedAt)}</div>
@@ -169,7 +169,7 @@
     </div>
 
     {#if status.source === 'static'}
-      <div class="alert alert-warning">
+      <div class="border-l-2 border-l-amber-500 bg-amber-500/5 px-3 py-2 font-mono text-[11px] uppercase tracking-command text-amber-200">
         <span>{$_('plugins.modelMappingCatalog.staticHint')}</span>
       </div>
     {:else}
@@ -179,29 +179,29 @@
     {/if}
 
     <!-- Filter Bar -->
-    <div class="flex flex-col sm:flex-row gap-4 items-center justify-between bg-base-100 p-4 rounded-xl border border-base-200">
+    <div class="flex flex-col sm:flex-row gap-4 items-center justify-between bg-base-100 p-4 rounded-xl border border-carbon-600">
       <div class="flex gap-4 w-full sm:w-auto flex-1">
         <div class="relative w-full sm:w-64" bind:this={providerDropdownRef}>
           <div class="flex items-center gap-1">
             <input
               type="text"
-              class="input input-bordered w-full"
+              class="nx-input w-full"
               placeholder={selectedProvider || $_('plugins.modelMappingCatalog.allProviders')}
               bind:value={providerFilter}
               on:focusin={() => showProviderDropdown = true}
               on:keydown={handleProviderKeydown}
             />
             {#if selectedProvider}
-              <button class="btn btn-ghost btn-xs btn-circle" on:click={clearProvider} title="Clear">
+              <button class="inline-flex items-center justify-center h-5 w-5 text-zinc-500 hover:text-red-300 transition-colors" on:click={clearProvider} title="Clear">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
               </button>
             {/if}
           </div>
           {#if showProviderDropdown && filteredProviders.length > 0}
-            <ul class="absolute z-50 left-0 right-0 mt-1 bg-base-100 border border-base-200 rounded-box shadow-lg max-h-60 overflow-y-auto">
+            <ul class="absolute z-50 left-0 right-0 mt-1 bg-base-100 border border-carbon-600 rounded-box shadow-lg max-h-60 overflow-y-auto">
               <li>
                 <button
-                  class="w-full text-left px-4 py-2 hover:bg-base-200 text-sm {!selectedProvider ? 'font-semibold bg-base-200/50' : ''}"
+                  class="w-full text-left px-4 py-2 hover:bg-carbon-950/60 text-sm {!selectedProvider ? 'font-semibold bg-carbon-950/60/50' : ''}"
                   on:click={() => selectProvider('')}
                 >
                   {$_('plugins.modelMappingCatalog.allProviders')}
@@ -210,7 +210,7 @@
               {#each filteredProviders as provider}
                 <li>
                   <button
-                    class="w-full text-left px-4 py-2 hover:bg-base-200 text-sm {selectedProvider === provider ? 'font-semibold bg-base-200/50' : ''}"
+                    class="w-full text-left px-4 py-2 hover:bg-carbon-950/60 text-sm {selectedProvider === provider ? 'font-semibold bg-carbon-950/60/50' : ''}"
                     on:click={() => selectProvider(provider)}
                   >
                     {provider}
@@ -225,7 +225,7 @@
           <input 
             type="text" 
             placeholder={$_('plugins.modelMappingCatalog.searchModels')} 
-            class="input input-bordered w-full pl-10"
+            class="nx-input w-full pl-10"
             bind:value={searchQuery}
           />
           <svg class="w-5 h-5 absolute left-3 top-3 text-base-content/50" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
@@ -237,11 +237,11 @@
     </div>
 
     <!-- Models Table -->
-    <div class="card bg-base-100 border border-base-200 overflow-hidden">
+    <div class="card bg-base-100 border border-carbon-600 overflow-hidden">
       <div class="overflow-x-auto">
         <table class="table w-full">
           <thead>
-            <tr class="bg-base-200/50">
+            <tr class="bg-carbon-950/60/50">
               <th class="w-1/4">{$_('plugins.modelMappingCatalog.provider')}</th>
               <th class="w-1/3">{$_('plugins.modelMappingCatalog.modelId')}</th>
               <th class="w-auto">{$_('plugins.modelMappingCatalog.modelName')}</th>
@@ -265,7 +265,7 @@
                     {/if}
                   </td>
                   <td>
-                    <code class="text-xs bg-base-200 px-1.5 py-0.5 rounded break-all">{model.value}</code>
+                    <code class="text-xs bg-carbon-950/60 px-1.5 py-0.5 rounded break-all">{model.value}</code>
                   </td>
                   <td>
                     <div class="font-medium">{model.label}</div>
@@ -282,7 +282,7 @@
 
       <!-- Pagination -->
       {#if totalPages > 1}
-        <div class="card-body p-4 border-t border-base-200 flex flex-row justify-between items-center bg-base-100">
+        <div class="card-body p-4 border-t border-carbon-600 flex flex-row justify-between items-center bg-base-100">
           <div class="text-sm text-base-content/60">
             Page {currentPage} of {totalPages}
           </div>

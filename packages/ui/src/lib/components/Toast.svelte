@@ -1,6 +1,16 @@
+<!--
+  Toast — Industrial floating notification. Variant tones map to the same
+  canonical mapping as the rest of the system (success=emerald, warning=
+  amber, error=red, info=nexus-orange). Each toast lives inside a
+  ToastContainer at the top-right of the viewport.
+
+  Positioning is delegated to ToastContainer so multiple toasts stack
+  cleanly.
+
+  Props preserved exactly so call-sites needn't change.
+-->
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { createEventDispatcher } from 'svelte';
+  import { onMount, onDestroy, createEventDispatcher } from 'svelte';
 
   export let message: string;
   export let type: 'success' | 'error' | 'warning' | 'info' = 'info';
@@ -8,8 +18,7 @@
   export let visible = true;
 
   const dispatch = createEventDispatcher();
-
-  let timer: number;
+  let timer: any;
 
   onMount(() => {
     if (duration > 0) {
@@ -18,10 +27,10 @@
         dispatch('close');
       }, duration);
     }
+  });
 
-    return () => {
-      if (timer) clearTimeout(timer);
-    };
+  onDestroy(() => {
+    if (timer) clearTimeout(timer);
   });
 
   function close() {
@@ -30,38 +39,35 @@
     if (timer) clearTimeout(timer);
   }
 
-  $: alertClass = {
-    success: 'alert-success',
-    error: 'alert-error',
-    warning: 'alert-warning',
-    info: 'alert-info'
-  }[type];
+  const toneClass: Record<typeof type, { border: string; text: string; dot: string }> = {
+    success: { border: 'border-l-emerald-500', text: 'text-emerald-300', dot: 'nx-dot-ok' },
+    warning: { border: 'border-l-amber-500',   text: 'text-amber-300',   dot: 'nx-dot-warn' },
+    error:   { border: 'border-l-red-500',     text: 'text-red-300',     dot: 'nx-dot-danger' },
+    info:    { border: 'border-l-nexus-500',   text: 'text-nexus-300',   dot: 'nx-dot-accent' },
+  };
+
+  $: tone = toneClass[type];
 </script>
 
 {#if visible}
-  <div class="toast toast-end toast-top z-50">
-    <div class="alert {alertClass} shadow-lg">
-      <div>
-        {#if type === 'success'}
-          <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        {:else if type === 'error'}
-          <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        {:else if type === 'warning'}
-          <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>
-        {:else}
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-          </svg>
-        {/if}
-        <span>{message}</span>
-      </div>
-      <button class="btn btn-sm btn-ghost" on:click={close}>✕</button>
-    </div>
+  <div
+    class="nx-panel-raised flex items-center gap-3 pl-3 pr-2 py-2.5 border-l-2 {tone.border} min-w-[260px] max-w-md pointer-events-auto"
+    role="status"
+    aria-live="polite"
+  >
+    <span class={tone.dot} aria-hidden="true"></span>
+    <span class="flex-1 font-mono text-[11px] uppercase tracking-command {tone.text} truncate">
+      {message}
+    </span>
+    <button
+      type="button"
+      class="inline-flex items-center justify-center h-6 w-6 border border-carbon-500 bg-transparent text-zinc-400 transition-colors hover:border-nexus-500 hover:text-nexus-300"
+      on:click={close}
+      aria-label="Close"
+    >
+      <svg viewBox="0 0 24 24" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2.4">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+      </svg>
+    </button>
   </div>
 {/if}
