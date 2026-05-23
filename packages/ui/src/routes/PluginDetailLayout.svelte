@@ -7,6 +7,8 @@
   import PluginHost from '../lib/components/PluginHost.svelte';
   import { toast } from '../lib/stores/toast';
   import { getPluginText } from '../lib/utils/plugin-i18n';
+  import PluginIcon from '../lib/components/PluginIcon.svelte';
+  import { PanelCard, StatusBadge } from '../lib/components/industrial';
 
   export let params: { name: string; path?: string } = { name: '' };
 
@@ -19,11 +21,9 @@
     const prefix = `/plugins/${params.name}`;
     let internalPath = fullPath.replace(prefix, '');
     if (internalPath.startsWith('/')) internalPath = internalPath.substring(1);
-
     activeTabPath = '/' + internalPath;
-
     if (plugin && (!internalPath || internalPath === '') && !loading) {
-       redirectToDefaultTab();
+      redirectToDefaultTab();
     }
   }
 
@@ -31,16 +31,13 @@
     loading = true;
     try {
       const plugins = await PluginsAPI.list();
-      plugin = plugins.find(p => p.name === params.name) || null;
-
+      plugin = plugins.find((p) => p.name === params.name) || null;
       if (!plugin) {
         toast.show(`Plugin ${params.name} not found`, 'error');
       } else {
         const prefix = `/plugins/${params.name}`;
         const internalPath = $location.replace(prefix, '');
-        if (!internalPath || internalPath === '/') {
-           redirectToDefaultTab();
-        }
+        if (!internalPath || internalPath === '/') redirectToDefaultTab();
       }
     } catch (e: any) {
       toast.show('Failed to load plugin details: ' + e.message, 'error');
@@ -50,15 +47,11 @@
   }
 
   function redirectToDefaultTab() {
-     if (!plugin) return;
-
-     if (plugin.metadata?.contributes?.settings || plugin.metadata?.ui?.settings) {
-        const settingsPath = plugin.metadata?.contributes?.settings || plugin.metadata?.ui?.settings;
-        replace(`/plugins/${plugin.name}${settingsPath}`);
-        return;
-     }
-
-     // Only redirect to settings
+    if (!plugin) return;
+    if (plugin.metadata?.contributes?.settings || plugin.metadata?.ui?.settings) {
+      const settingsPath = plugin.metadata?.contributes?.settings || plugin.metadata?.ui?.settings;
+      replace(`/plugins/${plugin.name}${settingsPath}`);
+    }
   }
 
   onMount(() => {
@@ -66,55 +59,64 @@
   });
 </script>
 
-<div class="p-6">
+<div class="px-6 py-5 space-y-4">
   {#if loading}
-    <div class="flex justify-center items-center h-64">
-      <span class="loading loading-spinner loading-lg"></span>
-    </div>
-  {:else if !plugin}
-    <div class="text-center py-12">
-      <h3 class="text-xl font-semibold mb-2">{$_('plugins.notFound')}</h3>
-      <a href="/__ui/#/plugins" class="btn btn-primary btn-sm">{$_('plugins.backToPlugins')}</a>
-    </div>
-  {:else}
-    <!-- Header -->
-    <div class="flex items-center gap-4 mb-6">
-       <div class="avatar placeholder">
-        <div class="bg-neutral-focus text-neutral-content rounded-full w-16 h-16 flex items-center justify-center text-2xl">
-          {#if plugin.metadata?.icon && plugin.metadata.icon.startsWith('<svg')}
-            {@html plugin.metadata.icon}
-          {:else if plugin.metadata?.icon}
-            <span class="material-icons text-3xl">{plugin.metadata.icon}</span>
-          {:else}
-            <span>{plugin.name[0].toUpperCase()}</span>
-          {/if}
+    <PanelCard title="LOADING PLUGIN" tag="WAIT">
+      <div class="flex justify-center items-center h-32">
+        <div class="relative h-10 w-10">
+          <div class="absolute inset-0 border border-nexus-500/30"></div>
+          <div class="absolute inset-0 border-t-2 border-nexus-500 animate-spin"></div>
         </div>
       </div>
-      <div>
-        <h1 class="text-3xl font-bold flex items-center gap-3">
-          {getPluginText(plugin.metadata?.name, plugin.name, $_) || plugin.name}
-          <span class="badge badge-lg badge-ghost">v{plugin.version || '0.0.0'}</span>
-           {#if plugin.enabled}
-              <span class="badge badge-lg badge-success">{$_('plugins.enabled')}</span>
-            {:else}
-              <span class="badge badge-lg badge-ghost">{$_('plugins.disabled')}</span>
-            {/if}
-        </h1>
-        <p class="text-gray-500 mt-1">{getPluginText(plugin.metadata?.description, plugin.name, $_) || $_('plugins.noDescription')}</p>
+    </PanelCard>
+  {:else if !plugin}
+    <PanelCard title={$_('plugins.notFound')} tag="404" stripe="red">
+      <div class="py-6 text-center">
+        <a href="/__ui/#/plugins" class="nx-btn-primary">{$_('plugins.backToPlugins')}</a>
+      </div>
+    </PanelCard>
+  {:else}
+    <!-- Plugin header -->
+    <div class="flex items-center gap-4">
+      <span class="flex h-14 w-14 items-center justify-center border border-carbon-500 bg-carbon-950 text-nexus-400 shrink-0">
+        <PluginIcon icon={plugin.metadata?.icon} fallback={plugin.name} sizeClass="h-6 w-6" />
+      </span>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-3 flex-wrap">
+          <h1 class="nx-display text-xl text-zinc-50 tracking-[0.02em] truncate">
+            {getPluginText(plugin.metadata?.name, plugin.name, $_) || plugin.name}
+          </h1>
+          <span class="font-mono text-[11px] uppercase tracking-command text-zinc-500">
+            {plugin.version && plugin.version !== 'unknown' ? `v${plugin.version}` : '— UNVERSIONED'}
+          </span>
+          {#if plugin.enabled}
+            <StatusBadge variant="active" dot>{$_('plugins.enabled')}</StatusBadge>
+          {:else}
+            <StatusBadge variant="muted">{$_('plugins.disabled')}</StatusBadge>
+          {/if}
+        </div>
+        <p class="text-xs text-zinc-400 mt-1 truncate">
+          {getPluginText(plugin.metadata?.description, plugin.name, $_) || $_('plugins.noDescription')}
+        </p>
       </div>
     </div>
 
-    <!-- Content -->
-    <div class="bg-base-100 rounded-box shadow-xl border border-base-200 min-h-[500px] overflow-hidden">
-       {#if plugin.name === 'model-mapping' && activeTabPath === '/catalog'}
-         <ModelMappingCatalogManager />
-       {:else if activeTabPath}
-          <PluginHost pluginName={plugin.name} path={activeTabPath} />
-        {:else}
-         <div class="flex justify-center items-center h-64 text-gray-400">
-           Select a tab to view content
-         </div>
-       {/if}
-    </div>
+    <!-- Content panel -->
+    <PanelCard
+      title={plugin.name.toUpperCase()}
+      tag={activeTabPath ? activeTabPath.toUpperCase() : 'DETAIL'}
+      flush
+      class="min-h-[500px]"
+    >
+      {#if plugin.name === 'model-mapping' && activeTabPath === '/catalog'}
+        <ModelMappingCatalogManager />
+      {:else if activeTabPath}
+        <PluginHost pluginName={plugin.name} path={activeTabPath} />
+      {:else}
+        <div class="flex justify-center items-center h-64 font-mono text-[11px] uppercase tracking-command text-zinc-500">
+          Select a tab to view content
+        </div>
+      {/if}
+    </PanelCard>
   {/if}
 </div>

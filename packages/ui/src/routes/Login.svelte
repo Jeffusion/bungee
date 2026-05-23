@@ -3,13 +3,13 @@
   import { login } from '../lib/stores/auth';
   import { loginWithToken } from '../lib/api/auth';
   import { toast } from '../lib/stores/toast';
+  import { PanelCard } from '../lib/components/industrial';
 
   let tokenInput = '';
   let loading = false;
   let error = '';
 
   async function handleLogin() {
-    // 1. 验证输入
     if (!tokenInput.trim()) {
       error = $_('login.required');
       return;
@@ -19,20 +19,15 @@
     error = '';
 
     try {
-      // 2. 调用登录 API
       const result = await loginWithToken(tokenInput);
-
       if (result.success) {
-        // 3. 登录成功：保存 token 并跳转
         login(tokenInput);
         toast.show($_('login.success'), 'success');
         window.location.hash = '#/';
       } else {
-        // 4. 登录失败：显示错误
         error = result.error || $_('login.unauthorized');
       }
     } catch (err) {
-      // 5. 网络错误或其他异常
       error = $_('login.failed', { values: { error: (err as Error).message } });
     } finally {
       loading = false;
@@ -40,86 +35,100 @@
   }
 
   function handleKeyPress(event: KeyboardEvent) {
-    if (event.key === 'Enter' && !loading) {
-      handleLogin();
-    }
+    if (event.key === 'Enter' && !loading) handleLogin();
   }
 </script>
 
-<div class="min-h-screen bg-base-200 flex items-center justify-center p-4">
-  <div class="card w-full max-w-md bg-base-100 shadow-2xl">
-    <div class="card-body">
-      <!-- Logo and Title -->
-      <div class="flex flex-col items-center mb-6">
-        <!-- Logo Icon -->
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          class="h-16 w-16 text-primary mb-4"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M13 10V3L4 14h7v7l9-11h-7z"
-          />
-        </svg>
+<div class="min-h-screen flex items-center justify-center p-4 bg-carbon-950 nx-grid-bg relative overflow-hidden">
+  <!-- Orange glow accents -->
+  <div class="absolute -top-32 -left-32 h-96 w-96 rounded-full bg-nexus-500/10 blur-3xl pointer-events-none"></div>
+  <div class="absolute -bottom-32 -right-32 h-96 w-96 rounded-full bg-nexus-500/5 blur-3xl pointer-events-none"></div>
 
-        <!-- Title and Subtitle -->
-        <h1 class="text-3xl font-bold text-center">{$_('login.title')}</h1>
-        <p class="text-sm text-base-content/60 text-center mt-2">
-          {$_('login.subtitle')}
-        </p>
-      </div>
+  <!-- Top accent line -->
+  <div class="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-nexus-500 to-transparent"></div>
 
-      <!-- Token Input Form -->
-      <div class="form-control w-full">
-        <label class="label" for="token-input">
-          <span class="label-text">{$_('login.token')}</span>
-        </label>
-        <input
-          id="token-input"
-          type="password"
-          placeholder={$_('login.tokenPlaceholder')}
-          class="input input-bordered w-full"
-          class:input-error={!!error}
-          bind:value={tokenInput}
-          on:keypress={handleKeyPress}
-          disabled={loading}
-          autocomplete="off"
-        />
+  <div class="relative w-full max-w-md">
+    <PanelCard title="AUTHENTICATION REQUIRED" tag="BUNGEE">
+      <div class="px-4 py-6 space-y-6">
+        <!-- Brand -->
+        <div class="flex flex-col items-center gap-3">
+          <span class="relative flex h-14 w-14 items-center justify-center border border-nexus-500/60 bg-carbon-900">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class="h-7 w-7 text-nexus-500"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path stroke-linecap="round" stroke-linejoin="round" d="M13 3L5 13h6l-1 8l8-11h-6l1-7z" />
+            </svg>
+            <span class="absolute -bottom-1 -right-1 h-2 w-2 bg-nexus-500 shadow-glow-orange"></span>
+          </span>
 
-        <!-- Error Message -->
-        {#if error}
-          <div class="label">
-            <span class="label-text-alt text-error">{error}</span>
+          <div class="text-center space-y-1">
+            <h1 class="nx-display text-xl text-zinc-50 tracking-[0.06em]">
+              {$_('login.title')}
+            </h1>
+            <p class="font-mono text-[11px] uppercase tracking-command text-zinc-500">
+              {$_('login.subtitle')}
+            </p>
           </div>
-        {/if}
-      </div>
+        </div>
 
-      <!-- Login Button -->
-      <div class="form-control mt-6">
+        <!-- Token input -->
+        <div class="space-y-2">
+          <label for="token-input" class="block font-mono text-[10px] uppercase tracking-chiseled text-zinc-500">
+            // {$_('login.token')}
+          </label>
+          <input
+            id="token-input"
+            type="password"
+            placeholder={$_('login.tokenPlaceholder')}
+            class="nx-input"
+            class:border-red-500={!!error}
+            bind:value={tokenInput}
+            on:keypress={handleKeyPress}
+            disabled={loading}
+            autocomplete="off"
+          />
+
+          {#if error}
+            <div class="flex items-center gap-2 pt-1">
+              <span class="nx-dot-danger"></span>
+              <span class="font-mono text-[10px] uppercase tracking-command text-red-300">{error}</span>
+            </div>
+          {/if}
+        </div>
+
+        <!-- Submit -->
         <button
-          class="btn btn-primary"
-          class:loading={loading}
+          class="nx-btn-primary w-full justify-center"
           on:click={handleLogin}
           disabled={loading}
         >
-          {loading ? $_('login.loggingIn') : $_('login.submit')}
+          {#if loading}
+            <span class="inline-block h-3 w-3 border border-current border-t-transparent animate-spin"></span>
+            <span>{$_('login.loggingIn')}</span>
+          {:else}
+            <svg viewBox="0 0 24 24" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2.4">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+            </svg>
+            <span>{$_('login.submit')}</span>
+          {/if}
         </button>
       </div>
 
-      <!-- Additional Info (Optional) -->
-      <div class="divider text-xs opacity-50 mt-6">Bungee Reverse Proxy</div>
-    </div>
+      <svelte:fragment slot="foot">
+        <div class="flex items-center justify-between">
+          <span class="font-mono text-[10px] uppercase tracking-chiseled text-zinc-600">
+            BUNGEE REVERSE PROXY
+          </span>
+          <span class="font-mono text-[10px] uppercase tracking-chiseled text-zinc-600">
+            v4.x
+          </span>
+        </div>
+      </svelte:fragment>
+    </PanelCard>
   </div>
 </div>
-
-<style>
-  /* Additional custom styles if needed */
-  .card {
-    backdrop-filter: blur(10px);
-  }
-</style>
