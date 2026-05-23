@@ -99,7 +99,7 @@ function createConfig(pluginPath: string): AppConfig {
     routes: [{
       path: ROUTE_ID,
       plugins: [{ name: TEST_PLUGIN_NAME, path: pluginPath, enabled: true }],
-      upstreams: [{ target: 'http://example.com' }],
+      endpoints: [{ target: 'http://example.com' }],
     }],
   };
 }

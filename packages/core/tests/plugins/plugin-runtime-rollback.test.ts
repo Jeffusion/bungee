@@ -142,7 +142,7 @@ describe('plugin runtime rollback semantics', () => {
     try {
       const result = await registry.initializeFromConfig({
         plugins: [],
-        routes: [{ path: ROUTE_ID, plugins: [{ name: TEST_PLUGIN_NAME, path: pluginPath }], upstreams: [] }],
+        routes: [{ path: ROUTE_ID, plugins: [{ name: TEST_PLUGIN_NAME, path: pluginPath }], endpoints: [] }],
       });
 
       expect(result.failed).toBe(0);
@@ -195,7 +195,7 @@ describe('plugin runtime rollback semantics', () => {
     try {
       const result = await registry.initializeFromConfig({
         plugins: [],
-        routes: [{ path: ROUTE_ID, plugins: [{ name: TEST_PLUGIN_NAME, path: goodPluginPath }], upstreams: [] }],
+        routes: [{ path: ROUTE_ID, plugins: [{ name: TEST_PLUGIN_NAME, path: goodPluginPath }], endpoints: [] }],
       });
 
       expect(result.failed).toBe(0);

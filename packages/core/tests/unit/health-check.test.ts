@@ -1,6 +1,5 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
-import type { RuntimeUpstream } from '../../src/worker/types';
-import type { RouteConfig } from '@jeffusion/bungee-types';
+import type { EffectiveRouteConfig, RuntimeUpstream } from '../../src/worker/types';
 import {
   getHealthCheckConfig,
   processHealthCheckResult,
@@ -10,34 +9,34 @@ import {
 
 const defaultConfig: HealthCheckConfig = {
   enabled: true,
-  intervalMs: 10000,
-  timeoutMs: 3000,
+  interval_ms: 10000,
+  timeout_ms: 3000,
   path: '/health',
   method: 'GET',
-  expectedStatus: [200],
-  unhealthyThreshold: 3,
-  healthyThreshold: 2,
-  autoEnableOnHealthCheck: true,
+  expected_status: [200],
+  unhealthy_threshold: 3,
+  healthy_threshold: 2,
+  auto_enable_on_health_check: true,
+  content_type: 'application/json',
 };
 
 function buildConfig(overrides: Partial<HealthCheckConfig> = {}): HealthCheckConfig {
   return {
     ...defaultConfig,
     ...overrides,
-    expectedStatus: overrides.expectedStatus ?? [...defaultConfig.expectedStatus],
-    autoEnableOnHealthCheck: overrides.autoEnableOnHealthCheck ?? defaultConfig.autoEnableOnHealthCheck,
+    expected_status: overrides.expected_status ?? [...defaultConfig.expected_status],
+    auto_enable_on_health_check: overrides.auto_enable_on_health_check ?? defaultConfig.auto_enable_on_health_check,
   };
 }
 
 describe('Health Check - Configuration', () => {
   test('should return null when health check is not enabled', () => {
-    const route: RouteConfig = {
-      configVersion: 2,
+    const route: EffectiveRouteConfig = {
       path: '/api',
-      upstreams: [{ target: 'http://server1.com' }],
+      endpoints: [{ target: 'http://server1.com' }],
       failover: {
         enabled: true,
-        retryOn: [502, 503],
+        retry_on: [502, 503],
       },
     };
 
@@ -46,14 +45,13 @@ describe('Health Check - Configuration', () => {
   });
 
   test('should return config with defaults when health check is enabled', () => {
-    const route: RouteConfig = {
-      configVersion: 2,
+    const route: EffectiveRouteConfig = {
       path: '/api',
-      upstreams: [{ target: 'http://server1.com' }],
+      endpoints: [{ target: 'http://server1.com' }],
       failover: {
         enabled: true,
-        retryOn: [502, 503],
-        healthCheck: {
+        retry_on: [502, 503],
+        health_check: {
           enabled: true,
         },
       },
@@ -62,50 +60,49 @@ describe('Health Check - Configuration', () => {
     const config = getHealthCheckConfig(route);
     expect(config).not.toBeNull();
     expect(config?.enabled).toBe(true);
-    expect(config?.intervalMs).toBe(10000);
-    expect(config?.timeoutMs).toBe(3000);
+    expect(config?.interval_ms).toBe(10000);
+    expect(config?.timeout_ms).toBe(3000);
     expect(config?.path).toBe('/health');
     expect(config?.method).toBe('GET');
-    expect(config?.expectedStatus).toEqual([200]);
-    expect(config?.unhealthyThreshold).toBe(3);
-    expect(config?.healthyThreshold).toBe(2);
-    expect(config?.autoEnableOnHealthCheck).toBe(true);
+    expect(config?.expected_status).toEqual([200]);
+    expect(config?.unhealthy_threshold).toBe(3);
+    expect(config?.healthy_threshold).toBe(2);
+    expect(config?.auto_enable_on_health_check).toBe(true);
   });
 
   test('should use custom configuration values', () => {
-    const route: RouteConfig = {
-      configVersion: 2,
+    const route: EffectiveRouteConfig = {
       path: '/api',
-      upstreams: [{ target: 'http://server1.com' }],
+      endpoints: [{ target: 'http://server1.com' }],
       failover: {
         enabled: true,
-        retryOn: [502, 503],
-        healthCheck: {
+        retry_on: [502, 503],
+        health_check: {
           enabled: true,
-          intervalMs: 5000,
-          timeoutMs: 2000,
+          interval_ms: 5000,
+          timeout_ms: 2000,
           path: '/custom-health',
           method: 'POST',
-          expectedStatus: [200, 204],
-          unhealthyThreshold: 5,
-          healthyThreshold: 3,
+          expected_status: [200, 204],
+          unhealthy_threshold: 5,
+          healthy_threshold: 3,
         },
-        passiveHealth: {
-          autoEnableOnActiveHealthCheck: false,
+        passive_health: {
+          auto_enable_on_active_health_check: false,
         },
       },
     };
 
     const config = getHealthCheckConfig(route);
     expect(config).not.toBeNull();
-    expect(config?.intervalMs).toBe(5000);
-    expect(config?.timeoutMs).toBe(2000);
+    expect(config?.interval_ms).toBe(5000);
+    expect(config?.timeout_ms).toBe(2000);
     expect(config?.path).toBe('/custom-health');
     expect(config?.method).toBe('POST');
-    expect(config?.expectedStatus).toEqual([200, 204]);
-    expect(config?.unhealthyThreshold).toBe(5);
-    expect(config?.healthyThreshold).toBe(3);
-    expect(config?.autoEnableOnHealthCheck).toBe(false);
+    expect(config?.expected_status).toEqual([200, 204]);
+    expect(config?.unhealthy_threshold).toBe(5);
+    expect(config?.healthy_threshold).toBe(3);
+    expect(config?.auto_enable_on_health_check).toBe(false);
   });
 });
 
@@ -114,16 +111,16 @@ describe('Health Check - Result Processing', () => {
 
   beforeEach(() => {
     upstream = {
-      upstreamId: 'server1',
+      upstream_id: 'server1',
       target: 'http://server1.com',
       weight: 100,
       status: 'HEALTHY',
-      lastFailureTime: undefined,
-      consecutiveFailures: 0,
-      consecutiveSuccesses: 0,
-      healthCheckSuccesses: 0,
-      healthCheckFailures: 0,
-      recoveryAttemptCount: 0,
+      last_failure_time: undefined,
+      consecutive_failures: 0,
+      consecutive_successes: 0,
+      health_check_successes: 0,
+      health_check_failures: 0,
+      recovery_attempt_count: 0,
     };
   });
 
@@ -138,9 +135,9 @@ describe('Health Check - Result Processing', () => {
 
     processHealthCheckResult(upstream, result, buildConfig());
 
-    expect(upstream.healthCheckSuccesses).toBe(1);
-    expect(upstream.healthCheckFailures).toBe(0);
-    expect(upstream.status).toBe('HEALTHY');
+    expect(upstream.health_check_successes).toBe(1);
+    expect(upstream.health_check_failures).toBe(0);
+    expect(upstream.status as RuntimeUpstream['status']).toBe('HEALTHY');
   });
 
   test('should mark as UNHEALTHY after reaching unhealthy threshold', () => {
@@ -158,12 +155,12 @@ describe('Health Check - Result Processing', () => {
     processHealthCheckResult(upstream, result, config);
 
     expect(upstream.status).toBe('UNHEALTHY');
-    expect(upstream.lastFailureTime).toBeDefined();
+    expect(upstream.last_failure_time).toBeDefined();
   });
 
   test('should mark as HEALTHY after reaching healthy threshold', () => {
     upstream.status = 'UNHEALTHY';
-    upstream.lastFailureTime = Date.now() - 10000;
+    upstream.last_failure_time = Date.now() - 10000;
 
     const result: HealthCheckResult = {
       upstream: 'http://server1.com',
@@ -177,14 +174,14 @@ describe('Health Check - Result Processing', () => {
     processHealthCheckResult(upstream, result, config);
     processHealthCheckResult(upstream, result, config);
 
-    expect(upstream.status).toBe('HEALTHY');
-    expect(upstream.lastFailureTime).toBeUndefined();
+    expect(upstream.status as RuntimeUpstream['status']).toBe('HEALTHY');
+    expect(upstream.last_failure_time).toBeUndefined();
   });
 
-  test('should respect autoEnableOnHealthCheck=false', () => {
+  test('should respect auto_enable_on_health_check=false', () => {
     upstream.status = 'UNHEALTHY';
-    upstream.disabled = true;
-    upstream.healthCheckSuccesses = 1;
+    upstream.is_disabled = true;
+    upstream.health_check_successes = 1;
 
     const result: HealthCheckResult = {
       upstream: 'http://server1.com',
@@ -194,9 +191,9 @@ describe('Health Check - Result Processing', () => {
       timestamp: Date.now(),
     };
 
-    processHealthCheckResult(upstream, result, buildConfig({ autoEnableOnHealthCheck: false }));
+    processHealthCheckResult(upstream, result, buildConfig({ auto_enable_on_health_check: false }));
 
-    expect(upstream.status).toBe('HEALTHY');
-    expect(upstream.disabled).toBe(true);
+    expect(upstream.status as RuntimeUpstream['status']).toBe('HEALTHY');
+    expect(upstream.is_disabled).toBe(true);
   });
 });

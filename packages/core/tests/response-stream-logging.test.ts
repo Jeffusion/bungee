@@ -131,8 +131,8 @@ describe('prepareResponse streamed logging', () => {
       logging: {
         body: {
           enabled: true,
-          maxSize: 64,
-          retentionDays: 1,
+          max_size: 64,
+          retention_days: 1,
         },
       },
     };
@@ -201,8 +201,8 @@ describe('prepareResponse streamed logging', () => {
       logging: {
         body: {
           enabled: false,
-          maxSize: 5_120,
-          retentionDays: 1,
+          max_size: 5_120,
+          retention_days: 1,
         },
       },
     };

@@ -1,12 +1,12 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect, beforeEach } from 'bun:test';
 import { selectUpstream } from '../../src/worker/upstream/selector';
-import type { RuntimeUpstream } from '../../src/worker/types';
+import { runtimeState } from '../../src/worker/state/runtime-state';
+import type { EffectiveRouteConfig, RuntimeUpstream } from '../../src/worker/types';
 import type { ExpressionContext } from '../../src/expression-engine';
-import type { RouteConfig } from '@jeffusion/bungee-types';
 
 // Helper function to create mock upstream with required fields
 function createUpstream(overrides: Partial<RuntimeUpstream> = {}): RuntimeUpstream {
-  const upstreamId = overrides.upstreamId
+  const upstream_id = overrides.upstream_id
     ?? (typeof overrides.target === 'string' ? overrides.target : 'upstream-default');
 
   return {
@@ -14,10 +14,11 @@ function createUpstream(overrides: Partial<RuntimeUpstream> = {}): RuntimeUpstre
     status: 'HEALTHY',
     weight: 100,
     priority: 1,
-    consecutiveFailures: 0,
-    consecutiveSuccesses: 0,
+    consecutive_failures: 0,
+    consecutive_successes: 0,
+    recovery_attempt_count: 0,
     ...overrides,
-    upstreamId
+    upstream_id
   };
 }
 
@@ -217,18 +218,26 @@ describe('selectUpstream', () => {
     expect(result?.target).toBe('http://conditional');
   });
 
-  describe('stickySession', () => {
-    const stickyRoute: RouteConfig = {
-      path: '/sticky',
-      stickySession: {
-        enabled: true,
-        keyExpression: "{{ headers['x-session-id'] }}"
-      },
-      upstreams: [
-        { target: 'http://u1:3000', weight: 100, priority: 1 },
-        { target: 'http://u2:3000', weight: 100, priority: 1 }
-      ]
-    };
+describe('stickySession', () => {
+  const stickyRoute: EffectiveRouteConfig = {
+    path: '/sticky',
+    service: 'sticky-service',
+    endpoints: [
+      { target: 'http://u1:3000', weight: 100, priority: 1 },
+      { target: 'http://u2:3000', weight: 100, priority: 1 }
+    ]
+  };
+
+    beforeEach(() => {
+      runtimeState.clear();
+      runtimeState.set('sticky-service', {
+        upstreams: [],
+        sticky_session: {
+          enabled: true,
+          key_expression: "{{ headers['x-session-id'] }}"
+        },
+      });
+    });
 
     const createStickyContext = (sessionId: string): ExpressionContext => ({
       ...baseContext,
@@ -240,8 +249,8 @@ describe('selectUpstream', () => {
 
     it('should consistently select same upstream for same session key', () => {
       const upstreams: RuntimeUpstream[] = [
-        createUpstream({ target: 'http://u1:3000', weight: 100, upstreamId: 'u1' }),
-        createUpstream({ target: 'http://u2:3000', weight: 100, upstreamId: 'u2' })
+        createUpstream({ target: 'http://u1:3000', weight: 100, upstream_id: 'u1' }),
+        createUpstream({ target: 'http://u2:3000', weight: 100, upstream_id: 'u2' })
       ];
 
       const context = createStickyContext('conv-42');
@@ -256,9 +265,9 @@ describe('selectUpstream', () => {
 
     it('should still honor priority ordering when stickySession is enabled', () => {
       const upstreams: RuntimeUpstream[] = [
-        createUpstream({ target: 'http://p2:3000', priority: 2, upstreamId: 'p2' }),
-        createUpstream({ target: 'http://p1-a:3000', priority: 1, upstreamId: 'p1-a' }),
-        createUpstream({ target: 'http://p1-b:3000', priority: 1, upstreamId: 'p1-b' })
+        createUpstream({ target: 'http://p2:3000', priority: 2, upstream_id: 'p2' }),
+        createUpstream({ target: 'http://p1-a:3000', priority: 1, upstream_id: 'p1-a' }),
+        createUpstream({ target: 'http://p1-b:3000', priority: 1, upstream_id: 'p1-b' })
       ];
 
       for (let i = 0; i < 10; i++) {
@@ -269,8 +278,8 @@ describe('selectUpstream', () => {
 
     it('should fall back to non-sticky weighted selection when sticky key is missing', () => {
       const upstreams: RuntimeUpstream[] = [
-        createUpstream({ target: 'http://heavy:3000', weight: 900, upstreamId: 'heavy' }),
-        createUpstream({ target: 'http://light:3000', weight: 100, upstreamId: 'light' })
+        createUpstream({ target: 'http://heavy:3000', weight: 900, upstream_id: 'heavy' }),
+        createUpstream({ target: 'http://light:3000', weight: 100, upstream_id: 'light' })
       ];
 
       const noSessionContext: ExpressionContext = {

@@ -1,37 +1,35 @@
-import { describe, it, expect, beforeEach } from 'bun:test';
+import { describe, it, expect } from 'bun:test';
 import { PriorityGroup } from '../../src/worker/upstream/priority-group';
-import type { RuntimeUpstream } from '../../src/worker/types';
-import type { RouteConfig } from '@jeffusion/bungee-types';
+import type { EffectiveRouteConfig, RuntimeUpstream } from '../../src/worker/types';
 
-// Helper function to create mock upstreams
+// Helper function to create mock endpoints
 function createMockUpstream(overrides: Partial<RuntimeUpstream> = {}): RuntimeUpstream {
-  const upstreamId = overrides.upstreamId
+  const upstream_id = overrides.upstream_id
     ?? (typeof overrides.target === 'string' ? overrides.target : 'upstream-default');
 
   return {
     target: 'http://example.com',
     weight: 100,
     priority: 1,
-    disabled: false,
+    is_disabled: false,
     status: 'HEALTHY',
-    consecutiveFailures: 0,
-    consecutiveSuccesses: 0,
-    recoveryAttemptCount: 0,
+    consecutive_failures: 0,
+    consecutive_successes: 0,
+    recovery_attempt_count: 0,
     ...overrides,
-    upstreamId
+    upstream_id
   };
 }
 
 // Helper function to create mock route config
-function createMockRoute(): RouteConfig {
+function createMockRoute(): EffectiveRouteConfig {
   return {
-    configVersion: 2,
     path: '/test',
-    upstreams: [],
+    endpoints: [],
     failover: {
       enabled: true,
-      retryOn: [502, 503, 504],
-      slowStart: {
+      retry_on: [502, 503, 504],
+      slow_start: {
         enabled: false
       }
     }
@@ -46,7 +44,7 @@ describe('PriorityGroup', () => {
       expect(group.getUpstreamCount()).toBe(0);
     });
 
-    it('should add upstreams to the group', () => {
+    it('should add endpoints to the group', () => {
       const group = new PriorityGroup(1, createMockRoute(), 5000);
       const upstream1 = createMockUpstream({ target: 'http://s1.com' });
       const upstream2 = createMockUpstream({ target: 'http://s2.com' });
@@ -59,7 +57,7 @@ describe('PriorityGroup', () => {
   });
 
   describe('hasAvailable', () => {
-    it('should return true when upstreams are available', () => {
+    it('should return true when endpoints are available', () => {
       const group = new PriorityGroup(1, createMockRoute(), 5000);
       group.addUpstream(createMockUpstream({ target: 'http://s1.com', status: 'HEALTHY' }));
       group.addUpstream(createMockUpstream({ target: 'http://s2.com', status: 'HEALTHY' }));
@@ -70,7 +68,7 @@ describe('PriorityGroup', () => {
       expect(group.hasAvailable(attempted, skipped)).toBe(true);
     });
 
-    it('should return false when all upstreams are attempted', () => {
+    it('should return false when all endpoints are attempted', () => {
       const group = new PriorityGroup(1, createMockRoute(), 5000);
       group.addUpstream(createMockUpstream({ target: 'http://s1.com' }));
       group.addUpstream(createMockUpstream({ target: 'http://s2.com' }));
@@ -81,7 +79,7 @@ describe('PriorityGroup', () => {
       expect(group.hasAvailable(attempted, skipped)).toBe(false);
     });
 
-    it('should return false when all upstreams are skipped', () => {
+    it('should return false when all endpoints are skipped', () => {
       const group = new PriorityGroup(1, createMockRoute(), 5000);
       group.addUpstream(createMockUpstream({ target: 'http://s1.com' }));
 
@@ -91,7 +89,7 @@ describe('PriorityGroup', () => {
       expect(group.hasAvailable(attempted, skipped)).toBe(false);
     });
 
-    it('should return true when some upstreams are still available', () => {
+    it('should return true when some endpoints are still available', () => {
       const group = new PriorityGroup(1, createMockRoute(), 5000);
       group.addUpstream(createMockUpstream({ target: 'http://s1.com' }));
       group.addUpstream(createMockUpstream({ target: 'http://s2.com' }));
@@ -117,7 +115,7 @@ describe('PriorityGroup', () => {
       expect(result!.shouldTransitionToHalfOpen).toBe(false);
     });
 
-    it('should return null when no upstreams are available', () => {
+    it('should return null when no endpoints are available', () => {
       const group = new PriorityGroup(1, createMockRoute(), 5000);
       group.addUpstream(createMockUpstream({ target: 'http://s1.com' }));
 
@@ -127,7 +125,7 @@ describe('PriorityGroup', () => {
       expect(result).toBeNull();
     });
 
-    it('should filter out attempted upstreams', () => {
+    it('should filter out attempted endpoints', () => {
       const group = new PriorityGroup(1, createMockRoute(), 5000);
       group.addUpstream(createMockUpstream({ target: 'http://s1.com', weight: 100, status: 'HEALTHY' }));
       group.addUpstream(createMockUpstream({ target: 'http://s2.com', weight: 100, status: 'HEALTHY' }));
@@ -139,7 +137,7 @@ describe('PriorityGroup', () => {
       expect(result!.upstream.target).toBe('http://s2.com');
     });
 
-    it('should filter out skipped upstreams', () => {
+    it('should filter out skipped endpoints', () => {
       const group = new PriorityGroup(1, createMockRoute(), 5000);
       group.addUpstream(createMockUpstream({ target: 'http://s1.com', weight: 100, status: 'HEALTHY' }));
       group.addUpstream(createMockUpstream({ target: 'http://s2.com', weight: 100, status: 'HEALTHY' }));
@@ -156,7 +154,7 @@ describe('PriorityGroup', () => {
       group.addUpstream(createMockUpstream({
         target: 'http://unhealthy.com',
         status: 'UNHEALTHY',
-        lastFailureTime: Date.now() - 1000 // 1 second ago, recovery interval is 5 seconds
+        last_failure_time: Date.now() - 1000 // 1 second ago, recovery interval is 5 seconds
       }));
 
       const result = group.selectOne(new Set(), new Set());
@@ -170,7 +168,7 @@ describe('PriorityGroup', () => {
       group.addUpstream(createMockUpstream({
         target: 'http://recovering.com',
         status: 'UNHEALTHY',
-        lastFailureTime: Date.now() - 6000 // 6 seconds ago, recovery interval is 5 seconds
+        last_failure_time: Date.now() - 6000 // 6 seconds ago, recovery interval is 5 seconds
       }));
 
       const result = group.selectOne(new Set(), new Set());
@@ -180,7 +178,7 @@ describe('PriorityGroup', () => {
       expect(result!.shouldTransitionToHalfOpen).toBe(true);
     });
 
-    it('should handle HALF_OPEN upstreams correctly', () => {
+    it('should handle HALF_OPEN endpoints correctly', () => {
       const group = new PriorityGroup(1, createMockRoute(), 5000);
       group.addUpstream(createMockUpstream({
         target: 'http://halfopen.com',
@@ -232,7 +230,7 @@ describe('PriorityGroup', () => {
       expect(result!.upstream.target).toBe('http://single.com');
     });
 
-    it('should handle all upstreams with zero weight gracefully', () => {
+    it('should handle all endpoints with zero weight gracefully', () => {
       const group = new PriorityGroup(1, createMockRoute(), 5000);
       group.addUpstream(createMockUpstream({ target: 'http://s1.com', weight: 0, status: 'HEALTHY' }));
       group.addUpstream(createMockUpstream({ target: 'http://s2.com', weight: 0, status: 'HEALTHY' }));

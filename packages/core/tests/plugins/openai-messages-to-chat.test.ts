@@ -157,7 +157,7 @@ const mockedFetch = mock(async (request: Request | string, options?: RequestInit
 
 function createRouteConfig(
   path: string,
-  pathRewrite: Record<string, string>,
+  path_rewrite: Record<string, string>,
   plugins: PluginConfig[],
   upstreamTarget: string
 ): AppConfig {
@@ -165,9 +165,9 @@ function createRouteConfig(
     routes: [
       {
         path,
-        pathRewrite,
+        path_rewrite,
         plugins,
-        upstreams: [{ target: upstreamTarget, weight: 100, priority: 1 }],
+        endpoints: [{ target: upstreamTarget, weight: 100, priority: 1 }],
       },
     ],
   };
@@ -200,7 +200,7 @@ async function readForwardedBody(options: RequestInit): Promise<Record<string, u
 async function reinitialize(config: AppConfig): Promise<void> {
   await cleanupPluginRegistry();
   initializeRuntimeState(config);
-  await initializePluginRegistryForTests(config);
+  await initializePluginRegistryForTests(config, process.cwd());
   mockedFetch.mockClear();
 }
 
@@ -248,7 +248,7 @@ describe('openai-messages-to-chat plugin', () => {
     );
 
     initializeRuntimeState(defaultConfig);
-    await initializePluginRegistryForTests(defaultConfig);
+    await initializePluginRegistryForTests(defaultConfig, process.cwd());
     mockedFetch.mockClear();
   });
 
@@ -272,9 +272,9 @@ describe('openai-messages-to-chat plugin', () => {
       routes: [
         {
           path: '/v1/messages-compat',
-          pathRewrite: { '^/v1/messages-compat': '/v1' },
+          path_rewrite: { '^/v1/messages-compat': '/v1' },
           plugins: [{ name: 'openai-messages-to-chat' }],
-          upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
+          endpoints: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
         },
       ],
     });
@@ -351,9 +351,9 @@ describe('openai-messages-to-chat plugin', () => {
       routes: [
         {
           path: '/v1/messages-compat',
-          pathRewrite: { '^/v1/messages-compat': '/v1' },
+          path_rewrite: { '^/v1/messages-compat': '/v1' },
           plugins: [{ name: 'openai-messages-to-chat' }],
-          upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
+          endpoints: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
         },
       ],
     });
@@ -437,9 +437,9 @@ describe('openai-messages-to-chat plugin', () => {
       routes: [
         {
           path: '/v1/messages-compat',
-          pathRewrite: { '^/v1/messages-compat': '/v1' },
+          path_rewrite: { '^/v1/messages-compat': '/v1' },
           plugins: [{ name: 'openai-messages-to-chat' }],
-          upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
+          endpoints: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
         },
       ],
     });
@@ -498,9 +498,9 @@ describe('openai-messages-to-chat plugin', () => {
       routes: [
         {
           path: '/v1/messages-compat',
-          pathRewrite: { '^/v1/messages-compat': '/v1' },
+          path_rewrite: { '^/v1/messages-compat': '/v1' },
           plugins: [{ name: 'openai-messages-to-chat' }],
-          upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
+          endpoints: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
         },
       ],
     });
@@ -579,9 +579,9 @@ describe('openai-messages-to-chat plugin', () => {
       routes: [
         {
           path: '/v1/messages-compat',
-          pathRewrite: { '^/v1/messages-compat': '/v1' },
+          path_rewrite: { '^/v1/messages-compat': '/v1' },
           plugins: [{ name: 'openai-messages-to-chat' }],
-          upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
+          endpoints: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
         },
       ],
     });
@@ -639,9 +639,9 @@ describe('openai-messages-to-chat plugin', () => {
       routes: [
         {
           path: '/v1/messages-compat',
-          pathRewrite: { '^/v1/messages-compat': '/v1' },
+          path_rewrite: { '^/v1/messages-compat': '/v1' },
           plugins: [{ name: 'openai-messages-to-chat' }],
-          upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
+          endpoints: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
         },
       ],
     });
@@ -691,9 +691,9 @@ describe('openai-messages-to-chat plugin', () => {
       routes: [
         {
           path: '/v1/messages-compat',
-          pathRewrite: { '^/v1/messages-compat': '/v1' },
+          path_rewrite: { '^/v1/messages-compat': '/v1' },
           plugins: [{ name: 'openai-messages-to-chat' }],
-          upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
+          endpoints: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
         },
       ],
     });
@@ -733,9 +733,9 @@ describe('openai-messages-to-chat plugin', () => {
       routes: [
         {
           path: '/v1/messages-compat',
-          pathRewrite: { '^/v1/messages-compat': '/v1' },
+          path_rewrite: { '^/v1/messages-compat': '/v1' },
           plugins: [{ name: 'openai-messages-to-chat' }],
-          upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
+          endpoints: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
         },
       ],
     });
@@ -789,9 +789,9 @@ describe('openai-messages-to-chat plugin', () => {
       routes: [
         {
           path: '/v1/messages-compat',
-          pathRewrite: { '^/v1/messages-compat': '/v1' },
+          path_rewrite: { '^/v1/messages-compat': '/v1' },
           plugins: [{ name: 'openai-messages-to-chat' }],
-          upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
+          endpoints: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
         },
       ],
     });
@@ -866,9 +866,9 @@ describe('openai-messages-to-chat plugin', () => {
       routes: [
         {
           path: '/v1/messages-compat',
-          pathRewrite: { '^/v1/messages-compat': '/v1' },
+          path_rewrite: { '^/v1/messages-compat': '/v1' },
           plugins: [{ name: 'openai-messages-to-chat' }],
-          upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
+          endpoints: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
         },
       ],
     });
@@ -926,9 +926,9 @@ describe('openai-messages-to-chat plugin', () => {
       routes: [
         {
           path: '/v1/messages-compat',
-          pathRewrite: { '^/v1/messages-compat': '/v1' },
+          path_rewrite: { '^/v1/messages-compat': '/v1' },
           plugins: [{ name: 'openai-messages-to-chat' }],
-          upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
+          endpoints: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
         },
       ],
     });
@@ -974,9 +974,9 @@ describe('openai-messages-to-chat plugin', () => {
       routes: [
         {
           path: '/v1/messages-compat',
-          pathRewrite: { '^/v1/messages-compat': '/v1' },
+          path_rewrite: { '^/v1/messages-compat': '/v1' },
           plugins: [{ name: 'openai-messages-to-chat' }],
-          upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
+          endpoints: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
         },
       ],
     });
@@ -1020,9 +1020,9 @@ describe('openai-messages-to-chat plugin', () => {
       routes: [
         {
           path: '/v1/messages-compat',
-          pathRewrite: { '^/v1/messages-compat': '/v1' },
+          path_rewrite: { '^/v1/messages-compat': '/v1' },
           plugins: [{ name: 'openai-messages-to-chat' }],
-          upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
+          endpoints: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
         },
       ],
     });
@@ -1065,9 +1065,9 @@ describe('openai-messages-to-chat plugin', () => {
       routes: [
         {
           path: '/v1/messages-compat',
-          pathRewrite: { '^/v1/messages-compat': '/v1' },
+          path_rewrite: { '^/v1/messages-compat': '/v1' },
           plugins: [{ name: 'openai-messages-to-chat' }],
-          upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
+          endpoints: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
         },
       ],
     });
@@ -1124,9 +1124,9 @@ describe('openai-messages-to-chat plugin', () => {
       routes: [
         {
           path: '/v1/messages-compat',
-          pathRewrite: { '^/v1/messages-compat': '/v1' },
+          path_rewrite: { '^/v1/messages-compat': '/v1' },
           plugins: [{ name: 'openai-messages-to-chat' }],
-          upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
+          endpoints: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
         },
       ],
     });
@@ -1153,9 +1153,9 @@ describe('openai-messages-to-chat plugin', () => {
       routes: [
         {
           path: '/v1/messages-compat',
-          pathRewrite: { '^/v1/messages-compat': '/v1' },
+          path_rewrite: { '^/v1/messages-compat': '/v1' },
           plugins: [{ name: 'openai-messages-to-chat' }],
-          upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
+          endpoints: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
         },
       ],
     });
@@ -1180,9 +1180,9 @@ describe('openai-messages-to-chat plugin', () => {
       routes: [
         {
           path: '/v1/messages-compat',
-          pathRewrite: { '^/v1/messages-compat': '/v1' },
+          path_rewrite: { '^/v1/messages-compat': '/v1' },
           plugins: [{ name: 'openai-messages-to-chat' }],
-          upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
+          endpoints: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
         },
       ],
     });
@@ -1257,9 +1257,9 @@ describe('openai-messages-to-chat plugin', () => {
       routes: [
         {
           path: '/v1/messages-compat',
-          pathRewrite: { '^/v1/messages-compat': '/v1' },
+          path_rewrite: { '^/v1/messages-compat': '/v1' },
           plugins: [{ name: 'openai-messages-to-chat' }],
-          upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
+          endpoints: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
         },
       ],
     });
@@ -1326,9 +1326,9 @@ describe('openai-messages-to-chat plugin', () => {
       routes: [
         {
           path: '/v1/messages-compat',
-          pathRewrite: { '^/v1/messages-compat': '/v1' },
+          path_rewrite: { '^/v1/messages-compat': '/v1' },
           plugins: [{ name: 'openai-messages-to-chat' }],
-          upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
+          endpoints: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
         },
       ],
     });
@@ -1376,9 +1376,9 @@ describe('openai-messages-to-chat plugin', () => {
       routes: [
         {
           path: '/v1/messages-compat',
-          pathRewrite: { '^/v1/messages-compat': '/v1' },
+          path_rewrite: { '^/v1/messages-compat': '/v1' },
           plugins: [{ name: 'openai-messages-to-chat' }],
-          upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
+          endpoints: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
         },
       ],
     });

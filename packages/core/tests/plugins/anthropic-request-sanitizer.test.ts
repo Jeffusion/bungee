@@ -11,8 +11,8 @@ const testConfig: AppConfig = {
   routes: [
     {
       path: '/v1/sanitize',
-      pathRewrite: { '^/v1/sanitize': '/v1' },
-      upstreams: [{ target: 'http://mock-anthropic.com', weight: 100, priority: 1 }],
+      path_rewrite: { '^/v1/sanitize': '/v1' },
+      endpoints: [{ target: 'http://mock-anthropic.com', weight: 100, priority: 1 }],
     },
   ],
 };
@@ -45,7 +45,7 @@ describe('anthropic-request-sanitizer plugin', () => {
     mockedFetch.mockClear();
     globalThis.fetch = mockedFetch as unknown as typeof fetch;
     initializeRuntimeState(testConfig);
-    await initializePluginRegistryForTests(testConfig);
+    await initializePluginRegistryForTests(testConfig, process.cwd());
   });
 
   afterEach(async () => {
@@ -75,7 +75,7 @@ describe('anthropic-request-sanitizer plugin', () => {
     };
 
     initializeRuntimeState(config);
-    await initializePluginRegistryForTests(config);
+    await initializePluginRegistryForTests(config, process.cwd());
 
     const req = new Request('http://localhost/v1/sanitize/messages?beta=true', {
       method: 'POST',
@@ -154,7 +154,7 @@ describe('anthropic-request-sanitizer plugin', () => {
     };
 
     initializeRuntimeState(config);
-    await initializePluginRegistryForTests(config);
+    await initializePluginRegistryForTests(config, process.cwd());
 
     const req = new Request('http://localhost/v1/sanitize/messages?beta=true', {
       method: 'POST',
@@ -209,7 +209,7 @@ describe('anthropic-request-sanitizer plugin', () => {
     };
 
     initializeRuntimeState(config);
-    await initializePluginRegistryForTests(config);
+    await initializePluginRegistryForTests(config, process.cwd());
 
     const req = new Request('http://localhost/v1/sanitize/messages?beta=false', {
       method: 'POST',
@@ -244,7 +244,7 @@ describe('anthropic-request-sanitizer plugin', () => {
     };
 
     initializeRuntimeState(config);
-    await initializePluginRegistryForTests(config);
+    await initializePluginRegistryForTests(config, process.cwd());
 
     const req = new Request('http://localhost/v1/sanitize/messages', {
       method: 'POST',
@@ -283,7 +283,7 @@ describe('anthropic-request-sanitizer plugin', () => {
     };
 
     initializeRuntimeState(config);
-    await initializePluginRegistryForTests(config);
+    await initializePluginRegistryForTests(config, process.cwd());
 
     const req = new Request('http://localhost/v1/sanitize/messages', {
       method: 'POST',
@@ -326,7 +326,7 @@ describe('anthropic-request-sanitizer plugin', () => {
     };
 
     initializeRuntimeState(config);
-    await initializePluginRegistryForTests(config);
+    await initializePluginRegistryForTests(config, process.cwd());
 
     const req = new Request('http://localhost/v1/sanitize/messages', {
       method: 'POST',
@@ -374,7 +374,7 @@ describe('anthropic-request-sanitizer plugin', () => {
     };
 
     initializeRuntimeState(config);
-    await initializePluginRegistryForTests(config);
+    await initializePluginRegistryForTests(config, process.cwd());
 
     const req = new Request('http://localhost/v1/sanitize/messages', {
       method: 'POST',
@@ -415,7 +415,7 @@ describe('anthropic-request-sanitizer plugin', () => {
     };
 
     initializeRuntimeState(config);
-    await initializePluginRegistryForTests(config);
+    await initializePluginRegistryForTests(config, process.cwd());
 
     const req = new Request('http://localhost/v1/sanitize/messages', {
       method: 'POST',
@@ -459,7 +459,7 @@ describe('anthropic-request-sanitizer plugin', () => {
     };
 
     initializeRuntimeState(config);
-    await initializePluginRegistryForTests(config);
+    await initializePluginRegistryForTests(config, process.cwd());
 
     const req = new Request('http://localhost/v1/sanitize/messages', {
       method: 'POST',
@@ -514,7 +514,7 @@ describe('anthropic-request-sanitizer plugin', () => {
     };
 
     initializeRuntimeState(config);
-    await initializePluginRegistryForTests(config);
+    await initializePluginRegistryForTests(config, process.cwd());
 
     const originalBody = {
       model: 'claude-3-5-sonnet-20241022',

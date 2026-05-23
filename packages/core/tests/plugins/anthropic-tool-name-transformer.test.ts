@@ -11,8 +11,8 @@ const baseConfig: AppConfig = {
   routes: [
     {
       path: '/v1/transform',
-      pathRewrite: { '^/v1/transform': '/v1' },
-      upstreams: [{ target: 'http://mock-anthropic.com', weight: 100, priority: 1 }],
+      path_rewrite: { '^/v1/transform': '/v1' },
+      endpoints: [{ target: 'http://mock-anthropic.com', weight: 100, priority: 1 }],
     },
   ],
 };
@@ -60,7 +60,7 @@ async function readStreamText(response: Response): Promise<string> {
 describe('anthropic-tool-name-transformer plugin', () => {
   beforeEach(async () => {
     initializeRuntimeState(baseConfig);
-    await initializePluginRegistryForTests(baseConfig);
+    await initializePluginRegistryForTests(baseConfig, process.cwd());
   });
 
   afterEach(async () => {
@@ -83,7 +83,7 @@ describe('anthropic-tool-name-transformer plugin', () => {
 
     const config = createConfig({ nameMap: 'todowrite=TodoWrite' });
     initializeRuntimeState(config);
-    await initializePluginRegistryForTests(config);
+    await initializePluginRegistryForTests(config, process.cwd());
 
     const req = new Request('http://localhost/v1/transform/messages', {
       method: 'POST',
@@ -146,7 +146,7 @@ describe('anthropic-tool-name-transformer plugin', () => {
 
     const config = createConfig({ fixSerializedArrays: true });
     initializeRuntimeState(config);
-    await initializePluginRegistryForTests(config);
+    await initializePluginRegistryForTests(config, process.cwd());
 
     const req = new Request('http://localhost/v1/transform/messages', {
       method: 'POST',
@@ -177,7 +177,7 @@ describe('anthropic-tool-name-transformer plugin', () => {
 
     const config = createConfig({ fixSerializedArrays: true });
     initializeRuntimeState(config);
-    await initializePluginRegistryForTests(config);
+    await initializePluginRegistryForTests(config, process.cwd());
 
     const req = new Request('http://localhost/v1/transform/messages', {
       method: 'POST',
@@ -222,7 +222,7 @@ describe('anthropic-tool-name-transformer plugin', () => {
 
     const config = createConfig();
     initializeRuntimeState(config);
-    await initializePluginRegistryForTests(config);
+    await initializePluginRegistryForTests(config, process.cwd());
 
     const req = new Request('http://localhost/v1/transform/messages', {
       method: 'POST',

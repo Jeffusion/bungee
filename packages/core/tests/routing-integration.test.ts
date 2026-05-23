@@ -6,8 +6,8 @@
  * transformer tests which focus on format conversion logic.
  *
  * Covers:
- * - pathRewrite functionality (http-proxy-middleware style)
- * - pathRewrite + transformer combination scenarios
+ * - path_rewrite functionality (http-proxy-middleware style)
+ * - path_rewrite + transformer combination scenarios
  * - Environment variable validation for plugins
  * - Detailed streaming response SSE event sequences
  * - Error response format transformation
@@ -23,7 +23,7 @@ const mockConfig: AppConfig = {
   routes: [
     {
       path: '/v1/anthropic-proxy',
-      pathRewrite: { '^/v1/anthropic-proxy': '/v1' },
+      path_rewrite: { '^/v1/anthropic-proxy': '/v1' },
       plugins: [
         {
           name: 'ai-transformer',
@@ -33,11 +33,11 @@ const mockConfig: AppConfig = {
           }
         }
       ],
-      upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
+      endpoints: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
     },
     {
       path: '/v1/openai-proxy',
-      pathRewrite: { '^/v1/openai-proxy': '/v1' },
+      path_rewrite: { '^/v1/openai-proxy': '/v1' },
       plugins: [
         {
           name: 'ai-transformer',
@@ -47,11 +47,11 @@ const mockConfig: AppConfig = {
           }
         }
       ],
-      upstreams: [{ target: 'http://mock-anthropic.com', weight: 100, priority: 1 }],
+      endpoints: [{ target: 'http://mock-anthropic.com', weight: 100, priority: 1 }],
     },
     {
       path: '/v1/gemini-proxy',
-      pathRewrite: { '^/v1/gemini-proxy': '/v1' },
+      path_rewrite: { '^/v1/gemini-proxy': '/v1' },
       plugins: [
         {
           name: 'ai-transformer',
@@ -61,15 +61,15 @@ const mockConfig: AppConfig = {
           }
         }
       ],
-      upstreams: [{ target: 'http://mock-gemini.com', weight: 100, priority: 1 }],
+      endpoints: [{ target: 'http://mock-gemini.com', weight: 100, priority: 1 }],
     },
     {
       path: '/api',
-      pathRewrite: {
+      path_rewrite: {
         '^/api/v1': '/v1-internal',
         '^/api': ''
       },
-      upstreams: [{
+      endpoints: [{
         target: 'http://mock-rewrite-target.com',
         weight: 100,
         priority: 1
@@ -147,7 +147,7 @@ describe('Path Rewrite Functionality', () => {
   beforeEach(async () => {
     mockedFetch.mockClear();
     initializeRuntimeState(mockConfig);
-    await initializePluginRegistryForTests(mockConfig);
+    await initializePluginRegistryForTests(mockConfig, process.cwd());
   });
 
   afterEach(async () => {
@@ -172,12 +172,12 @@ describe('Path Rewrite Functionality', () => {
     expect(fetchUrl2).toBe('http://mock-rewrite-target.com/health');
   });
 
-  test('should handle route.pathRewrite before plugin path matching', async () => {
+  test('should handle route.path_rewrite before plugin path matching', async () => {
     const configWithRewriteAndPlugin: AppConfig = {
       routes: [
         {
           path: '/api',
-          pathRewrite: { '^/api': '' }, // Strips /api prefix
+          path_rewrite: { '^/api': '' }, // Strips /api prefix
           plugins: [
             {
               name: 'ai-transformer',
@@ -187,14 +187,14 @@ describe('Path Rewrite Functionality', () => {
               }
             }
           ], // Expects to match on the rewritten path
-          upstreams: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
+          endpoints: [{ target: 'http://mock-openai.com', weight: 100, priority: 1 }],
         },
       ],
     };
 
     // Re-initialize plugin registry with the new config
     initializeRuntimeState(configWithRewriteAndPlugin);
-    await initializePluginRegistryForTests(configWithRewriteAndPlugin);
+    await initializePluginRegistryForTests(configWithRewriteAndPlugin, process.cwd());
 
     const req = new Request('http://localhost/api/v1/messages', {
       method: 'POST',
@@ -207,7 +207,7 @@ describe('Path Rewrite Functionality', () => {
     expect(mockedFetch).toHaveBeenCalledTimes(1);
     const [fetchUrl] = mockedFetch.mock.calls[0];
 
-    // pathRewrite removed /api, then plugin matched /v1/messages and rewrote it
+    // path_rewrite removed /api, then plugin matched /v1/messages and rewrote it
     expect(fetchUrl).toBe('http://mock-openai.com/v1/chat/completions');
   });
 
@@ -242,7 +242,7 @@ describe('Error Response Transformation', () => {
   beforeEach(async () => {
     mockedFetch.mockClear();
     initializeRuntimeState(mockConfig);
-    await initializePluginRegistryForTests(mockConfig);
+    await initializePluginRegistryForTests(mockConfig, process.cwd());
   });
 
   afterEach(async () => {
@@ -286,7 +286,7 @@ describe('Streaming Response - Detailed SSE Event Testing', () => {
   beforeEach(async () => {
     mockedFetch.mockClear();
     initializeRuntimeState(mockConfig);
-    await initializePluginRegistryForTests(mockConfig);
+    await initializePluginRegistryForTests(mockConfig, process.cwd());
   });
 
   afterEach(async () => {
