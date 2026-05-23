@@ -3,6 +3,31 @@
   import { _ } from '../lib/i18n';
   import { queryLogs, exportLogs, type LogEntry, type LogQueryParams } from '../lib/api/logs';
   import LogDetailModal from '../lib/components/LogDetailModal.svelte';
+  import { PanelCard } from '../lib/components/industrial';
+
+  // ---- Industrial status colour helpers --------------------------------
+  // The legacy getStatusColor / getRequestTypeColor functions return
+  // daisyUI `badge-*` classes; their callers were removed in favour of
+  // the `getStatusDotClass / getStatusTextClass / getRequestTypeTextClass`
+  // helpers below, which map cleanly to the industrial palette.
+  function getStatusDotClass(status: number): string {
+    if (status < 300) return 'nx-dot-ok';
+    if (status < 400) return 'nx-dot-accent';
+    if (status < 500) return 'nx-dot-warn';
+    return 'nx-dot-danger';
+  }
+  function getStatusTextClass(status: number): string {
+    if (status < 300) return 'text-emerald-300';
+    if (status < 400) return 'text-nexus-300';
+    if (status < 500) return 'text-amber-300';
+    return 'text-red-300';
+  }
+  function getRequestTypeTextClass(requestType?: string): string {
+    if (requestType === 'final') return 'text-emerald-300';
+    if (requestType === 'retry') return 'text-amber-300';
+    if (requestType === 'recovery') return 'text-nexus-300';
+    return 'text-zinc-500';
+  }
 
   // 查询参数
   let page = 1;
@@ -372,24 +397,26 @@
   }
 </script>
 
-<div class="p-6">
-  <!-- 简洁标题行 -->
-  <div class="mb-6">
-    <h1 class="text-2xl lg:text-3xl font-bold">{$_('logs.title')}</h1>
+<div class="px-6 py-5 space-y-5">
+  <!-- ===== Header ============================================ -->
+  <div class="flex items-center gap-3">
+    <span class="nx-stripe" aria-hidden="true"></span>
+    <div class="flex flex-col leading-tight">
+      <span class="nx-label">// REQUEST LOGS</span>
+      <h1 class="nx-display text-xl text-zinc-50 tracking-[0.02em]">{$_('logs.title')}</h1>
+    </div>
   </div>
 
-  <!-- 新数据提示 -->
+  <!-- New data hint -->
   {#if showRefreshHint}
-    <div class="alert alert-info shadow-lg mb-4">
-      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-      </svg>
-      <span>{$_('logs.newDataAvailable')}</span>
-      <div class="flex-none">
-        <button class="btn btn-sm" on:click={manualRefresh}>
-          {$_('common.refresh')}
-        </button>
+    <div class="border-l-2 border-l-nexus-500 bg-nexus-500/5 px-3 py-2 flex items-center justify-between gap-3">
+      <div class="flex items-center gap-2">
+        <span class="nx-dot-accent"></span>
+        <span class="font-mono text-[11px] uppercase tracking-command text-nexus-200">{$_('logs.newDataAvailable')}</span>
       </div>
+      <button class="nx-btn-ghost nx-btn-sm" on:click={manualRefresh}>
+        {$_('common.refresh')}
+      </button>
     </div>
   {/if}
 
@@ -403,7 +430,7 @@
           type="text"
           bind:value={searchTerm}
           placeholder={$_('logs.searchPlaceholder')}
-          class="input input-bordered input-sm w-full"
+          class="nx-input w-full"
         />
       </div>
 
@@ -416,17 +443,17 @@
             <div
               role="button"
               tabindex="0"
-              class="btn btn-sm {method ? 'btn-primary' : 'btn-ghost'} gap-1"
+              class={`${method ? 'nx-btn-primary' : 'nx-btn-ghost'} nx-btn-sm`}
             >
               {$_('logs.method')}
               {#if method}
-                <span class="badge badge-sm">1</span>
+                <span class="nx-feature-tag">1</span>
               {/if}
               <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
               </svg>
             </div>
-            <ul role="menu" tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-40 z-[1]">
+            <ul role="menu" tabindex="0" class="dropdown-content border border-carbon-500 bg-carbon-900 shadow-industrial-lg w-40 z-[1] p-1">
               <li><button on:click={() => method = ''}>{$_('logs.allMethods')}</button></li>
               <li><button on:click={() => method = 'GET'} class:active={method === 'GET'}>GET</button></li>
               <li><button on:click={() => method = 'POST'} class:active={method === 'POST'}>POST</button></li>
@@ -441,17 +468,17 @@
             <div
               role="button"
               tabindex="0"
-              class="btn btn-sm {statusFilter ? 'btn-primary' : 'btn-ghost'} gap-1"
+              class={`${statusFilter ? 'nx-btn-primary' : 'nx-btn-ghost'} nx-btn-sm`}
             >
               {$_('logs.status')}
               {#if statusFilter}
-                <span class="badge badge-sm">1</span>
+                <span class="nx-feature-tag">1</span>
               {/if}
               <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
               </svg>
             </div>
-            <div role="menu" tabindex="0" class="dropdown-content bg-base-100 rounded-box p-3 shadow-lg w-48 z-[1]">
+            <div role="menu" tabindex="0" class="dropdown-content border border-carbon-500 bg-carbon-900 shadow-industrial-lg p-3 w-48 z-[1]">
               <div class="form-control">
                 <div class="label py-1">
                   <span class="label-text text-xs">{$_('logs.statusPlaceholder')}</span>
@@ -460,7 +487,7 @@
                   type="text"
                   bind:value={statusFilter}
                   placeholder="200, 404, 500"
-                  class="input input-bordered input-sm"
+                  class="nx-input"
                 />
               </div>
             </div>
@@ -471,17 +498,17 @@
             <div
               role="button"
               tabindex="0"
-              class="btn btn-sm {successFilter !== undefined ? 'btn-primary' : 'btn-ghost'} gap-1"
+              class={`${successFilter !== undefined ? 'nx-btn-primary' : 'nx-btn-ghost'} nx-btn-sm`}
             >
               {$_('logs.result')}
               {#if successFilter !== undefined}
-                <span class="badge badge-sm">1</span>
+                <span class="nx-feature-tag">1</span>
               {/if}
               <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
               </svg>
             </div>
-            <ul role="menu" tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-40 z-[1]">
+            <ul role="menu" tabindex="0" class="dropdown-content border border-carbon-500 bg-carbon-900 shadow-industrial-lg w-40 z-[1] p-1">
               <li><button on:click={() => successFilter = undefined}>{$_('logs.allResults')}</button></li>
               <li><button on:click={() => successFilter = true} class:active={successFilter === true}>{$_('logs.success')}</button></li>
               <li><button on:click={() => successFilter = false} class:active={successFilter === false}>{$_('logs.failed')}</button></li>
@@ -493,11 +520,11 @@
           <div
             role="button"
             tabindex="0"
-            class="btn btn-sm {requestTypeFilter || timeRangeType !== 'recent' || recentHours !== 1 || sortBy !== 'timestamp' || sortOrder !== 'desc' ? 'btn-primary' : 'btn-ghost'} gap-1"
+            class={`${requestTypeFilter || timeRangeType !== 'recent' || recentHours !== 1 || sortBy !== 'timestamp' || sortOrder !== 'desc' ? 'nx-btn-primary' : 'nx-btn-ghost'} nx-btn-sm`}
           >
             {$_('logs.moreFilters')}
             {#if requestTypeFilter || timeRangeType !== 'recent' || recentHours !== 1 || sortBy !== 'timestamp' || sortOrder !== 'desc'}
-              <span class="badge badge-sm">
+              <span class="nx-feature-tag">
                 {[requestTypeFilter, timeRangeType !== 'recent' || recentHours !== 1, sortBy !== 'timestamp' || sortOrder !== 'desc'].filter(Boolean).length}
               </span>
             {/if}
@@ -505,14 +532,14 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
             </svg>
           </div>
-          <div role="menu" tabindex="0" class="dropdown-content bg-base-100 rounded-box p-4 shadow-lg w-80 z-[1]">
+          <div role="menu" tabindex="0" class="dropdown-content border border-carbon-500 bg-carbon-900 shadow-industrial-lg p-4 w-80 z-[1]">
             <div class="space-y-3">
               <!-- 请求类型 -->
               <div class="form-control">
                 <div class="label py-1">
                   <span class="label-text text-xs font-semibold">{$_('logs.requestTypeFilter')}</span>
                 </div>
-                <select bind:value={requestTypeFilter} class="select select-bordered select-sm">
+                <select bind:value={requestTypeFilter} class="nx-input pr-7">
                   <option value="">{$_('logs.requestType_all')}</option>
                   <option value="final">{$_('logs.requestType_final')}</option>
                   <option value="retry">{$_('logs.requestType_retry')}</option>
@@ -525,7 +552,7 @@
                 <div class="label py-1">
                   <span class="label-text text-xs font-semibold">{$_('logs.timeRange')}</span>
                 </div>
-                <select bind:value={timeRangeType} class="select select-bordered select-sm">
+                <select bind:value={timeRangeType} class="nx-input pr-7">
                   <option value="all">{$_('logs.allTime')}</option>
                   <option value="recent">{$_('logs.recentTime')}</option>
                   <option value="custom">{$_('logs.customTime')}</option>
@@ -542,7 +569,7 @@
                     type="number"
                     bind:value={recentHours}
                     min="1"
-                    class="input input-bordered input-sm"
+                    class="nx-input"
                   />
                 </div>
               {/if}
@@ -556,7 +583,7 @@
                   <input
                     type="datetime-local"
                     bind:value={customStartTime}
-                    class="input input-bordered input-sm"
+                    class="nx-input"
                   />
                 </div>
 
@@ -567,13 +594,13 @@
                   <input
                     type="datetime-local"
                     bind:value={customEndTime}
-                    class="input input-bordered input-sm"
+                    class="nx-input"
                   />
                 </div>
               {/if}
 
               <!-- 排序 -->
-              <div class="divider my-2"></div>
+              <div class="border-t border-carbon-600 my-2"></div>
               <div class="form-control">
                 <div class="label py-1">
                   <span class="label-text text-xs font-semibold">{$_('logs.sortBy')}</span>
@@ -602,7 +629,7 @@
         <div class="flex items-center gap-2 flex-wrap">
           <!-- 刷新设置下拉菜单 -->
           <div class="dropdown dropdown-end">
-            <div role="button" tabindex="0" class="btn btn-sm btn-outline gap-1">
+            <div role="button" tabindex="0" class="nx-btn-outline nx-btn-sm">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 class="h-4 w-4"
@@ -624,10 +651,10 @@
                 />
               </svg>
               {#if autoRefreshEnabled}
-                <span class="badge badge-sm badge-primary">{refreshInterval}</span>
+                <span class="nx-pill-accent">{refreshInterval}</span>
               {/if}
             </div>
-            <div role="menu" tabindex="0" class="dropdown-content bg-base-100 rounded-box p-4 shadow-lg w-64 z-[1]">
+            <div role="menu" tabindex="0" class="dropdown-content border border-carbon-500 bg-carbon-900 shadow-industrial-lg p-4 w-64 z-[1]">
               <div class="space-y-3">
                 <!-- Auto Refresh Toggle -->
                 <div class="form-control">
@@ -648,7 +675,7 @@
                       <span class="label-text text-xs font-semibold">{$_('logs.refreshInterval')}</span>
                     </div>
                     <select
-                      class="select select-bordered select-sm"
+                      class="nx-input pr-7"
                       bind:value={refreshInterval}
                     >
                       <option value="5s">{$_('logs.refreshEvery5s')}</option>
@@ -665,7 +692,7 @@
           <!-- 手动刷新按钮 -->
           <button
             type="button"
-            class="btn btn-sm btn-outline gap-2"
+            class="nx-btn-outline nx-btn-sm"
             on:click={manualRefresh}
             disabled={loading}
           >
@@ -689,13 +716,13 @@
 
           <!-- 导出按钮 -->
           <div class="dropdown dropdown-end">
-            <div role="button" tabindex="0" class="btn btn-sm btn-secondary gap-2">
+            <div role="button" tabindex="0" class="nx-btn-ghost nx-btn-sm">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
               <span>{$_('logs.export')}</span>
             </div>
-            <ul role="menu" tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-32 z-[1]">
+            <ul role="menu" tabindex="0" class="dropdown-content border border-carbon-500 bg-carbon-900 shadow-industrial-lg w-32 z-[1] p-1">
               <li><button on:click={() => handleExport('json')}>JSON</button></li>
               <li><button on:click={() => handleExport('csv')}>CSV</button></li>
             </ul>
@@ -705,7 +732,7 @@
           {#if activeFiltersCount > 0}
             <button
               type="button"
-              class="btn btn-sm btn-ghost gap-1"
+              class="nx-btn-ghost nx-btn-sm"
               on:click={clearAllFilters}
             >
               <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -724,26 +751,26 @@
           <div
             role="button"
             tabindex="0"
-            class="btn btn-sm {method || statusFilter || successFilter !== undefined || requestTypeFilter || timeRangeType !== 'recent' || recentHours !== 1 || sortBy !== 'timestamp' || sortOrder !== 'desc' ? 'btn-primary' : 'btn-ghost'} gap-1"
+            class={`${method || statusFilter || successFilter !== undefined || requestTypeFilter || timeRangeType !== 'recent' || recentHours !== 1 || sortBy !== 'timestamp' || sortOrder !== 'desc' ? 'nx-btn-primary' : 'nx-btn-ghost'} nx-btn-sm`}
           >
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
             </svg>
             {$_('logs.filters')}
             {#if method || statusFilter || successFilter !== undefined || requestTypeFilter || timeRangeType !== 'recent' || recentHours !== 1 || sortBy !== 'timestamp' || sortOrder !== 'desc'}
-              <span class="badge badge-sm">
+              <span class="nx-feature-tag">
                 {[method, statusFilter, successFilter !== undefined, requestTypeFilter, timeRangeType !== 'recent' || recentHours !== 1, sortBy !== 'timestamp' || sortOrder !== 'desc'].filter(Boolean).length}
               </span>
             {/if}
           </div>
-          <div role="menu" tabindex="0" class="dropdown-content bg-base-100 rounded-box p-4 shadow-lg w-80 z-[1]">
+          <div role="menu" tabindex="0" class="dropdown-content border border-carbon-500 bg-carbon-900 shadow-industrial-lg p-4 w-80 z-[1]">
             <div class="space-y-3">
               <!-- Method -->
               <div class="form-control">
                 <div class="label py-1">
                   <span class="label-text text-xs font-semibold">{$_('logs.method')}</span>
                 </div>
-                <select bind:value={method} class="select select-bordered select-sm">
+                <select bind:value={method} class="nx-input pr-7">
                   <option value="">{$_('logs.allMethods')}</option>
                   <option value="GET">GET</option>
                   <option value="POST">POST</option>
@@ -762,7 +789,7 @@
                   type="text"
                   bind:value={statusFilter}
                   placeholder="200, 404, 500"
-                  class="input input-bordered input-sm"
+                  class="nx-input"
                 />
               </div>
 
@@ -771,21 +798,21 @@
                 <div class="label py-1">
                   <span class="label-text text-xs font-semibold">{$_('logs.result')}</span>
                 </div>
-                <select bind:value={successFilter} class="select select-bordered select-sm">
+                <select bind:value={successFilter} class="nx-input pr-7">
                   <option value={undefined}>{$_('logs.allResults')}</option>
                   <option value={true}>{$_('logs.success')}</option>
                   <option value={false}>{$_('logs.failed')}</option>
                 </select>
               </div>
 
-              <div class="divider my-2"></div>
+              <div class="border-t border-carbon-600 my-2"></div>
 
               <!-- Request Type -->
               <div class="form-control">
                 <div class="label py-1">
                   <span class="label-text text-xs font-semibold">{$_('logs.requestTypeFilter')}</span>
                 </div>
-                <select bind:value={requestTypeFilter} class="select select-bordered select-sm">
+                <select bind:value={requestTypeFilter} class="nx-input pr-7">
                   <option value="">{$_('logs.requestType_all')}</option>
                   <option value="final">{$_('logs.requestType_final')}</option>
                   <option value="retry">{$_('logs.requestType_retry')}</option>
@@ -798,7 +825,7 @@
                 <div class="label py-1">
                   <span class="label-text text-xs font-semibold">{$_('logs.timeRange')}</span>
                 </div>
-                <select bind:value={timeRangeType} class="select select-bordered select-sm">
+                <select bind:value={timeRangeType} class="nx-input pr-7">
                   <option value="all">{$_('logs.allTime')}</option>
                   <option value="recent">{$_('logs.recentTime')}</option>
                   <option value="custom">{$_('logs.customTime')}</option>
@@ -814,7 +841,7 @@
                     type="number"
                     bind:value={recentHours}
                     min="1"
-                    class="input input-bordered input-sm"
+                    class="nx-input"
                   />
                 </div>
               {/if}
@@ -827,7 +854,7 @@
                   <input
                     type="datetime-local"
                     bind:value={customStartTime}
-                    class="input input-bordered input-sm"
+                    class="nx-input"
                   />
                 </div>
 
@@ -838,13 +865,13 @@
                   <input
                     type="datetime-local"
                     bind:value={customEndTime}
-                    class="input input-bordered input-sm"
+                    class="nx-input"
                   />
                 </div>
               {/if}
 
               <!-- Sort -->
-              <div class="divider my-2"></div>
+              <div class="border-t border-carbon-600 my-2"></div>
               <div class="form-control">
                 <div class="label py-1">
                   <span class="label-text text-xs font-semibold">{$_('logs.sortBy')}</span>
@@ -867,7 +894,7 @@
 
         <!-- 刷新菜单（合并刷新控制） -->
         <div class="dropdown dropdown-end">
-          <div role="button" tabindex="0" class="btn btn-sm btn-ghost gap-2">
+          <div role="button" tabindex="0" class="nx-btn-ghost nx-btn-sm">
             <svg
               xmlns="http://www.w3.org/2000/svg"
               class="h-4 w-4"
@@ -885,7 +912,7 @@
             </svg>
             {$_('common.refresh')}
           </div>
-          <div role="menu" tabindex="0" class="dropdown-content bg-base-100 rounded-box p-4 shadow-lg w-72 z-[1]">
+          <div role="menu" tabindex="0" class="dropdown-content border border-carbon-500 bg-carbon-900 shadow-industrial-lg p-4 w-72 z-[1]">
             <div class="space-y-3">
               <!-- Auto Refresh Toggle -->
               <div class="form-control">
@@ -906,7 +933,7 @@
                     <span class="label-text text-xs font-semibold">{$_('logs.refreshInterval')}</span>
                   </div>
                   <select
-                    class="select select-bordered select-sm"
+                    class="nx-input pr-7"
                     bind:value={refreshInterval}
                   >
                     <option value="5s">{$_('logs.refreshEvery5s')}</option>
@@ -918,10 +945,10 @@
               {/if}
 
               <!-- Manual Refresh Button -->
-              <div class="divider my-2"></div>
+              <div class="border-t border-carbon-600 my-2"></div>
               <button
                 type="button"
-                class="btn btn-sm btn-primary w-full gap-2"
+                class="nx-btn-primary nx-btn-sm w-full"
                 on:click={manualRefresh}
                 disabled={loading}
               >
@@ -955,13 +982,13 @@
 
         <!-- 导出按钮 -->
         <div class="dropdown dropdown-end">
-          <div role="button" tabindex="0" class="btn btn-sm btn-secondary gap-2">
+          <div role="button" tabindex="0" class="nx-btn-ghost nx-btn-sm">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
             {$_('logs.export')}
           </div>
-          <ul role="menu" tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-32 z-[1]">
+          <ul role="menu" tabindex="0" class="dropdown-content border border-carbon-500 bg-carbon-900 shadow-industrial-lg w-32 z-[1] p-1">
             <li><button on:click={() => handleExport('json')}>JSON</button></li>
             <li><button on:click={() => handleExport('csv')}>CSV</button></li>
           </ul>
@@ -971,7 +998,7 @@
         {#if activeFiltersCount > 0}
           <button
             type="button"
-            class="btn btn-sm btn-ghost gap-1"
+            class="nx-btn-ghost nx-btn-sm"
             on:click={clearAllFilters}
           >
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -986,16 +1013,16 @@
       <div class="flex md:hidden items-center gap-2">
         <!-- 操作菜单（包含所有功能） -->
         <div class="dropdown dropdown-end">
-          <div role="button" tabindex="0" class="btn btn-sm btn-ghost gap-1">
+          <div role="button" tabindex="0" class="nx-btn-ghost nx-btn-sm">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
             </svg>
             {$_('logs.actions')}
             {#if method || statusFilter || successFilter !== undefined || requestTypeFilter || timeRangeType !== 'recent' || recentHours !== 1 || sortBy !== 'timestamp' || sortOrder !== 'desc' || autoRefreshEnabled}
-              <span class="badge badge-sm badge-primary"></span>
+              <span class="nx-pill-accent"></span>
             {/if}
           </div>
-          <div role="menu" tabindex="0" class="dropdown-content bg-base-100 rounded-box p-4 shadow-lg w-80 z-[1]">
+          <div role="menu" tabindex="0" class="dropdown-content border border-carbon-500 bg-carbon-900 shadow-industrial-lg p-4 w-80 z-[1]">
             <div class="space-y-3">
               <h3 class="font-semibold text-sm">{$_('logs.filters')}</h3>
 
@@ -1004,7 +1031,7 @@
                 <div class="label py-1">
                   <span class="label-text text-xs font-semibold">{$_('logs.method')}</span>
                 </div>
-                <select bind:value={method} class="select select-bordered select-sm">
+                <select bind:value={method} class="nx-input pr-7">
                   <option value="">{$_('logs.allMethods')}</option>
                   <option value="GET">GET</option>
                   <option value="POST">POST</option>
@@ -1023,7 +1050,7 @@
                   type="text"
                   bind:value={statusFilter}
                   placeholder="200, 404, 500"
-                  class="input input-bordered input-sm"
+                  class="nx-input"
                 />
               </div>
 
@@ -1032,7 +1059,7 @@
                 <div class="label py-1">
                   <span class="label-text text-xs font-semibold">{$_('logs.result')}</span>
                 </div>
-                <select bind:value={successFilter} class="select select-bordered select-sm">
+                <select bind:value={successFilter} class="nx-input pr-7">
                   <option value={undefined}>{$_('logs.allResults')}</option>
                   <option value={true}>{$_('logs.success')}</option>
                   <option value={false}>{$_('logs.failed')}</option>
@@ -1044,7 +1071,7 @@
                 <div class="label py-1">
                   <span class="label-text text-xs font-semibold">{$_('logs.requestTypeFilter')}</span>
                 </div>
-                <select bind:value={requestTypeFilter} class="select select-bordered select-sm">
+                <select bind:value={requestTypeFilter} class="nx-input pr-7">
                   <option value="">{$_('logs.requestType_all')}</option>
                   <option value="final">{$_('logs.requestType_final')}</option>
                   <option value="retry">{$_('logs.requestType_retry')}</option>
@@ -1057,7 +1084,7 @@
                 <div class="label py-1">
                   <span class="label-text text-xs font-semibold">{$_('logs.timeRange')}</span>
                 </div>
-                <select bind:value={timeRangeType} class="select select-bordered select-sm">
+                <select bind:value={timeRangeType} class="nx-input pr-7">
                   <option value="all">{$_('logs.allTime')}</option>
                   <option value="recent">{$_('logs.recentTime')}</option>
                   <option value="custom">{$_('logs.customTime')}</option>
@@ -1073,7 +1100,7 @@
                     type="number"
                     bind:value={recentHours}
                     min="1"
-                    class="input input-bordered input-sm"
+                    class="nx-input"
                   />
                 </div>
               {/if}
@@ -1086,7 +1113,7 @@
                   <input
                     type="datetime-local"
                     bind:value={customStartTime}
-                    class="input input-bordered input-sm"
+                    class="nx-input"
                   />
                 </div>
 
@@ -1097,7 +1124,7 @@
                   <input
                     type="datetime-local"
                     bind:value={customEndTime}
-                    class="input input-bordered input-sm"
+                    class="nx-input"
                   />
                 </div>
               {/if}
@@ -1120,7 +1147,7 @@
                 </div>
               </div>
 
-              <div class="divider my-2"></div>
+              <div class="border-t border-carbon-600 my-2"></div>
               <h3 class="font-semibold text-sm">{$_('common.refresh')}</h3>
 
               <!-- Auto Refresh -->
@@ -1141,7 +1168,7 @@
                     <span class="label-text text-xs font-semibold">{$_('logs.refreshInterval')}</span>
                   </div>
                   <select
-                    class="select select-bordered select-sm"
+                    class="nx-input pr-7"
                     bind:value={refreshInterval}
                   >
                     <option value="5s">{$_('logs.refreshEvery5s')}</option>
@@ -1155,7 +1182,7 @@
               <!-- Manual Refresh -->
               <button
                 type="button"
-                class="btn btn-sm btn-primary w-full gap-2"
+                class="nx-btn-primary nx-btn-sm w-full"
                 on:click={manualRefresh}
                 disabled={loading}
               >
@@ -1177,20 +1204,20 @@
                 {$_('common.refresh')}
               </button>
 
-              <div class="divider my-2"></div>
+              <div class="border-t border-carbon-600 my-2"></div>
 
               <!-- Export Buttons -->
               <div class="flex gap-2">
                 <button
                   type="button"
-                  class="btn btn-sm btn-secondary flex-1 gap-2"
+                  class="nx-btn-ghost nx-btn-sm flex-1"
                   on:click={() => handleExport('json')}
                 >
                   JSON
                 </button>
                 <button
                   type="button"
-                  class="btn btn-sm btn-secondary flex-1 gap-2"
+                  class="nx-btn-ghost nx-btn-sm flex-1"
                   on:click={() => handleExport('csv')}
                 >
                   CSV
@@ -1199,10 +1226,10 @@
 
               <!-- Clear Filters -->
               {#if activeFiltersCount > 0}
-                <div class="divider my-2"></div>
+                <div class="border-t border-carbon-600 my-2"></div>
                 <button
                   type="button"
-                  class="btn btn-sm btn-ghost w-full gap-1"
+                  class="nx-btn-ghost nx-btn-sm w-full"
                   on:click={clearAllFilters}
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1221,12 +1248,12 @@
     {#if activeFiltersCount > 0}
       <div class="flex items-center gap-2 flex-wrap px-1">
         {#if searchTerm.trim()}
-          <div class="badge badge-lg gap-2">
+          <div class="inline-flex items-center gap-1.5 border border-carbon-500 bg-carbon-900 px-2.5 py-0.5 font-mono text-[11px] uppercase tracking-command text-zinc-300">
             <span class="text-xs opacity-70">{$_('logs.searchTerm')}:</span>
             <span class="font-medium">{searchTerm}</span>
             <button
               type="button"
-              class="btn btn-ghost btn-xs p-0 h-4 w-4 min-h-0"
+              class="inline-flex items-center justify-center h-4 w-4 text-zinc-500 hover:text-red-300 transition-colors"
               on:click={() => searchTerm = ''}
             >
               <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1237,12 +1264,12 @@
         {/if}
 
         {#if method}
-          <div class="badge badge-primary badge-lg gap-2">
+          <div class="inline-flex items-center gap-1.5 border border-nexus-500/60 bg-nexus-500/10 px-2.5 py-0.5 font-mono text-[11px] uppercase tracking-command text-nexus-300">
             <span class="text-xs opacity-70">{$_('logs.method')}:</span>
             <span class="font-medium">{method}</span>
             <button
               type="button"
-              class="btn btn-ghost btn-xs p-0 h-4 w-4 min-h-0"
+              class="inline-flex items-center justify-center h-4 w-4 text-zinc-500 hover:text-red-300 transition-colors"
               on:click={() => method = ''}
             >
               <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1253,12 +1280,12 @@
         {/if}
 
         {#if statusFilter}
-          <div class="badge badge-primary badge-lg gap-2">
+          <div class="inline-flex items-center gap-1.5 border border-nexus-500/60 bg-nexus-500/10 px-2.5 py-0.5 font-mono text-[11px] uppercase tracking-command text-nexus-300">
             <span class="text-xs opacity-70">{$_('logs.status')}:</span>
             <span class="font-medium">{statusFilter}</span>
             <button
               type="button"
-              class="btn btn-ghost btn-xs p-0 h-4 w-4 min-h-0"
+              class="inline-flex items-center justify-center h-4 w-4 text-zinc-500 hover:text-red-300 transition-colors"
               on:click={() => statusFilter = ''}
             >
               <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1269,12 +1296,12 @@
         {/if}
 
         {#if successFilter !== undefined}
-          <div class="badge badge-primary badge-lg gap-2">
+          <div class="inline-flex items-center gap-1.5 border border-nexus-500/60 bg-nexus-500/10 px-2.5 py-0.5 font-mono text-[11px] uppercase tracking-command text-nexus-300">
             <span class="text-xs opacity-70">{$_('logs.result')}:</span>
             <span class="font-medium">{successFilter ? $_('logs.success') : $_('logs.failed')}</span>
             <button
               type="button"
-              class="btn btn-ghost btn-xs p-0 h-4 w-4 min-h-0"
+              class="inline-flex items-center justify-center h-4 w-4 text-zinc-500 hover:text-red-300 transition-colors"
               on:click={() => successFilter = undefined}
             >
               <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1285,12 +1312,12 @@
         {/if}
 
         {#if requestTypeFilter}
-          <div class="badge badge-primary badge-lg gap-2">
+          <div class="inline-flex items-center gap-1.5 border border-nexus-500/60 bg-nexus-500/10 px-2.5 py-0.5 font-mono text-[11px] uppercase tracking-command text-nexus-300">
             <span class="text-xs opacity-70">{$_('logs.requestType')}:</span>
             <span class="font-medium">{$_(`logs.requestType_${requestTypeFilter}`)}</span>
             <button
               type="button"
-              class="btn btn-ghost btn-xs p-0 h-4 w-4 min-h-0"
+              class="inline-flex items-center justify-center h-4 w-4 text-zinc-500 hover:text-red-300 transition-colors"
               on:click={() => requestTypeFilter = ''}
             >
               <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1301,12 +1328,12 @@
         {/if}
 
         {#if timeRangeType === 'recent' && recentHours !== 1}
-          <div class="badge badge-primary badge-lg gap-2">
+          <div class="inline-flex items-center gap-1.5 border border-nexus-500/60 bg-nexus-500/10 px-2.5 py-0.5 font-mono text-[11px] uppercase tracking-command text-nexus-300">
             <span class="text-xs opacity-70">{$_('logs.timeRange')}:</span>
             <span class="font-medium">{$_('logs.recentTime')} {recentHours}h</span>
             <button
               type="button"
-              class="btn btn-ghost btn-xs p-0 h-4 w-4 min-h-0"
+              class="inline-flex items-center justify-center h-4 w-4 text-zinc-500 hover:text-red-300 transition-colors"
               on:click={() => recentHours = 1}
             >
               <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1317,12 +1344,12 @@
         {/if}
 
         {#if timeRangeType === 'custom'}
-          <div class="badge badge-primary badge-lg gap-2">
+          <div class="inline-flex items-center gap-1.5 border border-nexus-500/60 bg-nexus-500/10 px-2.5 py-0.5 font-mono text-[11px] uppercase tracking-command text-nexus-300">
             <span class="text-xs opacity-70">{$_('logs.timeRange')}:</span>
             <span class="font-medium">{$_('logs.customTime')}</span>
             <button
               type="button"
-              class="btn btn-ghost btn-xs p-0 h-4 w-4 min-h-0"
+              class="inline-flex items-center justify-center h-4 w-4 text-zinc-500 hover:text-red-300 transition-colors"
               on:click={() => { timeRangeType = 'recent'; customStartTime = ''; customEndTime = ''; }}
             >
               <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1333,12 +1360,12 @@
         {/if}
 
         {#if timeRangeType === 'all'}
-          <div class="badge badge-primary badge-lg gap-2">
+          <div class="inline-flex items-center gap-1.5 border border-nexus-500/60 bg-nexus-500/10 px-2.5 py-0.5 font-mono text-[11px] uppercase tracking-command text-nexus-300">
             <span class="text-xs opacity-70">{$_('logs.timeRange')}:</span>
             <span class="font-medium">{$_('logs.allTime')}</span>
             <button
               type="button"
-              class="btn btn-ghost btn-xs p-0 h-4 w-4 min-h-0"
+              class="inline-flex items-center justify-center h-4 w-4 text-zinc-500 hover:text-red-300 transition-colors"
               on:click={() => timeRangeType = 'recent'}
             >
               <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1349,12 +1376,12 @@
         {/if}
 
         {#if sortBy !== 'timestamp' || sortOrder !== 'desc'}
-          <div class="badge badge-primary badge-lg gap-2">
+          <div class="inline-flex items-center gap-1.5 border border-nexus-500/60 bg-nexus-500/10 px-2.5 py-0.5 font-mono text-[11px] uppercase tracking-command text-nexus-300">
             <span class="text-xs opacity-70">{$_('logs.sortBy')}:</span>
             <span class="font-medium">{$_(`logs.sortBy${sortBy.charAt(0).toUpperCase() + sortBy.slice(1)}`)} {sortOrder === 'asc' ? '↑' : '↓'}</span>
             <button
               type="button"
-              class="btn btn-ghost btn-xs p-0 h-4 w-4 min-h-0"
+              class="inline-flex items-center justify-center h-4 w-4 text-zinc-500 hover:text-red-300 transition-colors"
               on:click={() => { sortBy = 'timestamp'; sortOrder = 'desc'; }}
             >
               <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1370,102 +1397,98 @@
   <!-- 日志列表 -->
   {#if loading && logs.length === 0}
     <div class="flex justify-center items-center h-64">
-      <span class="loading loading-spinner loading-lg"></span>
+      <span class="inline-block h-8 w-8 border-2 border-current border-t-transparent animate-spin"></span>
     </div>
   {:else if error}
-    <div class="alert alert-error">
-      <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
-      <span>{$_('common.error')}: {error}</span>
-    </div>
+    <PanelCard title={$_('common.error')} tag="ERR" stripe="red">
+      <p class="font-mono text-[11px] uppercase tracking-command text-red-300">{error}</p>
+    </PanelCard>
   {:else if logs.length === 0}
-    <div class="alert alert-info">
-      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-      </svg>
-      <span>{$_('logs.noData')}</span>
-    </div>
+    <PanelCard title={$_('logs.noData')} tag="EMPTY" stripe="zinc">
+      <div class="py-6 text-center">
+        <span class="font-mono text-[11px] uppercase tracking-command text-zinc-500">
+          {$_('logs.noData')}
+        </span>
+      </div>
+    </PanelCard>
   {:else}
-    <div class="card bg-base-100 shadow-xl">
-      <div class="card-body p-0">
-        <div class="overflow-x-auto">
-          <table class="table table-zebra table-sm">
-            <thead>
-              <tr>
-                <th>{$_('logs.time')}</th>
-                <th>{$_('logs.method')}</th>
-                <th>{$_('logs.path')}</th>
-                <th>{$_('logs.status')}</th>
-                <th>{$_('logs.requestType')}</th>
-                <th>{$_('logs.duration')}</th>
-                <th>{$_('logs.upstream')}</th>
-                <th>{$_('logs.actions')}</th>
+    <PanelCard title="REQUEST LOG" tag={`N=${logs.length}/${total}`} flush>
+      <div class="overflow-x-auto">
+        <table class="w-full">
+          <thead class="border-b border-carbon-600 bg-carbon-900/60">
+            <tr>
+              <th class="text-left nx-label py-2.5 px-4">{$_('logs.time')}</th>
+              <th class="text-left nx-label py-2.5 px-4">{$_('logs.method')}</th>
+              <th class="text-left nx-label py-2.5 px-4">{$_('logs.path')}</th>
+              <th class="text-left nx-label py-2.5 px-4">{$_('logs.status')}</th>
+              <th class="text-left nx-label py-2.5 px-4">{$_('logs.requestType')}</th>
+              <th class="text-right nx-label py-2.5 px-4">{$_('logs.duration')}</th>
+              <th class="text-left nx-label py-2.5 px-4">{$_('logs.upstream')}</th>
+              <th class="text-right nx-label py-2.5 px-4">{$_('logs.actions')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each logs as log (log.requestId)}
+              <tr class="group border-b border-carbon-600/60 hover:bg-carbon-700/40 transition-colors">
+                <td class="py-2.5 px-4 font-mono text-[11px] text-zinc-400">{formatTime(log.timestamp)}</td>
+                <td class="py-2.5 px-4"><span class="nx-feature-tag">{log.method}</span></td>
+                <td class="py-2.5 px-4 font-mono text-[12px] text-zinc-200 truncate max-w-xs" title={log.path}>
+                  {log.path}
+                </td>
+                <td class="py-2.5 px-4">
+                  <span class="inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-command">
+                    <span class={getStatusDotClass(log.status)}></span>
+                    <span class={getStatusTextClass(log.status)}>{log.status}</span>
+                  </span>
+                </td>
+                <td class="py-2.5 px-4">
+                  <span
+                    class="font-mono text-[10px] uppercase tracking-command {getRequestTypeTextClass(log.requestType)}"
+                    title={$_(`logs.requestType_${log.requestType}_desc`)}
+                  >
+                    {getRequestTypeLabel(log.requestType)}
+                  </span>
+                </td>
+                <td class="py-2.5 px-4 text-right font-mono text-[11px] text-zinc-300 tabular-nums">{formatDuration(log.duration)}</td>
+                <td class="py-2.5 px-4 font-mono text-[11px] text-zinc-400 truncate max-w-xs" title={log.upstream || '-'}>
+                  {log.upstream || '—'}
+                </td>
+                <td class="py-2.5 px-4 text-right">
+                  <button
+                    class="nx-btn-ghost nx-btn-sm opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+                    on:click={() => viewDetail(log)}
+                  >
+                    {$_('logs.viewDetail')}
+                  </button>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {#each logs as log (log.requestId)}
-                <tr class="hover">
-                  <td class="text-xs">{formatTime(log.timestamp)}</td>
-                  <td><span class="badge badge-sm">{log.method}</span></td>
-                  <td class="font-mono text-xs truncate max-w-xs" title={log.path}>
-                    {log.path}
-                  </td>
-                  <td>
-                    <span class="badge badge-sm {getStatusColor(log.status)}">
-                      {log.status}
-                    </span>
-                  </td>
-                  <td>
-                    <span class="badge badge-sm {getRequestTypeColor(log.requestType)}" title={$_(`logs.requestType_${log.requestType}_desc`)}>
-                      {getRequestTypeLabel(log.requestType)}
-                    </span>
-                  </td>
-                  <td class="text-xs">{formatDuration(log.duration)}</td>
-                  <td class="text-xs truncate max-w-xs" title={log.upstream || '-'}>
-                    {log.upstream || '-'}
-                  </td>
-                  <td>
-                    <button
-                      class="btn btn-xs btn-ghost"
-                      on:click={() => viewDetail(log)}
-                    >
-                      {$_('logs.viewDetail')}
-                    </button>
-                  </td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
+            {/each}
+          </tbody>
+        </table>
+      </div>
 
-        <!-- 分页 -->
-        <div class="flex justify-between items-center p-4">
-          <div class="text-sm">
-            {$_('logs.showing', { values: { start: (page - 1) * limit + 1, end: Math.min(page * limit, total), total } })}
-          </div>
-          <div class="join">
-            <button
-              class="join-item btn btn-sm"
-              disabled={page <= 1}
-              on:click={() => page = page - 1}
-            >
-              «
-            </button>
-            <button class="join-item btn btn-sm">
-              {$_('logs.page', { values: { page, totalPages } })}
-            </button>
-            <button
-              class="join-item btn btn-sm"
-              disabled={page >= totalPages}
-              on:click={() => page = page + 1}
-            >
-              »
-            </button>
-          </div>
+      <!-- Pagination -->
+      <div class="flex justify-between items-center px-4 py-3 border-t border-carbon-600 bg-carbon-900/60">
+        <span class="font-mono text-[10px] uppercase tracking-command text-zinc-500">
+          {$_('logs.showing', { values: { start: (page - 1) * limit + 1, end: Math.min(page * limit, total), total } })}
+        </span>
+        <div class="inline-flex border border-carbon-500 bg-carbon-900">
+          <button
+            class="nx-pager-btn"
+            disabled={page <= 1}
+            on:click={() => (page = page - 1)}
+          >«</button>
+          <span class="nx-pager-btn pointer-events-none">
+            {$_('logs.page', { values: { page, totalPages } })}
+          </span>
+          <button
+            class="nx-pager-btn"
+            disabled={page >= totalPages}
+            on:click={() => (page = page + 1)}
+          >»</button>
         </div>
       </div>
-    </div>
+    </PanelCard>
   {/if}
 </div>
 
