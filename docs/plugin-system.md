@@ -353,6 +353,13 @@ Apply plugins to all requests matching a route:
 
 ```json
 {
+  "config_version": 3,
+  "services": [{
+    "name": "anthropic-api",
+    "endpoints": [{
+      "target": "https://api.anthropic.com"
+    }]
+  }],
   "routes": [{
     "path": "/v1/chat/completions",
     "plugins": [{
@@ -362,29 +369,21 @@ Apply plugins to all requests matching a route:
         "to": "anthropic"
       }
     }],
-    "upstreams": [{
-      "target": "https://api.anthropic.com"
-    }]
+    "service": "anthropic-api"
   }]
 }
 ```
 
-### Upstream-Level Plugins
+### Endpoint-Level Plugins
 
-Apply plugins to specific upstreams:
+Apply plugins to specific service endpoints:
 
 ```json
 {
-  "routes": [{
-    "path": "/api/ai",
-    "plugins": [{
-      "name": "ai-transformer",
-      "options": {
-        "from": "anthropic",
-        "to": "openai"
-      }
-    }],
-    "upstreams": [
+  "config_version": 3,
+  "services": [{
+    "name": "ai-providers",
+    "endpoints": [
       {
         "target": "https://api.openai.com",
         "priority": 1
@@ -401,6 +400,17 @@ Apply plugins to specific upstreams:
         }]
       }
     ]
+  }],
+  "routes": [{
+    "path": "/api/ai",
+    "plugins": [{
+      "name": "ai-transformer",
+      "options": {
+        "from": "anthropic",
+        "to": "openai"
+      }
+    }],
+    "service": "ai-providers"
   }]
 }
 ```
@@ -1098,10 +1108,15 @@ describe('MyPlugin', () => {
 ```typescript
 test('plugin should work end-to-end', async () => {
   const config = {
+    config_version: 3,
+    services: [{
+      name: 'test-service',
+      endpoints: [{ target: 'http://localhost:9000' }]
+    }],
     routes: [{
       path: '/test',
       plugins: ['my-plugin'],
-      upstreams: [{ target: 'http://localhost:9000' }]
+      service: 'test-service'
     }]
   };
 
