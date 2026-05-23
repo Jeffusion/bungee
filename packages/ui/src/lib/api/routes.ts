@@ -1,47 +1,15 @@
 import { api } from './client';
-import type { AppConfig, PluginConfigValue, RouteTimeoutsConfig } from '../types';
-
-export interface PluginConfig {
-  name: string;
-  path?: string;
-  options?: Record<string, PluginConfigValue>;
-  enabled?: boolean;
-}
-
-export interface Route {
-  path: string;
-  pathRewrite?: { [pattern: string]: string };
-  upstreams: Upstream[];
-  headers?: ModificationRules;
-  body?: ModificationRules;
-  query?: ModificationRules;
-  plugins?: Array<PluginConfig | string>;
-  auth?: { enabled: boolean; tokens: string[] };
-  timeouts?: RouteTimeoutsConfig;
-  failover?: FailoverConfig;
-  stickySession?: StickySessionConfig;
-}
-
-export interface StickySessionConfig {
-  enabled: boolean;
-  keyExpression?: string;
-}
-
-export interface Upstream {
-  _uid?: string;
-  target: string;
-  weight?: number;
-  priority?: number;
-  plugins?: Array<PluginConfig | string>;
-  headers?: ModificationRules;
-  body?: ModificationRules;
-  query?: ModificationRules;
-  disabled?: boolean;
-  description?: string;
-  condition?: string;
-  status?: 'HEALTHY' | 'UNHEALTHY' | 'HALF_OPEN';
-  lastFailureTime?: number;
-}
+import type {
+  AppConfig,
+  Endpoint as BaseEndpoint,
+  FailoverConfig,
+  PluginConfig,
+  PluginConfigValue,
+  RouteConfig,
+  RouteTimeoutsConfig,
+  Service as BaseService,
+  StickySessionConfig,
+} from '@jeffusion/bungee-types';
 
 export interface ModificationRules {
   add?: Record<string, any>;
@@ -50,38 +18,49 @@ export interface ModificationRules {
   default?: Record<string, any>;
 }
 
-export interface FailoverConfig {
-  enabled: boolean;
-  retryOn?: number | string | (number | string)[];
-  passiveHealth?: {
-    consecutiveFailures?: number;
-    healthySuccesses?: number;
-    autoDisableThreshold?: number;
-    autoEnableOnActiveHealthCheck?: boolean;
-  };
-  recovery?: {
-    probeIntervalMs?: number;
-    probeTimeoutMs?: number;
-  };
-  slowStart?: {
-    enabled: boolean;
-    durationMs?: number;
-    initialWeightFactor?: number;
-  };
-  healthCheck?: {
-    enabled: boolean;
-    intervalMs?: number;
-    timeoutMs?: number;
-    path?: string;
-    method?: string;
-    expectedStatus?: number[];
-    unhealthyThreshold?: number;
-    healthyThreshold?: number;
-    body?: string;
-    contentType?: string;
-    headers?: Record<string, string>;
-    query?: Record<string, string>;
-  };
+export interface Upstream extends Omit<BaseEndpoint, 'headers' | 'body' | 'query'> {
+  _uid?: string;
+  headers?: ModificationRules;
+  body?: ModificationRules;
+  query?: ModificationRules;
+  status?: 'HEALTHY' | 'UNHEALTHY' | 'HALF_OPEN';
+  upstream_id?: string;
+  last_failure_time?: number;
+  consecutive_failures?: number;
+  consecutive_successes?: number;
+  recovery_attempt_count?: number;
+  health_check_successes?: number;
+  health_check_failures?: number;
+}
+
+export interface Service extends Omit<BaseService, 'endpoints'> {
+  endpoints: Upstream[];
+}
+
+export interface Route extends Omit<RouteConfig, 'endpoints' | 'headers' | 'body' | 'query'> {
+  headers?: ModificationRules;
+  body?: ModificationRules;
+  query?: ModificationRules;
+  endpoints?: Upstream[];
+  transformer?: string | object;
+}
+
+export type {
+  AppConfig,
+  FailoverConfig,
+  PluginConfig,
+  PluginConfigValue,
+  RouteTimeoutsConfig,
+  StickySessionConfig,
+};
+
+export function resolveRouteEndpoints(route: Partial<Pick<Route, 'endpoints' | 'service'>>, services: Service[] = []): Upstream[] {
+  if (route.service) {
+    const svc = services.find((service) => service.name === route.service);
+    return svc?.endpoints ?? [];
+  }
+
+  return route.endpoints ?? [];
 }
 
 export class RoutesAPI {
@@ -141,7 +120,7 @@ export class RoutesAPI {
 
   static async validateRoute(route: Route): Promise<{ valid: boolean; error?: string }> {
     const tempConfig = {
-      configVersion: 2,
+      config_version: 4,
       routes: [route]
     };
 

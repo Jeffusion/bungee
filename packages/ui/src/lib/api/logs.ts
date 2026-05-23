@@ -130,20 +130,20 @@ export async function loadHeaderById(headerId: string): Promise<Record<string, s
  */
 export interface CleanupConfig {
   enabled: boolean;
-  retentionDays: number;
-  scheduleIntervalHours: number;
-  isActive: boolean;
+  retention_days: number;
+  schedule_interval_hours: number;
+  is_active: boolean;
 }
 
 /**
  * 清理结果接口
  */
 export interface CleanupResult {
-  deletedSqliteRecords: number;
-  deletedFileLogFiles: number;
-  deletedBodyDirs: number;
-  deletedBodyFiles: number;
-  durationMs: number;
+  deleted_sqlite_records: number;
+  deleted_file_log_files: number;
+  deleted_body_dirs: number;
+  deleted_body_files: number;
+  duration_ms: number;
 }
 
 /**
