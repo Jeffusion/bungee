@@ -1,23 +1,26 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { pop } from 'svelte-spa-router';
+  import { pop, querystring } from 'svelte-spa-router';
   import { sortBy } from 'lodash-es';
-  import { RoutesAPI } from '../lib/api/routes';
-  import type { Route } from '../lib/api/routes';
+  import { resolveRouteEndpoints, RoutesAPI } from '../lib/api/routes';
+  import type { Route, Service } from '../lib/api/routes';
+  import { getConfig } from '../lib/api/config';
   import { validateRoute, validateWeights, type ValidationError } from '../lib/validation';
-  import Toast from '../lib/components/Toast.svelte';
   import RouteTemplates from '../lib/components/RouteTemplates.svelte';
+  import ConfirmDialog from '../lib/components/ConfirmDialog.svelte';
   import BasicInfoSection from '../lib/components/sections/BasicInfoSection.svelte';
-  import UpstreamsSection from '../lib/components/sections/UpstreamsSection.svelte';
+  import UpstreamTargetSection from '../lib/components/sections/UpstreamTargetSection.svelte';
   import ModificationSection from '../lib/components/sections/ModificationSection.svelte';
   import AuthSection from '../lib/components/sections/AuthSection.svelte';
-  import FailoverSection from '../lib/components/sections/FailoverSection.svelte';
-  import StickySessionSection from '../lib/components/sections/StickySessionSection.svelte';
-  import PreviewSection from '../lib/components/sections/PreviewSection.svelte';
+  import CorsSection from '../lib/components/sections/CorsSection.svelte';
+  import RateLimitSection from '../lib/components/sections/RateLimitSection.svelte';
+  import RetrySection from '../lib/components/sections/RetrySection.svelte';
+  import DirectResponseSection from '../lib/components/sections/DirectResponseSection.svelte';
   import { toast } from '../lib/stores/toast';
   import { _ } from '../lib/i18n';
   import { v4 as uuidv4 } from 'uuid';
-  import { isMac, getModifierKey, isModifierPressed } from '../lib/utils/platform';
+  import { getModifierKey, isModifierPressed } from '../lib/utils/platform';
+  import { PanelCard, StatusBadge, StatusDot } from '../lib/components/industrial';
 
   export let params: { path?: string } = {};
 
@@ -26,55 +29,48 @@
   let loading = true;
   let saving = false;
   let showTemplates = false;
-  let activeSection: 'basic' | 'upstreams' | 'modification' | 'auth' | 'failover' | 'stickySession' | 'preview' = 'basic';
+  type RouteEditorSection = 'match' | 'target' | 'processing' | 'policy' | 'response' | 'plugins' | 'review';
+  let activeSection: RouteEditorSection = 'match';
   let showValidationDetails = false;
+
+  function isRouteEditorSection(value: string | null): value is RouteEditorSection {
+    const valid: RouteEditorSection[] = ['match', 'target', 'processing', 'policy', 'response', 'plugins', 'review'];
+    return value !== null && (valid as string[]).includes(value);
+  }
+
+  $: {
+    if ($querystring) {
+      const p = new URLSearchParams($querystring);
+      const s = p.get('section');
+      if (isRouteEditorSection(s)) activeSection = s;
+    }
+  }
 
   let route: Route = {
     path: '',
-    upstreams: [{
-      _uid: uuidv4(),
-      target: '',
-      weight: 100,
-      priority: 1
-    }],
+    endpoints: [{ _uid: uuidv4(), target: '', weight: 100, priority: 1 }],
     headers: { add: {}, remove: [], default: {} },
     body: { add: {}, remove: [], replace: {}, default: {} },
     query: { add: {}, remove: [], replace: {}, default: {} },
   };
 
-  // Validation
+  let services: Service[] = [];
+  $: resolvedEndpoints = resolveRouteEndpoints(route, services);
+
   let errors: ValidationError[] = [];
   let weightErrors: ValidationError[] = [];
   let allErrors: ValidationError[] = [];
   let isValid = false;
-  let validationDebounce: number | null = null;
+  let validationDebounce: any = null;
 
-  // Auto-save draft
   let lastAutoSave: number | null = null;
-  let autoSaveInterval: number | null = null;
+  let autoSaveInterval: any = null;
 
-  // Toast notification
-  let showToast = false;
-  let toastMessage = '';
-  let toastType: 'success' | 'error' | 'warning' | 'info' = 'success';
-
-  // Confirmation dialog
+  // Confirm dialog state
   let showConfirmDialog = false;
   let confirmDialogTitle = '';
   let confirmDialogMessage = '';
   let confirmDialogCallback: (() => void) | null = null;
-
-  function showSuccessToast(message: string) {
-    toastMessage = message;
-    toastType = 'success';
-    showToast = true;
-  }
-
-  function showErrorToast(message: string) {
-    toastMessage = message;
-    toastType = 'error';
-    showToast = true;
-  }
 
   function showConfirm(title: string, message: string, callback: () => void) {
     confirmDialogTitle = title;
@@ -82,47 +78,28 @@
     confirmDialogCallback = callback;
     showConfirmDialog = true;
   }
-
   function handleConfirmYes() {
     showConfirmDialog = false;
-    if (confirmDialogCallback) {
-      confirmDialogCallback();
-      confirmDialogCallback = null;
-    }
+    if (confirmDialogCallback) { confirmDialogCallback(); confirmDialogCallback = null; }
   }
-
   function handleConfirmNo() {
     showConfirmDialog = false;
     confirmDialogCallback = null;
   }
 
-  // Keyboard shortcuts
   function handleKeydown(event: KeyboardEvent) {
-    // Cmd/Ctrl + S: Save
     if ((event.metaKey || event.ctrlKey) && event.key === 's') {
       event.preventDefault();
-      if (isValid && !saving) {
-        handleSave();
-      }
+      if (isValid && !saving) handleSave();
     }
-
-    // Esc: Cancel
-    if (event.key === 'Escape') {
-      handleCancel();
-    }
-
-    // Cmd/Ctrl + Number keys 1-7: Switch sections (Mac: ⌘+1-7, Windows/Linux: Ctrl+1-7)
+    if (event.key === 'Escape') handleCancel();
     if (event.key >= '1' && event.key <= '7' && isModifierPressed(event) && !event.altKey) {
-      const sections: typeof activeSection[] = ['basic', 'upstreams', 'modification', 'auth', 'failover', 'stickySession', 'preview'];
-      const targetSection = sections[parseInt(event.key) - 1];
-      if (targetSection) {
-        activeSection = targetSection;
-        event.preventDefault();
-      }
+      const sections: RouteEditorSection[] = ['match', 'target', 'processing', 'policy', 'response', 'plugins', 'review'];
+      const target = sections[parseInt(event.key) - 1];
+      if (target) { activeSection = target; event.preventDefault(); }
     }
   }
 
-  // Auto-save to localStorage
   function autoSaveDraft() {
     if (!isEditMode) {
       try {
@@ -134,7 +111,6 @@
     }
   }
 
-  // Format relative time
   function formatRelativeTime(timestamp: number): string {
     const seconds = Math.floor((Date.now() - timestamp) / 1000);
     if (seconds < 60) return $_('autosave.justNow');
@@ -142,31 +118,26 @@
     return $_('autosave.hoursAgo', { values: { hours: Math.floor(seconds / 3600) } });
   }
 
-  // Async validation
   async function performValidation() {
     try {
-      const routeErrors = await validateRoute(route);
-      const routeWeightErrors = validateWeights(route.upstreams);
-
+      const endpointsForValidation = route.endpoints && route.endpoints.length > 0 ? route.endpoints : resolvedEndpoints;
+      const routeErrors = await validateRoute(route, services);
+      const routeWeightErrors = validateWeights(endpointsForValidation);
       errors = routeErrors;
       weightErrors = routeWeightErrors;
       allErrors = [...routeErrors, ...routeWeightErrors];
-      isValid = allErrors.length === 0 && route.upstreams.length > 0;
+      const hasGlobalResponseBypass = route.direct_response?.enabled || route.redirect?.enabled;
+      isValid = allErrors.length === 0 && (hasGlobalResponseBypass || Boolean(route.service) || endpointsForValidation.length > 0);
     } catch (error) {
       console.error('Validation failed:', error);
       isValid = false;
     }
   }
 
-  // Reactive validation (debounced)
   $: {
     route && (() => {
-      if (validationDebounce) {
-        clearTimeout(validationDebounce);
-      }
-      validationDebounce = setTimeout(() => {
-        performValidation();
-      }, 300) as any;
+      if (validationDebounce) clearTimeout(validationDebounce);
+      validationDebounce = setTimeout(() => performValidation(), 300);
     })();
   }
 
@@ -175,14 +146,17 @@
       toast.show($_('routeEditor.saveFailed', { values: { error: $_('common.error') } }), 'error');
       return;
     }
-
     try {
       saving = true;
-
+      const hasDirectResponse = route.direct_response?.enabled || route.redirect?.enabled;
       const sortedRoute = {
         ...route,
-        upstreams: sortBy(route.upstreams, [(up: any) => up.priority ?? 1]).map(({ _uid, ...upstream }: any) => upstream)
+        endpoints: !hasDirectResponse && !route.service && route.endpoints && route.endpoints.length > 0
+          ? sortBy(route.endpoints, [(endpoint: any) => endpoint.priority ?? 1]).map(({ _uid, ...endpoint }: any) => endpoint)
+          : undefined,
+        service: hasDirectResponse ? undefined : route.service,
       };
+      if (!sortedRoute.endpoints) delete sortedRoute.endpoints;
 
       if (isEditMode) {
         await RoutesAPI.update(originalPath, sortedRoute);
@@ -190,10 +164,8 @@
       } else {
         await RoutesAPI.create(sortedRoute);
         toast.show($_('routeEditor.routeSaved'), 'success');
-        // Clear draft after successful save
         localStorage.removeItem('bungee-route-draft');
       }
-
       pop();
     } catch (e: any) {
       toast.show($_('routeEditor.saveFailed', { values: { error: e.message } }), 'error');
@@ -203,11 +175,7 @@
   }
 
   function handleCancel() {
-    showConfirm(
-      $_('confirmDialog.cancelTitle'),
-      $_('confirmDialog.cancelMessage'),
-      () => pop()
-    );
+    showConfirm($_('confirmDialog.cancelTitle'), $_('confirmDialog.cancelMessage'), () => pop());
   }
 
   function handleTemplateSelect(event: CustomEvent<Partial<Route>>) {
@@ -218,31 +186,26 @@
       headers: template.headers || route.headers,
       body: template.body || route.body,
       query: template.query || route.query,
-      upstreams: template.upstreams?.map(u => ({
+      endpoints: template.endpoints?.map((u) => ({
         ...u,
         _uid: uuidv4(),
         headers: u.headers || { add: {}, remove: [], default: {} },
         body: u.body || { add: {}, remove: [], replace: {}, default: {} },
-        query: u.query || { add: {}, remove: [], replace: {}, default: {} }
-      })) || route.upstreams
+        query: u.query || { add: {}, remove: [], replace: {}, default: {} },
+      })) || route.endpoints,
     };
-
     toast.show($_('routeEditor.templateApplied'), 'success');
   }
 
   onMount(async () => {
-    // Add keyboard event listener
     window.addEventListener('keydown', handleKeydown);
-
-    // Start auto-save interval (every 30 seconds)
-    autoSaveInterval = setInterval(() => {
-      autoSaveDraft();
-    }, 30000) as any;
+    const config = await getConfig();
+    services = config.services ?? [];
+    autoSaveInterval = setInterval(() => autoSaveDraft(), 30000);
 
     if (params.path) {
       isEditMode = true;
       originalPath = decodeURIComponent(params.path);
-
       try {
         const existingRoute = await RoutesAPI.get(originalPath);
         if (existingRoute) {
@@ -250,12 +213,12 @@
           route.headers = route.headers || { add: {}, remove: [], default: {} };
           route.body = route.body || { add: {}, remove: [], replace: {}, default: {} };
           route.query = route.query || { add: {}, remove: [], replace: {}, default: {} };
-          route.upstreams = route.upstreams.map(u => ({
+          route.endpoints = route.endpoints?.map((u) => ({
             ...u,
             _uid: uuidv4(),
             headers: u.headers || { add: {}, remove: [], default: {} },
             body: u.body || { add: {}, remove: [], replace: {}, default: {} },
-            query: u.query || { add: {}, remove: [], replace: {}, default: {} }
+            query: u.query || { add: {}, remove: [], replace: {}, default: {} },
           }));
         } else {
           toast.show($_('routes.noRoutes'), 'error');
@@ -266,7 +229,6 @@
         pop();
       }
     } else {
-      // Try to restore draft for new routes
       try {
         const draft = localStorage.getItem('bungee-route-draft');
         if (draft) {
@@ -274,9 +236,7 @@
           showConfirm(
             $_('confirmDialog.restoreDraftTitle'),
             $_('confirmDialog.restoreDraftMessage'),
-            () => {
-              route = parsedDraft;
-            }
+            () => { route = parsedDraft; }
           );
         }
       } catch (e) {
@@ -288,289 +248,408 @@
 
   onDestroy(() => {
     window.removeEventListener('keydown', handleKeydown);
-    if (autoSaveInterval) {
-      clearInterval(autoSaveInterval);
-    }
+    if (autoSaveInterval) clearInterval(autoSaveInterval);
   });
+
+  // Navigation items
+  $: navItems = loading ? [] : ([
+    {
+      id: 'match'      as RouteEditorSection,
+      label: $_('routeEditor.builder.match'),
+      icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z',
+      badge: '',
+    },
+    {
+      id: 'target'     as RouteEditorSection,
+      label: $_('routeEditor.builder.target'),
+      icon: 'M13 10V3L4 14h7v7l9-11h-7z',
+      badge: (route.direct_response?.enabled || route.redirect?.enabled)
+        ? '—'
+        : (route.service || String(route.endpoints?.length ?? 0)),
+    },
+    {
+      id: 'processing' as RouteEditorSection,
+      label: $_('routeEditor.builder.processing'),
+      icon: 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10',
+      badge: route.retry?.enabled ? '✓' : '',
+    },
+    {
+      id: 'policy'     as RouteEditorSection,
+      label: $_('routeEditor.builder.policy'),
+      icon: 'M9 12l2 2 4-4m5.618-4.016A9 9 0 112.683 13.317',
+      badge: (route.rate_limit?.enabled || route.auth?.enabled || route.cors?.enabled) ? '✓' : '',
+    },
+    {
+      id: 'response'   as RouteEditorSection,
+      label: $_('routeEditor.builder.response'),
+      icon: 'M14 5l7 7m0 0l-7 7m7-7H3',
+      badge: (route.response_rules?.some((r) => r.enabled) || route.direct_response?.enabled || route.redirect?.enabled) ? '✓' : '',
+    },
+    {
+      id: 'plugins'    as RouteEditorSection,
+      label: $_('routeEditor.builder.plugins'),
+      icon: 'M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 011-1h1a2 2 0 100-4H7a1 1 0 01-1-1V7a1 1 0 011-1h3a1 1 0 001-1V4z',
+      badge: route.plugins?.length ? String(route.plugins.length) : '',
+    },
+    {
+      id: 'review'     as RouteEditorSection,
+      label: $_('routeEditor.builder.review'),
+      icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4',
+      badge: '',
+    },
+  ]);
 </script>
 
-<div class="min-h-screen bg-base-200">
-  <!-- Page Title Area -->
-  <div class="bg-base-100 border-b border-base-300">
-    <div class="max-w-7xl mx-auto px-6 py-4">
-      <!-- Breadcrumb Navigation with Path -->
-      <div class="breadcrumbs text-sm">
-        <ul>
-          <li>
-            <button type="button" class="link link-hover" on:click={() => window.location.hash = '/'}>
-              {$_('breadcrumb.home')}
-            </button>
-          </li>
-          <li>
-            <button type="button" class="link link-hover" on:click={() => window.location.hash = '/routes'}>
-              {$_('breadcrumb.routes')}
-            </button>
-          </li>
-          <li>
-            <span class="flex items-center gap-2">
-              <span>{isEditMode ? $_('breadcrumb.editRoute') : $_('breadcrumb.newRoute')}</span>
-              {#if isEditMode}
-                <code class="px-2 py-1 bg-base-200 rounded text-sm font-mono text-gray-600">
-                  {originalPath}
-                </code>
-              {/if}
-            </span>
-          </li>
-        </ul>
-      </div>
+<div class="min-h-screen flex flex-col">
+  <!-- ===== Breadcrumb ============================================ -->
+  <div class="border-b border-carbon-600 bg-carbon-900/70 backdrop-blur sticky top-16 z-30">
+    <div class="max-w-7xl mx-auto px-6 py-3">
+      <nav class="flex items-center gap-2 font-mono text-[11px] uppercase tracking-command">
+        <button type="button" class="text-zinc-500 hover:text-nexus-300 transition-colors" on:click={() => (window.location.hash = '/')}>
+          {$_('breadcrumb.home')}
+        </button>
+        <span class="text-zinc-700">/</span>
+        <button type="button" class="text-zinc-500 hover:text-nexus-300 transition-colors" on:click={() => (window.location.hash = '/routes')}>
+          {$_('breadcrumb.routes')}
+        </button>
+        <span class="text-zinc-700">/</span>
+        <span class="text-nexus-300 flex items-center gap-2">
+          <span>{isEditMode ? $_('breadcrumb.editRoute') : $_('breadcrumb.newRoute')}</span>
+          {#if isEditMode}
+            <code class="px-1.5 py-0.5 border border-carbon-500 bg-carbon-900 text-zinc-300 normal-case">{originalPath}</code>
+          {/if}
+        </span>
+      </nav>
     </div>
   </div>
 
   {#if loading}
-    <div class="flex justify-center items-center h-64">
-      <span class="loading loading-spinner loading-lg"></span>
+    <div class="flex-1 flex justify-center items-center">
+      <div class="flex flex-col items-center gap-3">
+        <div class="relative h-10 w-10">
+          <div class="absolute inset-0 border border-nexus-500/30"></div>
+          <div class="absolute inset-0 border-t-2 border-nexus-500 animate-spin"></div>
+        </div>
+        <span class="nx-label">LOADING ROUTE</span>
+      </div>
     </div>
   {:else}
-    <!-- Main Content: Left Nav + Right Content -->
-    <div class="max-w-7xl mx-auto flex gap-0 p-6 pb-32">
-      <!-- Left Navigation -->
-      <div class="w-56 flex-shrink-0 relative z-10">
-        <div class="sticky top-24">
-          <ul class="menu bg-base-100 rounded-box shadow-lg gap-1">
-            <li>
-              <button
-                class:active={activeSection === 'basic'}
-                on:click={() => activeSection = 'basic'}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                {$_('routeEditor.basicSettings')}
-              </button>
-            </li>
-            <li>
-              <button
-                class:active={activeSection === 'upstreams'}
-                on:click={() => activeSection = 'upstreams'}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-                {$_('routeEditor.upstreams')}
-                <span
-                  class="badge badge-sm tooltip tooltip-right"
-                  data-tip={$_('routeEditor.upstreamCountTooltip', { values: { count: route.upstreams.length } })}
-                >
-                  {route.upstreams.length}
-                </span>
-              </button>
-            </li>
-            <li>
-              <button
-                class:active={activeSection === 'modification'}
-                on:click={() => activeSection = 'modification'}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                </svg>
-                {$_('routeEditor.requestModification')}
-              </button>
-            </li>
-            <li>
-              <button
-                class:active={activeSection === 'auth'}
-                on:click={() => activeSection = 'auth'}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                </svg>
-                {$_('auth.routeAuth')}
-                {#if route.auth?.enabled}
-                  <span class="badge badge-success badge-xs">✓</span>
-                {/if}
-              </button>
-            </li>
-            <li>
-              <button
-                class:active={activeSection === 'failover'}
-                on:click={() => activeSection = 'failover'}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                {$_('routeEditor.failoverTitle')}
-                {#if route.failover?.enabled}
-                  <span class="badge badge-success badge-xs">✓</span>
-                {/if}
-              </button>
-            </li>
-            <li>
-              <button
-                class:active={activeSection === 'stickySession'}
-                on:click={() => activeSection = 'stickySession'}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.656m-5.656 0a4 4 0 010-5.656m9.9-2.12a8 8 0 010 11.314m-14.142 0a8 8 0 010-11.314" />
-                </svg>
-                {$_('routeEditor.stickySessionTitle')}
-                {#if route.stickySession?.enabled}
-                  <span class="badge badge-success badge-xs">✓</span>
-                {/if}
-              </button>
-            </li>
-            <li>
-              <button
-                class:active={activeSection === 'preview'}
-                on:click={() => activeSection = 'preview'}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                </svg>
-                {$_('routeEditor.preview')}
-              </button>
-            </li>
-          </ul>
+    <div class="max-w-7xl mx-auto w-full flex flex-col lg:flex-row gap-4 p-4 sm:p-6 pb-32">
+      <!-- ===== Side nav =========================================== -->
+      <aside class="w-full lg:w-56 flex-shrink-0" data-testid="builder-nav">
+        <div class="lg:sticky lg:top-32 space-y-3">
+          <PanelCard title="BUILDER" tag="NAV" flush>
+            <ul class="divide-y divide-carbon-600">
+              {#each navItems as item}
+                <li>
+                  <button
+                    class="nx-side-nav-btn"
+                    class:is-active={activeSection === item.id}
+                    on:click={() => (activeSection = item.id)}
+                  >
+                    {#if activeSection === item.id}
+                      <span class="nx-caret-left mr-1.5" aria-hidden="true"></span>
+                    {:else}
+                      <span class="inline-block w-[5px] h-2 mr-1.5"></span>
+                    {/if}
+                    <svg viewBox="0 0 24 24" class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" stroke-width="1.8">
+                      <path stroke-linecap="round" stroke-linejoin="round" d={item.icon} />
+                    </svg>
+                    <span class="flex-1 text-left truncate">{item.label}</span>
+                    {#if item.badge}
+                      <span class="font-mono text-[10px] uppercase tracking-command px-1.5 py-0.5 border border-carbon-500 text-zinc-400 truncate max-w-[8ch]">
+                        {item.badge}
+                      </span>
+                    {/if}
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          </PanelCard>
 
-          <!-- Keyboard Shortcuts Hint -->
-          <div class="mt-4 p-3 bg-base-100 rounded-box shadow-lg text-xs">
-            <div class="font-semibold mb-2">{$_('shortcuts.title')}</div>
-            <div class="space-y-1 text-gray-500">
-              <div>
-                <kbd class="kbd kbd-xs">{getModifierKey()}</kbd> + <kbd class="kbd kbd-xs">S</kbd>
-                <span class="ml-1">{$_('shortcuts.save')}</span>
-              </div>
-              <div>
-                <kbd class="kbd kbd-xs">{getModifierKey()}</kbd> + <kbd class="kbd kbd-xs">1-7</kbd>
-                <span class="ml-1">{$_('shortcuts.switchSection')}</span>
-              </div>
-              <div>
-                <kbd class="kbd kbd-xs">Esc</kbd>
-                <span class="ml-1">{$_('shortcuts.cancel')}</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Template Button (New Route Only) -->
           {#if !isEditMode}
-            <div class="mt-4">
-              <button
-                type="button"
-                class="btn btn-sm btn-outline w-full gap-2"
-                on:click={() => showTemplates = true}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                {$_('routeEditor.useTemplate')}
-              </button>
-            </div>
+            <button class="nx-btn-ghost w-full justify-center" on:click={() => (showTemplates = true)}>
+              <svg viewBox="0 0 24 24" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              {$_('routeEditor.useTemplate')}
+            </button>
           {/if}
-        </div>
-      </div>
 
-      <!-- Right Content Area -->
-      <div class="flex-1 ml-6 relative">
-        <div class="card bg-base-100 shadow-md">
-          <div class="card-body">
-            {#if activeSection === 'basic'}
-              <BasicInfoSection bind:route {errors} />
-            {:else if activeSection === 'upstreams'}
-              <UpstreamsSection bind:route {errors} {weightErrors} />
-            {:else if activeSection === 'modification'}
-              <ModificationSection bind:route />
-            {:else if activeSection === 'auth'}
-              <AuthSection bind:route />
-            {:else if activeSection === 'failover'}
-              <FailoverSection bind:route />
-            {:else if activeSection === 'stickySession'}
-              <StickySessionSection bind:route {errors} />
-            {:else if activeSection === 'preview'}
-              <PreviewSection {route} />
-            {/if}
-          </div>
+          <PanelCard title={$_('shortcuts.title')} tag="KEYS">
+            <ul class="space-y-1.5 font-mono text-[11px]">
+              <li class="flex items-center gap-1.5">
+                <kbd class="nx-kbd">{getModifierKey()}</kbd><span class="text-zinc-600">+</span><kbd class="nx-kbd">S</kbd>
+                <span class="text-zinc-400 ml-2">{$_('shortcuts.save')}</span>
+              </li>
+              <li class="flex items-center gap-1.5">
+                <kbd class="nx-kbd">{getModifierKey()}</kbd><span class="text-zinc-600">+</span><kbd class="nx-kbd">1-7</kbd>
+                <span class="text-zinc-400 ml-2">{$_('shortcuts.switchSection')}</span>
+              </li>
+              <li class="flex items-center gap-1.5">
+                <kbd class="nx-kbd">Esc</kbd>
+                <span class="text-zinc-400 ml-2">{$_('shortcuts.cancel')}</span>
+              </li>
+            </ul>
+          </PanelCard>
         </div>
-      </div>
+      </aside>
+
+      <!-- ===== Content panel ===================================== -->
+      <section class="flex-1 min-w-0 space-y-4">
+        {#if activeSection === 'match'}
+          <PanelCard title={$_('routeEditor.builder.match')} tag="MA-01">
+            <div data-testid="section-match" class="space-y-5">
+              <BasicInfoSection bind:route {errors} showOnly="path" />
+              <BasicInfoSection bind:route {errors} showOnly="rewrite" />
+            </div>
+          </PanelCard>
+
+        {:else if activeSection === 'target'}
+          <PanelCard
+            title={$_('routeEditor.builder.target')}
+            tag={(route.direct_response?.enabled || route.redirect?.enabled)
+              ? 'BYPASS'
+              : route.service ? 'SVC' : `EP=${route.endpoints?.length ?? 0}`}
+          >
+            <div data-testid="section-target">
+              <UpstreamTargetSection
+                bind:route
+                {errors}
+                {weightErrors}
+                bind:services
+                on:navigatetosection={(e) => (activeSection = e.detail.section)}
+              />
+            </div>
+          </PanelCard>
+
+        {:else if activeSection === 'processing'}
+          <div data-testid="section-processing" class="space-y-4">
+            <PanelCard title={$_('routeEditor.builder.processing')} tag="MOD">
+              <ModificationSection bind:route />
+            </PanelCard>
+
+            <PanelCard title={$_('routeEditor.retry')} tag={route.retry?.enabled ? 'ENABLED' : 'IDLE'} stripe={route.retry?.enabled ? 'orange' : 'zinc'}>
+              <RetrySection bind:route />
+            </PanelCard>
+          </div>
+
+        {:else if activeSection === 'policy'}
+          <div data-testid="section-policy" class="space-y-4">
+            <PanelCard title={$_('auth.routeAuth')} tag={route.auth?.enabled ? 'ENABLED' : 'IDLE'} stripe={route.auth?.enabled ? 'orange' : 'zinc'}>
+              <AuthSection bind:route />
+            </PanelCard>
+
+            <PanelCard title={$_('routeEditor.cors')} tag={route.cors?.enabled ? 'ENABLED' : 'IDLE'} stripe={route.cors?.enabled ? 'orange' : 'zinc'}>
+              <CorsSection bind:route />
+            </PanelCard>
+
+            <PanelCard title={$_('routeEditor.rateLimit')} tag={route.rate_limit?.enabled ? 'ENABLED' : 'IDLE'} stripe={route.rate_limit?.enabled ? 'orange' : 'zinc'}>
+              <RateLimitSection bind:route />
+            </PanelCard>
+          </div>
+
+        {:else if activeSection === 'response'}
+          <PanelCard title={$_('routeEditor.builder.response')} tag={(route.direct_response?.enabled || route.redirect?.enabled) ? 'BYPASS' : 'PASSTHRU'}>
+            <div data-testid="section-response">
+              <DirectResponseSection bind:route />
+            </div>
+          </PanelCard>
+
+        {:else if activeSection === 'plugins'}
+          <PanelCard title={$_('routeEditor.builder.plugins')} tag={`N=${route.plugins?.length ?? 0}`}>
+            <div data-testid="section-plugins">
+              <BasicInfoSection bind:route {errors} showOnly="plugins" />
+            </div>
+          </PanelCard>
+
+        {:else if activeSection === 'review'}
+          <div data-testid="section-review" class="space-y-4">
+            <PanelCard title={$_('routeEditor.builder.match')} tag="REVIEW">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <span class="nx-label-sm block mb-1">{$_('routes.path')}</span>
+                  <code class="font-mono text-[12px] text-zinc-100">{route.path || '—'}</code>
+                </div>
+                {#if route.path_rewrite && Object.keys(route.path_rewrite).length > 0}
+                  <div>
+                    <span class="nx-label-sm block mb-1">{$_('routeEditor.pathRewrite')}</span>
+                    <div class="space-y-1">
+                      {#each Object.entries(route.path_rewrite) as [pattern, replacement]}
+                        <div class="font-mono text-[11px] border border-carbon-600 bg-carbon-900/60 px-2 py-1 flex items-center gap-2">
+                          <span class="text-zinc-200">{pattern}</span>
+                          <svg viewBox="0 0 24 24" class="h-3 w-3 text-zinc-500" fill="none" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                          </svg>
+                          <span class="text-nexus-300">{replacement}</span>
+                        </div>
+                      {/each}
+                    </div>
+                  </div>
+                {/if}
+              </div>
+            </PanelCard>
+
+            <PanelCard title="{$_('routeEditor.builder.processing')} & {$_('routeEditor.builder.policy')}" tag="REVIEW">
+              <div class="space-y-3">
+                {#if (route.headers && Object.keys(route.headers).length > 0) || (route.body && Object.keys(route.body).length > 0) || (route.query && Object.keys(route.query).length > 0)}
+                  <div>
+                    <span class="nx-label-sm block mb-1.5">{$_('routeEditor.builder.processing')}</span>
+                    <div class="flex flex-wrap gap-1.5">
+                      {#if route.headers && Object.keys(route.headers).length > 0}
+                        <StatusBadge variant="muted">{$_('routeEditor.review.headersModification')}</StatusBadge>
+                      {/if}
+                      {#if route.body && Object.keys(route.body).length > 0}
+                        <StatusBadge variant="muted">{$_('routeEditor.review.bodyModification')}</StatusBadge>
+                      {/if}
+                      {#if route.query && Object.keys(route.query).length > 0}
+                        <StatusBadge variant="muted">{$_('routeEditor.review.queryModification')}</StatusBadge>
+                      {/if}
+                    </div>
+                  </div>
+                {/if}
+
+                <div>
+                  <span class="nx-label-sm block mb-1.5">{$_('routeEditor.builder.policy')}</span>
+                  <div class="flex flex-wrap gap-1.5">
+                    {#if route.auth?.enabled}<StatusBadge variant="active" dot>{$_('routeEditor.review.auth')}</StatusBadge>{:else}<StatusBadge variant="muted">{$_('routeEditor.review.auth')}</StatusBadge>{/if}
+                    {#if route.cors?.enabled}<StatusBadge variant="active" dot>{$_('routeEditor.review.cors')}</StatusBadge>{:else}<StatusBadge variant="muted">{$_('routeEditor.review.cors')}</StatusBadge>{/if}
+                    {#if route.rate_limit?.enabled}<StatusBadge variant="active" dot>{$_('routeEditor.review.rateLimit')}</StatusBadge>{:else}<StatusBadge variant="muted">{$_('routeEditor.review.rateLimit')}</StatusBadge>{/if}
+                    {#if route.retry?.enabled}<StatusBadge variant="active" dot>{$_('routeEditor.review.retry')}</StatusBadge>{:else}<StatusBadge variant="muted">{$_('routeEditor.review.retry')}</StatusBadge>{/if}
+                  </div>
+                </div>
+
+                {#if route.plugins && route.plugins.length > 0}
+                  <div>
+                    <span class="nx-label-sm block mb-1.5">{$_('routeEditor.builder.plugins')}</span>
+                    <div class="flex flex-wrap gap-1">
+                      {#each route.plugins as plugin}
+                        <StatusBadge variant="info">
+                          {typeof plugin === 'string' ? plugin : plugin.name}
+                        </StatusBadge>
+                      {/each}
+                    </div>
+                  </div>
+                {/if}
+              </div>
+            </PanelCard>
+
+            <PanelCard title={$_('routeEditor.builder.target')} tag="REVIEW">
+              {#if route.service}
+                <div>
+                  <span class="nx-label-sm block mb-1">{$_('routeEditor.review.referencedService')}</span>
+                  <span class="font-mono text-[12px] text-nexus-300">{route.service}</span>
+                </div>
+              {:else if route.endpoints && route.endpoints.length > 0}
+                <div>
+                  <span class="nx-label-sm block mb-2">{$_('routeEditor.review.customEndpoints')} ({route.endpoints.length})</span>
+                  <div class="space-y-1">
+                    {#each route.endpoints as endpoint}
+                      <div class="font-mono text-[11px] border border-carbon-600 bg-carbon-900/60 px-2 py-1 flex justify-between items-center gap-3">
+                        <span class="text-zinc-200 truncate">{endpoint.target}</span>
+                        <span class="text-zinc-500 shrink-0">w:{endpoint.weight ?? 100} · p:{endpoint.priority ?? 1}</span>
+                      </div>
+                    {/each}
+                  </div>
+                </div>
+              {:else}
+                <span class="font-mono text-[11px] uppercase tracking-command text-zinc-500">— {$_('routeEditor.review.noTarget')}</span>
+              {/if}
+            </PanelCard>
+
+            <PanelCard title={$_('routeEditor.builder.response')} tag="REVIEW">
+              <div class="space-y-2">
+                {#if route.direct_response?.enabled}
+                  <div class="flex items-center gap-2">
+                    <StatusBadge variant="online">{$_('routeEditor.review.directResponse')}</StatusBadge>
+                    <span class="font-mono text-[11px] text-zinc-400">{$_('routeEditor.review.status')}: {route.direct_response.status}</span>
+                  </div>
+                {/if}
+                {#if route.redirect?.enabled}
+                  <div class="flex items-center gap-2">
+                    <StatusBadge variant="online">{$_('routeEditor.review.redirect')}</StatusBadge>
+                    <span class="font-mono text-[11px] text-zinc-400">{$_('routeEditor.review.url')}: {route.redirect.url} ({$_('routeEditor.review.status')}: {route.redirect.status ?? 302})</span>
+                  </div>
+                {/if}
+                {#if route.response_rules && route.response_rules.some((r) => r.enabled)}
+                  <div>
+                    <span class="nx-label-sm block mb-1.5">{$_('routeEditor.review.responseRules')}</span>
+                    <div class="space-y-1">
+                      {#each route.response_rules.filter((r) => r.enabled) as rule}
+                        <div class="border border-carbon-600 bg-carbon-900/60 px-2 py-1 flex justify-between items-center font-mono text-[11px]">
+                          <span class="text-zinc-200">{rule.path} ({rule.match_type ?? 'exact'})</span>
+                          <StatusBadge variant="muted">{rule.type}</StatusBadge>
+                        </div>
+                      {/each}
+                    </div>
+                  </div>
+                {/if}
+                {#if !route.direct_response?.enabled && !route.redirect?.enabled && (!route.response_rules || !route.response_rules.some((r) => r.enabled))}
+                  <span class="font-mono text-[11px] uppercase tracking-command text-zinc-500">— {$_('routeEditor.review.noResponseRules')}</span>
+                {/if}
+              </div>
+            </PanelCard>
+          </div>
+        {/if}
+      </section>
     </div>
   {/if}
 
-  <!-- Fixed Bottom Action Bar -->
-  <div class="fixed bottom-0 left-0 right-0 bg-base-100 border-t border-base-300 shadow-2xl z-40">
-    <div class="max-w-7xl mx-auto px-6 py-4">
-      <div class="flex justify-between items-center">
-        <!-- Left: Auto-save indicator -->
-        <div class="flex items-center gap-4">
+  <!-- ===== Bottom action bar ==================================== -->
+  <div class="fixed bottom-0 left-0 right-0 bg-carbon-950 border-t border-carbon-600 shadow-industrial-lg z-40">
+    <div class="max-w-7xl mx-auto px-6 py-3">
+      <div class="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+        <div class="flex items-center gap-4 min-w-0">
+          {#if allErrors.length > 0}
+            <div class="flex items-center gap-2 min-w-0">
+              <StatusDot status="danger" />
+              <span class="font-mono text-[11px] uppercase tracking-command text-red-300">
+                {allErrors.length} {$_('validation.errors')}
+              </span>
+              <button class="font-mono text-[10px] uppercase tracking-command text-zinc-400 hover:text-nexus-300 hover:underline transition-colors" on:click={() => (showValidationDetails = !showValidationDetails)}>
+                [{showValidationDetails ? $_('common.hide') : $_('common.show')}]
+              </button>
+            </div>
+          {:else if isValid}
+            <div class="flex items-center gap-2">
+              <StatusDot status="ok" />
+              <span class="font-mono text-[11px] uppercase tracking-command text-emerald-300">
+                {$_('validation.allGood')}
+              </span>
+            </div>
+          {/if}
           {#if lastAutoSave && !isEditMode}
-            <span class="text-xs text-gray-500">
+            <span class="font-mono text-[10px] uppercase tracking-command text-zinc-500 hidden md:inline">
               {$_('autosave.lastSaved')}: {formatRelativeTime(lastAutoSave)}
             </span>
           {/if}
         </div>
 
-        <!-- Right: Validation Status & Action Buttons -->
-        <div class="flex items-center gap-4">
-          <!-- Validation Status -->
-          {#if allErrors.length > 0}
-            <div class="flex items-center gap-2 text-error">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        <div class="flex items-center gap-2">
+          <button class="nx-btn-ghost" on:click={handleCancel} disabled={saving}>
+            {$_('common.cancel')}
+          </button>
+          <button class="nx-btn-primary" disabled={!isValid || saving} on:click={handleSave}>
+            {#if saving}
+              <span class="inline-block h-3 w-3 border border-current border-t-transparent animate-spin"></span>
+            {:else}
+              <svg viewBox="0 0 24 24" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2.4">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
               </svg>
-              <span class="text-sm font-medium">
-                {allErrors.length} {$_('validation.errors')}
-              </span>
-              <button
-                class="btn btn-xs btn-ghost"
-                on:click={() => showValidationDetails = !showValidationDetails}
-              >
-                {showValidationDetails ? $_('common.hide') : $_('common.show')}
-              </button>
-            </div>
-          {:else if isValid}
-            <div class="flex items-center gap-2 text-success">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span class="text-sm font-medium">
-                {$_('validation.allGood')}
-              </span>
-            </div>
-          {/if}
-
-          <!-- Action Buttons -->
-          <div class="flex gap-3">
-            <button
-              class="btn btn-outline"
-              on:click={handleCancel}
-              disabled={saving}
-            >
-              {$_('common.cancel')}
-            </button>
-            <button
-              class="btn btn-primary"
-              disabled={!isValid || saving}
-              on:click={handleSave}
-            >
-              {#if saving}
-                <span class="loading loading-spinner loading-sm"></span>
-              {:else}
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
-                </svg>
-              {/if}
-              {$_('common.save')}
-            </button>
-          </div>
+            {/if}
+            {$_('common.save')}
+          </button>
         </div>
       </div>
 
-      <!-- Validation Error Details (Expandable) -->
       {#if showValidationDetails && allErrors.length > 0}
-        <div class="mt-3 p-3 bg-error/10 rounded-lg border border-error/20">
-          <ul class="text-sm space-y-1">
-            {#each allErrors as error}
-              <li class="flex items-start gap-2">
-                <span class="text-error">•</span>
-                <span>{error.field}: {error.message}</span>
+        <div class="mt-3 border border-red-500/40 bg-red-500/5 px-3 py-2">
+          <ul class="space-y-1">
+            {#each allErrors as err}
+              <li class="flex items-start gap-2 font-mono text-[11px]">
+                <span class="text-red-400">×</span>
+                <span class="text-red-200">{err.field}:</span>
+                <span class="text-zinc-400">{err.message}</span>
               </li>
             {/each}
           </ul>
@@ -579,23 +658,18 @@
     </div>
   </div>
 
-  <!-- Route Templates Modal -->
+  <!-- Templates modal -->
   <RouteTemplates bind:showTemplates on:select={handleTemplateSelect} />
 
-  <!-- Confirmation Dialog -->
-  <dialog class="modal" class:modal-open={showConfirmDialog}>
-    <div class="modal-box">
-      <h3 class="font-bold text-lg">{confirmDialogTitle}</h3>
-      <p class="py-4">{confirmDialogMessage}</p>
-      <div class="modal-action">
-        <button class="btn btn-ghost" on:click={handleConfirmNo}>
-          {$_('confirmDialog.no')}
-        </button>
-        <button class="btn btn-primary" on:click={handleConfirmYes}>
-          {$_('confirmDialog.yes')}
-        </button>
-      </div>
-    </div>
-    <button type="button" class="modal-backdrop" on:click={handleConfirmNo} aria-label="Close dialog"></button>
-  </dialog>
+  <!-- Confirm dialog -->
+  <ConfirmDialog
+    bind:open={showConfirmDialog}
+    title={confirmDialogTitle}
+    message={confirmDialogMessage}
+    confirmText={$_('confirmDialog.yes')}
+    cancelText={$_('confirmDialog.no')}
+    confirmClass="btn-primary"
+    on:confirm={handleConfirmYes}
+    on:cancel={handleConfirmNo}
+  />
 </div>
