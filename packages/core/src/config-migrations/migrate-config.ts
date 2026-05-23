@@ -33,7 +33,7 @@ export function migrateConfigToLatest(rawConfig: unknown): MigrateToLatestResult
     throw new Error('Migrated config must be an object');
   }
 
-  workingConfig.configVersion = LATEST_CONFIG_VERSION;
+  workingConfig.config_version = LATEST_CONFIG_VERSION;
 
   return {
     config: workingConfig as MigrateToLatestResult['config'],

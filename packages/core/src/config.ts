@@ -1,5 +1,5 @@
 import { logger } from './logger';
-import type { AppConfig, AuthConfig, FailoverConfig, RouteConfig } from '@jeffusion/bungee-types';
+import type { AppConfig, AuthConfig, RouteConfig, Service, Endpoint } from '@jeffusion/bungee-types';
 import fs from 'fs';
 import path from 'path';
 import { migrateConfigToLatest } from './config-migrations/migrate-config';
@@ -19,124 +19,141 @@ function ensurePositiveNumber(value: unknown, field: string, context: string): n
   return value;
 }
 
-function normalizeRouteConfig(route: RouteConfig): RouteConfig {
-  route.timeouts ??= {};
-  route.failover ??= undefined;
-
-  for (const upstream of route.upstreams) {
-    if (upstream.weight === undefined) {
-      upstream.weight = 100;
+function resolveRouteEndpoints(route: RouteConfig, services?: Service[]): Endpoint[] {
+  if (route.service) {
+    const svc = services?.find(s => s.name === route.service);
+    if (!svc) {
+      logger.error(`Route "${route.path}" references unknown service "${route.service}".`);
+      process.exit(1);
     }
-    if (upstream.priority === undefined) {
-      upstream.priority = 1;
+    return svc.endpoints;
+  }
+
+  const routeEndpoints = route.endpoints ?? [];
+  if (routeEndpoints.length > 0) {
+    return routeEndpoints;
+  }
+
+  if ((route as any).direct_response?.enabled || (route as any).redirect?.enabled || (route as any).response_rules?.some((rule: any) => rule.enabled)) {
+    return [];
+  }
+
+  logger.error(`Route "${route.path}" must have "endpoints", "service", "response_rules", "direct_response", or "redirect" defined.`);
+  process.exit(1);
+}
+
+function normalizeRouteConfig(route: RouteConfig, services?: Service[]): RouteConfig {
+  route.timeouts ??= {};
+
+  const endpoints = resolveRouteEndpoints(route, services);
+  route.endpoints = endpoints;
+
+  for (const endpoint of endpoints) {
+    if (endpoint.weight === undefined) {
+      endpoint.weight = 100;
+    }
+    if (endpoint.priority === undefined) {
+      endpoint.priority = 1;
     }
   }
 
   return route;
 }
 
-function validateStickySession(route: RouteConfig): void {
-  if (route.stickySession === undefined) {
+function validateStickySession(service: Service): void {
+  if (service.sticky_session === undefined) {
     return;
   }
 
-  if (typeof route.stickySession !== 'object' || route.stickySession === null || Array.isArray(route.stickySession)) {
-    logger.error(`Invalid stickySession config in route "${route.path}". stickySession must be an object.`);
+  if (typeof service.sticky_session !== 'object' || service.sticky_session === null || Array.isArray(service.sticky_session)) {
+    logger.error(`Invalid sticky_session config in service "${service.name}". sticky_session must be an object.`);
     process.exit(1);
   }
 
-  if (route.stickySession.enabled !== undefined && typeof route.stickySession.enabled !== 'boolean') {
-    logger.error(`Invalid stickySession.enabled in route "${route.path}". stickySession.enabled must be a boolean.`);
+  if (service.sticky_session.enabled !== undefined && typeof service.sticky_session.enabled !== 'boolean') {
+    logger.error(`Invalid sticky_session.enabled in service "${service.name}". sticky_session.enabled must be a boolean.`);
     process.exit(1);
   }
 
-  if (route.stickySession.keyExpression !== undefined && typeof route.stickySession.keyExpression !== 'string') {
-    logger.error(`Invalid stickySession.keyExpression in route "${route.path}". stickySession.keyExpression must be a string.`);
+  if (service.sticky_session.key_expression !== undefined && typeof service.sticky_session.key_expression !== 'string') {
+    logger.error(`Invalid sticky_session.key_expression in service "${service.name}". sticky_session.key_expression must be a string.`);
     process.exit(1);
   }
 }
 
-function validateFailoverConfig(route: RouteConfig): void {
-  const failover = route.failover;
+function validateFailoverConfig(service: Service): void {
+  const failover = service.failover;
   if (!failover) {
     return;
   }
 
   if (typeof failover.enabled !== 'boolean') {
-    logger.error(`Invalid failover.enabled in route "${route.path}". failover.enabled must be a boolean.`);
+    logger.error(`Invalid failover.enabled in service "${service.name}". failover.enabled must be a boolean.`);
     process.exit(1);
   }
 
-  if (route.upstreams.length < 2 && failover.enabled) {
-    logger.warn(`Route for path "${route.path}" has failover enabled but less than 2 upstreams. Failover will not be active.`);
+  if (service.endpoints.length < 2 && failover.enabled) {
+    logger.warn(`Service "${service.name}" has failover enabled but less than 2 endpoints. Failover will not be active.`);
   }
 
-  if (route.timeouts?.connectMs !== undefined) {
-    ensurePositiveNumber(route.timeouts.connectMs, 'timeouts.connectMs', `route "${route.path}"`);
+  if (failover.recovery?.probe_interval_ms !== undefined) {
+    ensurePositiveNumber(failover.recovery.probe_interval_ms, 'failover.recovery.probe_interval_ms', `service "${service.name}"`);
   }
 
-  if (route.timeouts?.requestMs !== undefined) {
-    ensurePositiveNumber(route.timeouts.requestMs, 'timeouts.requestMs', `route "${route.path}"`);
+  if (failover.recovery?.probe_timeout_ms !== undefined) {
+    ensurePositiveNumber(failover.recovery.probe_timeout_ms, 'failover.recovery.probe_timeout_ms', `service "${service.name}"`);
   }
 
-  if (failover.recovery?.probeIntervalMs !== undefined) {
-    ensurePositiveNumber(failover.recovery.probeIntervalMs, 'failover.recovery.probeIntervalMs', `route "${route.path}"`);
+  if (failover.passive_health?.consecutive_failures !== undefined) {
+    ensurePositiveNumber(failover.passive_health.consecutive_failures, 'failover.passive_health.consecutive_failures', `service "${service.name}"`);
   }
 
-  if (failover.recovery?.probeTimeoutMs !== undefined) {
-    ensurePositiveNumber(failover.recovery.probeTimeoutMs, 'failover.recovery.probeTimeoutMs', `route "${route.path}"`);
+  if (failover.passive_health?.healthy_successes !== undefined) {
+    ensurePositiveNumber(failover.passive_health.healthy_successes, 'failover.passive_health.healthy_successes', `service "${service.name}"`);
   }
 
-  if (failover.passiveHealth?.consecutiveFailures !== undefined) {
-    ensurePositiveNumber(failover.passiveHealth.consecutiveFailures, 'failover.passiveHealth.consecutiveFailures', `route "${route.path}"`);
+  if (failover.passive_health?.auto_disable_threshold !== undefined) {
+    ensurePositiveNumber(failover.passive_health.auto_disable_threshold, 'failover.passive_health.auto_disable_threshold', `service "${service.name}"`);
   }
 
-  if (failover.passiveHealth?.healthySuccesses !== undefined) {
-    ensurePositiveNumber(failover.passiveHealth.healthySuccesses, 'failover.passiveHealth.healthySuccesses', `route "${route.path}"`);
-  }
-
-  if (failover.passiveHealth?.autoDisableThreshold !== undefined) {
-    ensurePositiveNumber(failover.passiveHealth.autoDisableThreshold, 'failover.passiveHealth.autoDisableThreshold', `route "${route.path}"`);
-  }
-
-  if (failover.passiveHealth?.autoEnableOnActiveHealthCheck !== undefined && typeof failover.passiveHealth.autoEnableOnActiveHealthCheck !== 'boolean') {
-    logger.error(`Invalid failover.passiveHealth.autoEnableOnActiveHealthCheck in route "${route.path}". It must be a boolean.`);
+  if (failover.passive_health?.auto_enable_on_active_health_check !== undefined && typeof failover.passive_health.auto_enable_on_active_health_check !== 'boolean') {
+    logger.error(`Invalid failover.passive_health.auto_enable_on_active_health_check in service "${service.name}". It must be a boolean.`);
     process.exit(1);
   }
 
-  if (failover.slowStart) {
-    if (typeof failover.slowStart.enabled !== 'boolean') {
-      logger.error(`Invalid failover.slowStart.enabled in route "${route.path}". It must be a boolean.`);
+  if (failover.slow_start) {
+    if (typeof failover.slow_start.enabled !== 'boolean') {
+      logger.error(`Invalid failover.slow_start.enabled in service "${service.name}". It must be a boolean.`);
       process.exit(1);
     }
-    if (failover.slowStart.durationMs !== undefined) {
-      ensurePositiveNumber(failover.slowStart.durationMs, 'failover.slowStart.durationMs', `route "${route.path}"`);
+    if (failover.slow_start.duration_ms !== undefined) {
+      ensurePositiveNumber(failover.slow_start.duration_ms, 'failover.slow_start.duration_ms', `service "${service.name}"`);
     }
-    if (failover.slowStart.initialWeightFactor !== undefined) {
-      const factor = failover.slowStart.initialWeightFactor;
+    if (failover.slow_start.initial_weight_factor !== undefined) {
+      const factor = failover.slow_start.initial_weight_factor;
       if (typeof factor !== 'number' || Number.isNaN(factor) || factor <= 0 || factor > 1) {
-        logger.error(`failover.slowStart.initialWeightFactor in route "${route.path}" must be between 0 and 1.`);
+        logger.error(`failover.slow_start.initial_weight_factor in service "${service.name}" must be between 0 and 1.`);
         process.exit(1);
       }
     }
   }
 
-  if (failover.healthCheck) {
-    if (typeof failover.healthCheck.enabled !== 'boolean') {
-      logger.error(`Invalid failover.healthCheck.enabled in route "${route.path}". It must be a boolean.`);
+  if (failover.health_check) {
+    if (typeof failover.health_check.enabled !== 'boolean') {
+      logger.error(`Invalid failover.health_check.enabled in service "${service.name}". It must be a boolean.`);
       process.exit(1);
     }
-    if (failover.healthCheck.intervalMs !== undefined) {
-      ensurePositiveNumber(failover.healthCheck.intervalMs, 'failover.healthCheck.intervalMs', `route "${route.path}"`);
+    if (failover.health_check.interval_ms !== undefined) {
+      ensurePositiveNumber(failover.health_check.interval_ms, 'failover.health_check.interval_ms', `service "${service.name}"`);
     }
-    if (failover.healthCheck.timeoutMs !== undefined) {
-      ensurePositiveNumber(failover.healthCheck.timeoutMs, 'failover.healthCheck.timeoutMs', `route "${route.path}"`);
+    if (failover.health_check.timeout_ms !== undefined) {
+      ensurePositiveNumber(failover.health_check.timeout_ms, 'failover.health_check.timeout_ms', `service "${service.name}"`);
     }
-    if (failover.healthCheck.unhealthyThreshold !== undefined) {
-      ensurePositiveNumber(failover.healthCheck.unhealthyThreshold, 'failover.healthCheck.unhealthyThreshold', `route "${route.path}"`);
+    if (failover.health_check.unhealthy_threshold !== undefined) {
+      ensurePositiveNumber(failover.health_check.unhealthy_threshold, 'failover.health_check.unhealthy_threshold', `service "${service.name}"`);
     }
-    if (failover.healthCheck.healthyThreshold !== undefined) {
-      ensurePositiveNumber(failover.healthCheck.healthyThreshold, 'failover.healthCheck.healthyThreshold', `route "${route.path}"`);
+    if (failover.health_check.healthy_threshold !== undefined) {
+      ensurePositiveNumber(failover.health_check.healthy_threshold, 'failover.health_check.healthy_threshold', `service "${service.name}"`);
     }
   }
 }
@@ -171,10 +188,44 @@ function validateAuthConfig(authConfig: AuthConfig, context: string): void {
   logger.debug(`Auth config validated successfully for ${context}`);
 }
 
+function validateServices(services: Service[]): void {
+  const names = new Set<string>();
+  for (const service of services) {
+    if (!service.name || typeof service.name !== 'string') {
+      logger.error('Each service must have a non-empty "name" string.');
+      process.exit(1);
+    }
+    if (names.has(service.name)) {
+      logger.error(`Duplicate service name: "${service.name}". Service names must be unique.`);
+      process.exit(1);
+    }
+    names.add(service.name);
+
+    if (!service.endpoints || !Array.isArray(service.endpoints) || service.endpoints.length === 0) {
+      logger.error(`Service "${service.name}" must have a non-empty "endpoints" array.`);
+      process.exit(1);
+    }
+
+    for (const endpoint of service.endpoints) {
+      if (typeof endpoint.target !== 'string') {
+        logger.error(`Invalid endpoint in service "${service.name}". Each endpoint must have a string "target".`);
+        process.exit(1);
+      }
+    }
+
+    validateStickySession(service);
+    validateFailoverConfig(service);
+  }
+}
+
 function validateAndNormalizeConfig(config: AppConfig): AppConfig {
   if (!config.routes || !Array.isArray(config.routes)) {
     logger.error('Error: "routes" is not defined or not an array in config.json.');
     process.exit(1);
+  }
+
+  if (config.services && Array.isArray(config.services)) {
+    validateServices(config.services);
   }
 
   if (config.auth) {
@@ -182,44 +233,68 @@ function validateAndNormalizeConfig(config: AppConfig): AppConfig {
   }
 
   for (const route of config.routes) {
-    if (!route.upstreams || route.upstreams.length === 0) {
-      logger.error(`Route for path "${route.path}" must have a non-empty "upstreams" array.`);
+    const hasEndpoints = route.endpoints && route.endpoints.length > 0;
+    const hasServiceRef = !!route.service;
+
+  const hasDirectResponse = !!(route as any).direct_response?.enabled;
+  const hasRedirect = !!(route as any).redirect?.enabled;
+  const hasResponseRules = !!(route as any).response_rules?.some((rule: any) => rule.enabled);
+
+  if (!hasEndpoints && !hasServiceRef && !hasDirectResponse && !hasRedirect && !hasResponseRules) {
+    logger.error(`Route for path "${route.path}" must have "endpoints", "service", "response_rules", "direct_response", or "redirect" defined.`);
       process.exit(1);
+    }
+
+    if (hasServiceRef && config.services) {
+      const svc = config.services.find(s => s.name === route.service);
+      if (!svc) {
+        logger.error(`Route "${route.path}" references unknown service "${route.service}".`);
+        process.exit(1);
+      }
     }
 
     if (route.auth) {
       validateAuthConfig(route.auth, `route "${route.path}"`);
     }
 
-    validateStickySession(route);
-    validateFailoverConfig(route);
-    normalizeRouteConfig(route);
+    normalizeRouteConfig(route, config.services);
 
-    let totalWeight = 0;
-    for (const upstream of route.upstreams) {
-      if (typeof upstream.target !== 'string') {
-        logger.error(`Invalid upstream in route for path "${route.path}". Each upstream must have a string "target".`);
+    if (route.timeouts?.connect_ms !== undefined) {
+      ensurePositiveNumber(route.timeouts.connect_ms, 'timeouts.connect_ms', `route "${route.path}"`);
+    }
+
+    if (route.timeouts?.request_ms !== undefined) {
+      ensurePositiveNumber(route.timeouts.request_ms, 'timeouts.request_ms', `route "${route.path}"`);
+    }
+
+  const endpoints = resolveRouteEndpoints(route, config.services);
+
+  if (endpoints.length > 0) {
+    let total_weight = 0;
+    for (const endpoint of endpoints) {
+      if (typeof endpoint.target !== 'string') {
+        logger.error(`Invalid endpoint in route for path "${route.path}". Each endpoint must have a string "target".`);
         process.exit(1);
       }
 
-      if (typeof upstream.weight !== 'number' || upstream.weight <= 0) {
+      if (typeof endpoint.weight !== 'number' || endpoint.weight <= 0) {
         logger.error(`Invalid weight in route for path "${route.path}". Weight must be a positive number.`);
         process.exit(1);
       }
 
-      if (typeof upstream.priority !== 'number' || upstream.priority <= 0) {
+      if (typeof endpoint.priority !== 'number' || endpoint.priority <= 0) {
         logger.error(`Invalid priority in route for path "${route.path}". Priority must be a positive number.`);
         process.exit(1);
       }
 
-      totalWeight += upstream.weight;
+      total_weight += endpoint.weight;
     }
 
-    if (totalWeight === 0) {
-      logger.error(`Total weight for upstreams in route "${route.path}" cannot be zero.`);
+    if (total_weight === 0) {
+      logger.error(`Total weight for endpoints in route "${route.path}" cannot be zero.`);
       process.exit(1);
     }
-  }
+  }  }
 
   return config;
 }
@@ -239,7 +314,7 @@ function preloadGlobalConfig(): void {
 
     const configMapping: ConfigMapping[] = [
       {
-        jsonKey: 'logLevel',
+        jsonKey: 'log_level',
         envKey: 'LOG_LEVEL',
         default: 'info',
         validate: (value) => ['trace', 'debug', 'info', 'warn', 'error', 'fatal'].includes(value.toLowerCase())
@@ -263,7 +338,7 @@ function preloadGlobalConfig(): void {
         }
       },
       {
-        jsonKey: 'bodyParserLimit',
+        jsonKey: 'body_parser_limit',
         envKey: 'BODY_PARSER_LIMIT',
         default: '50mb'
       }
@@ -306,7 +381,7 @@ async function loadConfig(configPath?: string): Promise<AppConfig> {
     if (!fs.existsSync(configFilePath)) {
       logger.info(`Config file not found at ${configFilePath}, creating empty configuration`);
       const minimalConfig: AppConfig = {
-        configVersion: 2,
+        config_version: 4,
         routes: []
       };
       fs.writeFileSync(configFilePath, JSON.stringify(minimalConfig, null, 2), 'utf-8');

@@ -1,4 +1,4 @@
-import { LATEST_CONFIG_VERSION, type ConfigMigration, type MigrationChange, type MigrationWarning } from '../types';
+import { type ConfigMigration, type MigrationChange, type MigrationWarning } from '../types';
 import { cleanupEmptyObjects, cloneJson, deleteAtPath, getAtPath, isPlainRecord, setAtPath } from '../utils';
 
 const LEGACY_FIELD_MAPPINGS = [
@@ -36,7 +36,7 @@ function moveLegacyField(route: Record<string, any>, fromPath: string, toPath: s
 
 export const v1ToV2Migration: ConfigMigration = {
   fromVersion: 1,
-  toVersion: LATEST_CONFIG_VERSION,
+  toVersion: 2,
   description: 'Migrate legacy failover route fields to config model v2',
   migrate(input) {
     const config = cloneJson(input);
@@ -76,7 +76,7 @@ export const v1ToV2Migration: ConfigMigration = {
       return cleanupEmptyObjects(migratedRoute);
     });
 
-    config.configVersion = LATEST_CONFIG_VERSION;
+    config.configVersion = 2;
 
     return {
       config: cleanupEmptyObjects(config),
