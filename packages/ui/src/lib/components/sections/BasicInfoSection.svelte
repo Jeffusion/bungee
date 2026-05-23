@@ -8,12 +8,11 @@
 
   export let route: Route;
   export let errors: ValidationError[] = [];
+  export let showOnly: 'path' | 'rewrite' | 'timeouts' | 'plugins' | undefined = undefined;
 
-  // Path rewrite entries
   let pathRewriteEntries: Array<{ pattern: string; replacement: string }> = [];
   let confirmDeleteIndex: number | null = null;
 
-  // Timeout state
   let requestMs: number | undefined;
   let connectMs: number | undefined;
   let timeoutsInitialized = false;
@@ -21,192 +20,139 @@
   function compactObject<T extends Record<string, any>>(value: T): T | undefined {
     const entries = Object.entries(value).filter(([, child]) => {
       if (child === undefined) return false;
-      if (typeof child === 'object' && child !== null && !Array.isArray(child) && Object.keys(child).length === 0) {
-        return false;
-      }
+      if (typeof child === 'object' && child !== null && !Array.isArray(child) && Object.keys(child).length === 0) return false;
       return true;
     });
-
-    return entries.length > 0 ? Object.fromEntries(entries) as T : undefined;
+    return entries.length > 0 ? (Object.fromEntries(entries) as T) : undefined;
   }
 
   function syncTimeouts(): void {
-    route.timeouts = compactObject({
-      requestMs,
-      connectMs,
-    });
+    route.timeouts = compactObject({ request_ms: requestMs, connect_ms: connectMs });
   }
 
   $: {
-    if (!pathRewriteEntries.length && route.pathRewrite) {
-      pathRewriteEntries = Object.entries(route.pathRewrite || {}).map(([pattern, replacement]) => ({
-        pattern,
-        replacement
-      }));
+    if (!pathRewriteEntries.length && route.path_rewrite) {
+      pathRewriteEntries = Object.entries(route.path_rewrite || {}).map(([pattern, replacement]) => ({ pattern, replacement }));
     }
     const rewrite: Record<string, string> = {};
     pathRewriteEntries
-      .filter(e => e.pattern.trim())
-      .forEach(e => {
-        rewrite[e.pattern] = e.replacement;
-      });
-    route.pathRewrite = Object.keys(rewrite).length > 0 ? rewrite : undefined;
+      .filter((e) => e.pattern.trim())
+      .forEach((e) => { rewrite[e.pattern] = e.replacement; });
+    route.path_rewrite = Object.keys(rewrite).length > 0 ? rewrite : undefined;
   }
 
-  // Initialize plugins array if undefined
-  $: if (!route.plugins) {
-    route.plugins = [];
-  }
+  $: if (!route.plugins) route.plugins = [];
 
-  // Initialize timeouts from route props
   $: if (!timeoutsInitialized) {
-    requestMs = route.timeouts?.requestMs;
-    connectMs = route.timeouts?.connectMs;
+    requestMs = route.timeouts?.request_ms;
+    connectMs = route.timeouts?.connect_ms;
     timeoutsInitialized = true;
   }
 
   function addPathRewrite() {
     pathRewriteEntries = [...pathRewriteEntries, { pattern: '', replacement: '' }];
   }
-
-  function requestDeletePathRewrite(index: number) {
-    confirmDeleteIndex = index;
-  }
-
+  function requestDeletePathRewrite(index: number) { confirmDeleteIndex = index; }
   function confirmDelete() {
     if (confirmDeleteIndex !== null) {
       pathRewriteEntries = pathRewriteEntries.filter((_, i) => i !== confirmDeleteIndex);
       confirmDeleteIndex = null;
     }
   }
+  function cancelDelete() { confirmDeleteIndex = null; }
 
-  function cancelDelete() {
-    confirmDeleteIndex = null;
-  }
+  $: pathError = errors.find((e) => e.field === 'path');
 </script>
 
 <div class="space-y-4">
-  <!-- Path -->
-  <div class="form-control">
-    <SmartInput
-      label={$_('routes.path') + ' *'}
-      placeholder={$_('routeEditor.pathPlaceholder')}
-      bind:value={route.path}
-      required={true}
-    />
-    <div class="label">
-      {#if errors.some(e => e.field === 'path')}
-        <span class="label-text-alt text-error">
-          {errors.find(e => e.field === 'path')?.message}
-        </span>
-      {:else}
-        <span class="label-text-alt text-gray-500">
-          {$_('routeEditor.pathHelpLong')}
-        </span>
-      {/if}
-    </div>
-  </div>
-
-  <!-- Path Rewrite -->
-  <div class="collapse collapse-arrow bg-base-200">
-    <input type="checkbox" checked />
-    <div class="collapse-title text-sm font-medium flex items-center gap-2">
-      {$_('routeEditor.pathRewrite')}
-      <span class="text-xs text-base-content/50">({$_('routeEditor.optional')})</span>
-      <div
-        class="tooltip tooltip-right"
-        data-tip={$_('routeEditor.pathRewriteTooltip')}
+  {#if showOnly === undefined || showOnly === 'path'}
+    <div class="space-y-1.5">
+      <SmartInput
+        label={$_('routes.path') + ' *'}
+        placeholder={$_('routeEditor.pathPlaceholder')}
+        bind:value={route.path}
+        required={true}
+      />
+      <span
+        class="block font-mono text-[10px] uppercase tracking-command"
+        class:text-red-300={!!pathError}
+        class:text-zinc-500={!pathError}
       >
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400 cursor-help" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-      </div>
+        {pathError ? pathError.message : $_('routeEditor.pathHelpLong')}
+      </span>
     </div>
-    <div class="collapse-content space-y-2">
-      {#each pathRewriteEntries as entry, index}
-        <div class="flex gap-2 items-center">
-          <div class="flex-1">
-            <RegexInput
-              size="sm"
-              placeholder={$_('routeEditor.patternPlaceholder')}
-              bind:value={entry.pattern}
-            />
-          </div>
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
-          </svg>
-          <div class="flex-1">
-            <SmartInput
-              size="sm"
-              placeholder={$_('routeEditor.replacementPlaceholder')}
-              bind:value={entry.replacement}
-            />
-          </div>
-          <button
-            type="button"
-            class="btn btn-sm btn-error btn-square flex-shrink-0"
-            on:click={() => requestDeletePathRewrite(index)}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+  {/if}
+
+  {#if showOnly === undefined || showOnly === 'rewrite'}
+    <div class="border border-carbon-600 bg-carbon-950/60">
+      <div class="flex items-center gap-2 px-3 py-2 border-b border-carbon-600">
+        <span class="nx-stripe" aria-hidden="true"></span>
+        <span class="font-mono text-[11px] uppercase tracking-command text-zinc-200">{$_('routeEditor.pathRewrite')}</span>
+        <span class="font-mono text-[10px] uppercase tracking-command text-zinc-600">({$_('routeEditor.optional')})</span>
+      </div>
+      <div class="p-3 space-y-2">
+        {#each pathRewriteEntries as entry, index}
+          <div class="flex gap-2 items-center">
+            <div class="flex-1">
+              <RegexInput size="sm" placeholder={$_('routeEditor.patternPlaceholder')} bind:value={entry.pattern} />
+            </div>
+            <svg viewBox="0 0 24 24" class="h-4 w-4 text-zinc-500 shrink-0" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
             </svg>
-          </button>
-        </div>
-      {/each}
-      <button
-        type="button"
-        class="btn btn-sm btn-outline gap-2"
-        on:click={addPathRewrite}
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-        </svg>
-        {$_('routeEditor.addPathRewriteRule')}
-      </button>
-    </div>
-  </div>
-
-  <!-- Timeouts -->
-  <div class="collapse collapse-arrow bg-base-200">
-    <input type="checkbox" />
-    <div class="collapse-title text-sm font-medium">{$_('routeEditor.timeoutSettings')}</div>
-    <div class="collapse-content grid grid-cols-1 md:grid-cols-2 gap-4">
-      <div class="form-control">
-        <label class="label" for="request-timeout-ms">
-          <span class="label-text">{$_('routeEditor.requestTimeoutMs')}</span>
-        </label>
-        <input id="request-timeout-ms" type="number" placeholder="30000" class="input input-bordered input-sm" bind:value={requestMs} min="100" on:input={syncTimeouts} />
-        <div class="label">
-          <span class="label-text-alt text-xs">{$_('routeEditor.requestTimeoutMsHelp')}</span>
-        </div>
-      </div>
-
-      <div class="form-control">
-        <label class="label" for="connect-timeout-ms">
-          <span class="label-text">{$_('routeEditor.connectTimeoutMs')}</span>
-        </label>
-        <input id="connect-timeout-ms" type="number" placeholder="5000" class="input input-bordered input-sm" bind:value={connectMs} min="100" on:input={syncTimeouts} />
-        <div class="label">
-          <span class="label-text-alt text-xs">{$_('routeEditor.connectTimeoutMsHelp')}</span>
-        </div>
+            <div class="flex-1">
+              <SmartInput size="sm" placeholder={$_('routeEditor.replacementPlaceholder')} bind:value={entry.replacement} />
+            </div>
+            <button
+              type="button"
+              class="inline-flex items-center justify-center h-9 w-9 border-2 border-red-500 bg-red-500/10 text-red-300 hover:bg-red-500/20 transition-colors"
+              on:click={() => requestDeletePathRewrite(index)}
+              aria-label={$_('common.delete')}
+            >
+              <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </button>
+          </div>
+        {/each}
+        <button type="button" class="nx-btn-ghost" on:click={addPathRewrite}>
+          <svg viewBox="0 0 24 24" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2.4">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+          </svg>
+          {$_('routeEditor.addPathRewriteRule')}
+        </button>
       </div>
     </div>
-  </div>
+  {/if}
 
-  <!-- Route-level Plugin/Transformer -->
-  <div class="collapse collapse-arrow bg-base-200">
-    <input type="checkbox" />
-    <div class="collapse-title text-sm font-medium">{$_('routeEditor.routePlugins')}</div>
-    <div class="collapse-content">
-      <p class="text-sm text-gray-500 mb-4">
-        {$_('routeEditor.routePluginsHelp')}
-      </p>
+  {#if showOnly === undefined || showOnly === 'timeouts'}
+    <div class="border border-carbon-600 bg-carbon-950/60">
+      <div class="flex items-center gap-2 px-3 py-2 border-b border-carbon-600">
+        <span class="nx-stripe" aria-hidden="true"></span>
+        <span class="font-mono text-[11px] uppercase tracking-command text-zinc-200">{$_('routeEditor.timeoutSettings')}</span>
+      </div>
+      <div class="p-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+        <label class="block space-y-1.5">
+          <span class="nx-label">// {$_('routeEditor.requestTimeoutMs')}</span>
+          <input type="number" placeholder="30000" class="nx-input" bind:value={requestMs} min="100" on:input={syncTimeouts} />
+          <span class="font-mono text-[10px] uppercase tracking-command text-zinc-500">{$_('routeEditor.requestTimeoutMsHelp')}</span>
+        </label>
+        <label class="block space-y-1.5">
+          <span class="nx-label">// {$_('routeEditor.connectTimeoutMs')}</span>
+          <input type="number" placeholder="5000" class="nx-input" bind:value={connectMs} min="100" on:input={syncTimeouts} />
+          <span class="font-mono text-[10px] uppercase tracking-command text-zinc-500">{$_('routeEditor.connectTimeoutMsHelp')}</span>
+        </label>
+      </div>
+    </div>
+  {/if}
+
+  {#if showOnly === undefined || showOnly === 'plugins'}
+    <div class="space-y-3">
+      <p class="text-xs text-zinc-500">{$_('routeEditor.routePluginsHelp')}</p>
       <PluginEditor bind:plugins={route.plugins} label="" />
     </div>
-  </div>
+  {/if}
 </div>
 
-<!-- Confirm Delete Dialog -->
 <ConfirmDialog
   open={confirmDeleteIndex !== null}
   title={$_('common.confirm')}

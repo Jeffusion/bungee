@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { pop } from 'svelte-spa-router';
   import { sortBy } from 'lodash-es';
   import type { Route, Upstream } from '../../api/routes';
   import type { ValidationError } from '../../validation';
@@ -65,23 +64,24 @@
   }
 
   // Reactive grouping
-  $: groupedUpstreams = groupUpstreams(route.upstreams);
+  $: endpoints = route.endpoints ?? [];
+  $: groupedUpstreams = groupUpstreams(endpoints);
 
   $: if (showUpstreamModal && editingUpstream) {
-    editingUpstreamErrors = validateUpstreamSync(editingUpstream, editingUpstreamIndex === -1 ? route.upstreams.length : editingUpstreamIndex);
+    editingUpstreamErrors = validateUpstreamSync(editingUpstream, editingUpstreamIndex === -1 ? (route.endpoints?.length ?? 0) : editingUpstreamIndex);
   }
   $: isEditingUpstreamValid = showUpstreamModal && editingUpstream && editingUpstreamErrors.length === 0;
 
   function openUpstreamModal(index: number = -1) {
     editingUpstreamIndex = index;
     if (index >= 0) {
-      editingUpstream = JSON.parse(JSON.stringify(route.upstreams[index]));
+      editingUpstream = JSON.parse(JSON.stringify(route.endpoints?.[index]));
     } else {
       editingUpstream = {
         _uid: uuidv4(),
         target: '',
         weight: 100,
-        priority: route.upstreams.length + 1,
+        priority: (route.endpoints?.length ?? 0) + 1,
         headers: { add: {}, remove: [], default: {} },
         body: { add: {}, remove: [], replace: {}, default: {} },
         query: { add: {}, remove: [], replace: {}, default: {} }
@@ -98,24 +98,27 @@
   function saveUpstream() {
     if (!isEditingUpstreamValid) return;
 
+    route.endpoints = route.endpoints ?? [];
+
     if (editingUpstreamIndex >= 0) {
-      route.upstreams[editingUpstreamIndex] = editingUpstream;
+      route.endpoints[editingUpstreamIndex] = editingUpstream;
     } else {
-      route.upstreams = [...route.upstreams, editingUpstream];
+      route.endpoints = [...route.endpoints, editingUpstream];
     }
     closeUpstreamModal();
   }
 
   function removeUpstream(index: number) {
-    if (route.upstreams.length <= 1) {
+    if ((route.endpoints?.length ?? 0) <= 1) {
       alert($_('routeEditor.upstreamRequired'));
       return;
     }
-    route.upstreams = route.upstreams.filter((_, i) => i !== index);
+    route.endpoints = (route.endpoints ?? []).filter((_, i) => i !== index);
   }
 
   function duplicateUpstream(index: number) {
-    const originalUpstream = route.upstreams[index];
+    const originalUpstream = route.endpoints?.[index];
+    if (!originalUpstream) return;
     const duplicatedUpstream = JSON.parse(JSON.stringify(originalUpstream));
 
     duplicatedUpstream._uid = uuidv4();
@@ -136,19 +139,20 @@
     }
 
     if (duplicatedUpstream.priority !== undefined) {
-      duplicatedUpstream.priority = Math.max(...route.upstreams.map(u => u.priority || 1)) + 1;
+      duplicatedUpstream.priority = Math.max(...(route.endpoints ?? []).map(u => u.priority || 1)) + 1;
     }
 
-    route.upstreams = [
-      ...route.upstreams.slice(0, index + 1),
+    route.endpoints = [
+      ...(route.endpoints ?? []).slice(0, index + 1),
       duplicatedUpstream,
-      ...route.upstreams.slice(index + 1)
+      ...(route.endpoints ?? []).slice(index + 1)
     ];
   }
 
   function toggleUpstreamStatus(index: number) {
-    route.upstreams[index].disabled = !route.upstreams[index].disabled;
-    route.upstreams = route.upstreams; // 触发 Svelte 响应式更新
+    if (!route.endpoints?.[index]) return;
+    route.endpoints[index].is_disabled = !route.endpoints[index].is_disabled;
+    route.endpoints = route.endpoints; // 触发 Svelte 响应式更新
   }
 
   import UpstreamPriorityGroup from '../UpstreamPriorityGroup.svelte';
@@ -156,19 +160,20 @@
   // Drag & Drop Handlers
   function handleMerge(event: CustomEvent<{ originalIndex: number }>, targetGroupIndex: number) {
     const { originalIndex } = event.detail;
-    const movedUpstream = route.upstreams[originalIndex];
+    const movedUpstream = route.endpoints?.[originalIndex];
+    if (!movedUpstream) return;
     
     // Calculate new priority: target group's index + 1
     // Note: Since we are merging into an existing group, we just adopt its priority index (1-based)
     const newPriority = targetGroupIndex + 1;
     
     // Optimistic update
-    const newUpstreams = [...route.upstreams];
+    const newUpstreams = [...(route.endpoints ?? [])];
     newUpstreams[originalIndex] = { ...movedUpstream, priority: newPriority };
     
     // Regroup and re-flatten to normalize priorities
     const groups = groupUpstreams(newUpstreams);
-    route.upstreams = flattenGroups(groups);
+    route.endpoints = flattenGroups(groups);
   }
 
   function handleCreatePriority(event: DragEvent, insertIndex: number) {
@@ -177,7 +182,8 @@
     if (!data) return;
     
     const { originalIndex } = JSON.parse(data);
-    const movedUpstream = route.upstreams[originalIndex];
+    const movedUpstream = route.endpoints?.[originalIndex];
+    if (!movedUpstream) return;
     
     // Strategy:
     // 1. Convert current upstreams to groups
@@ -185,7 +191,7 @@
     // 3. Insert a NEW group at `insertIndex` containing only the moved item
     // 4. Flatten back to upstreams
     
-    const currentGroups = groupUpstreams(route.upstreams);
+    const currentGroups = groupUpstreams(route.endpoints ?? []);
     
     // Find and remove the item from its source group
     for (const group of currentGroups) {
@@ -214,7 +220,7 @@
     // insertIndex is 0-based index in the VISUAL list of groups
     cleanGroups.splice(insertIndex, 0, newGroup);
     
-    route.upstreams = flattenGroups(cleanGroups);
+    route.endpoints = flattenGroups(cleanGroups);
   }
   
   // Spacer Drop Zone Logic
@@ -241,70 +247,73 @@
   function onDuplicate(originalIndex: number) { duplicateUpstream(originalIndex); }
   function onToggleStatus(originalIndex: number) { toggleUpstreamStatus(originalIndex); }
   function onUpdateWeight(originalIndex: number, weight: number) {
-    route.upstreams[originalIndex].weight = weight;
-    route.upstreams = route.upstreams;
+    if (!route.endpoints?.[originalIndex]) return;
+    route.endpoints[originalIndex].weight = weight;
+    route.endpoints = route.endpoints;
   }
 </script>
 
 <div class="space-y-4">
-  <div class="flex justify-between items-center">
+  <div class="flex flex-col gap-3 lg:flex-row lg:justify-between lg:items-end">
     <div>
-      <h3 class="text-lg font-semibold">
-        {$_('routeEditor.upstreams')} <span class="text-error">*</span>
+      <h3 class="font-mono text-[12px] font-bold uppercase tracking-command text-zinc-200">
+        {$_('routeEditor.upstreams')} <span class="text-red-400">*</span>
       </h3>
-      <p class="text-sm text-gray-500 mt-1">
+      <p class="text-xs text-zinc-500 mt-1">
         {$_('routeEditor.upstreamsHelp')}
       </p>
     </div>
-    <div class="flex gap-2">
+    <div class="flex gap-2 items-stretch">
       <input
         type="text"
         placeholder={$_('common.search')}
-        class="input input-bordered input-sm"
+        class="nx-input"
         bind:value={upstreamSearchTerm}
       />
       <button
         type="button"
-        class="btn btn-sm btn-primary"
+        class="nx-btn-primary"
         on:click={() => openUpstreamModal(-1)}
       >
+        <svg viewBox="0 0 24 24" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2.4">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+        </svg>
         {$_('routeEditor.addUpstream')}
       </button>
     </div>
   </div>
 
-  {#if errors.some(e => e.field === 'upstreams')}
-    <div class="alert alert-error">
-      <span>{errors.find(e => e.field === 'upstreams')?.message}</span>
+  {#if errors.some(e => e.field === 'endpoints')}
+    <div class="border-l-2 border-l-red-500 bg-red-500/5 px-3 py-2">
+      <span class="font-mono text-[11px] uppercase tracking-command text-red-300">
+        {errors.find(e => e.field === 'endpoints')?.message}
+      </span>
     </div>
   {/if}
 
-  <!-- Kanban / Priority Groups List -->
-  <div class="flex flex-col gap-4 p-4 bg-base-200/30 rounded-box border border-base-200 min-h-[300px]">
-    
-    <!-- Top Spacer (Create Priority 1) -->
-    <!-- Only show if there are existing groups, otherwise the empty state handles it or the first group is P1 -->
+  <!-- Priority groups kanban -->
+  <div class="flex flex-col gap-4 p-4 bg-carbon-950 border border-carbon-600 min-h-[300px]">
+
     {#if groupedUpstreams.length > 0}
-        <div 
-          role="group"
-          aria-label="Insert New Priority Group"
-          class="h-4 -my-2 transition-all duration-200 flex items-center justify-center rounded border-2 border-dashed border-transparent {dragOverSpacerIndex === 0 ? 'bg-primary/10' : ''}"
-          class:h-12={dragOverSpacerIndex === 0}
-          class:border-primary={dragOverSpacerIndex === 0}
-          on:dragover={(e) => handleSpacerDragOver(e, 0)}
-          on:dragleave={handleSpacerDragLeave}
-          on:drop={(e) => handleSpacerDrop(e, 0)}
-        >
-          {#if dragOverSpacerIndex === 0}
-            <span class="text-sm font-bold text-primary">{$_('upstream.newPriority1')}</span>
-          {/if}
-        </div>
+      <div
+        role="group"
+        aria-label="Insert New Priority Group"
+        class="-my-2 transition-all duration-200 flex items-center justify-center border-2 border-dashed {dragOverSpacerIndex === 0 ? 'h-12 bg-nexus-500/10 border-nexus-500' : 'h-4 border-transparent'}"
+        on:dragover={(e) => handleSpacerDragOver(e, 0)}
+        on:dragleave={handleSpacerDragLeave}
+        on:drop={(e) => handleSpacerDrop(e, 0)}
+      >
+        {#if dragOverSpacerIndex === 0}
+          <span class="font-mono text-[11px] font-bold uppercase tracking-command text-nexus-300">
+            {$_('upstream.newPriority1')}
+          </span>
+        {/if}
+      </div>
     {/if}
 
     {#each groupedUpstreams as group, groupIndex (groupIndex)}
-      <!-- Priority Group -->
-      <UpstreamPriorityGroup 
-        priority={group.priority} 
+      <UpstreamPriorityGroup
+        priority={group.priority}
         upstreams={group.upstreams}
         on:merge={(e) => handleMerge(e, groupIndex)}
         on:edit={(e) => onEdit(e.detail.originalIndex)}
@@ -313,51 +322,71 @@
         on:toggleStatus={(e) => onToggleStatus(e.detail.originalIndex)}
         on:updateWeight={(e) => onUpdateWeight(e.detail.originalIndex, e.detail.weight)}
       />
-      
-      <!-- Spacer between groups (Create New Priority) -->
-      <div 
+
+      <div
         role="group"
         aria-label="Insert New Priority Group"
-        class="h-4 -my-2 transition-all duration-200 flex items-center justify-center rounded border-2 border-dashed border-transparent z-10 {dragOverSpacerIndex === groupIndex + 1 ? 'bg-primary/10' : ''}"
-        class:h-12={dragOverSpacerIndex === groupIndex + 1}
-        class:border-primary={dragOverSpacerIndex === groupIndex + 1}
+        class="-my-2 transition-all duration-200 flex items-center justify-center border-2 border-dashed z-10 {dragOverSpacerIndex === groupIndex + 1 ? 'h-12 bg-nexus-500/10 border-nexus-500' : 'h-4 border-transparent'}"
         on:dragover={(e) => handleSpacerDragOver(e, groupIndex + 1)}
         on:dragleave={handleSpacerDragLeave}
         on:drop={(e) => handleSpacerDrop(e, groupIndex + 1)}
       >
         {#if dragOverSpacerIndex === groupIndex + 1}
-          <span class="text-sm font-bold text-primary">{$_('upstream.insertNewPriority', { values: { priority: groupIndex + 2 } })}</span>
+          <span class="font-mono text-[11px] font-bold uppercase tracking-command text-nexus-300">
+            {$_('upstream.insertNewPriority', { values: { priority: groupIndex + 2 } })}
+          </span>
         {/if}
       </div>
     {/each}
 
     {#if groupedUpstreams.length === 0}
-      <div class="text-center py-12 text-gray-400 border-2 border-dashed border-base-300 rounded-lg">
-        {#if upstreamSearchTerm}
+      <div class="text-center py-12 border border-dashed border-carbon-500">
+        <span class="font-mono text-[11px] uppercase tracking-command text-zinc-500">
+          {#if upstreamSearchTerm}
             {$_('routes.noMatchingRoutes')}
-        {:else}
+          {:else}
             {$_('routes.noRoutesMessage')}
-        {/if}
+          {/if}
+        </span>
       </div>
     {/if}
   </div>
 
   {#if weightErrors.length > 0}
-    <div class="alert alert-warning">
-      <span>{weightErrors[0].message}</span>
+    <div class="border-l-2 border-l-amber-500 bg-amber-500/5 px-3 py-2">
+      <span class="font-mono text-[11px] uppercase tracking-command text-amber-300">
+        {weightErrors[0].message}
+      </span>
     </div>
   {/if}
 </div>
 
 <!-- Upstream Edit Modal -->
 {#if showUpstreamModal && editingUpstream}
-  <div class="modal modal-open">
-    <div class="modal-box w-11/12 max-w-3xl">
-      <h3 class="font-bold text-lg mb-4">
-        {editingUpstreamIndex >= 0 ? $_('upstream.title', { values: { index: editingUpstreamIndex + 1 } }) : $_('routeEditor.addUpstream')}
-      </h3>
+  <div
+    class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+    role="dialog"
+    aria-modal="true"
+    on:click={(e) => { if (e.target === e.currentTarget) closeUpstreamModal(); }}
+  >
+    <div class="nx-panel-raised nx-bracketed relative w-11/12 max-w-3xl flex flex-col max-h-[90vh]">
+      <span class="nx-corner nx-corner-tl" aria-hidden="true"></span>
+      <span class="nx-corner nx-corner-tr" aria-hidden="true"></span>
+      <span class="nx-corner nx-corner-bl" aria-hidden="true"></span>
+      <span class="nx-corner nx-corner-br" aria-hidden="true"></span>
 
-      <div class="max-h-[70vh] overflow-y-auto">
+      <header class="nx-panel-head">
+        <div class="nx-panel-head-title">
+          <span class="nx-stripe" aria-hidden="true"></span>
+          <span>
+            {editingUpstreamIndex >= 0
+              ? $_('upstream.title', { values: { index: editingUpstreamIndex + 1 } })
+              : $_('routeEditor.addUpstream')}
+          </span>
+        </div>
+      </header>
+
+      <div class="flex-1 overflow-y-auto p-4">
         <UpstreamForm
           bind:upstream={editingUpstream}
           index={editingUpstreamIndex}
@@ -367,12 +396,12 @@
         />
       </div>
 
-      <div class="modal-action">
-        <button type="button" class="btn" on:click={closeUpstreamModal}>{$_('common.cancel')}</button>
-        <button type="button" class="btn btn-primary" on:click={saveUpstream} disabled={!isEditingUpstreamValid}>
+      <footer class="border-t border-carbon-600 px-4 py-3 flex justify-end gap-2 bg-carbon-900/60">
+        <button type="button" class="nx-btn-ghost" on:click={closeUpstreamModal}>{$_('common.cancel')}</button>
+        <button type="button" class="nx-btn-primary" on:click={saveUpstream} disabled={!isEditingUpstreamValid}>
           {$_('common.save')}
         </button>
-      </div>
+      </footer>
     </div>
   </div>
 {/if}
