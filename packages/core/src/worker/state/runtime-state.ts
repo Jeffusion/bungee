@@ -5,8 +5,8 @@
 
 import { forEach, map } from 'lodash-es';
 import { logger } from '../../logger';
-import type { AppConfig } from '@jeffusion/bungee-types';
-import type { RuntimeUpstream } from '../types';
+import type { AppConfig, Endpoint, Service, StickySessionConfig } from '@jeffusion/bungee-types';
+import type { EffectiveRouteConfig, RuntimeUpstream } from '../types';
 import { startHealthCheckScheduler, stopAllHealthCheckSchedulers } from '../health/scheduler';
 
 /**
@@ -14,7 +14,27 @@ import { startHealthCheckScheduler, stopAllHealthCheckSchedulers } from '../heal
  * Map key: route path
  * Map value: upstreams with runtime status
  */
-export const runtimeState = new Map<string, { upstreams: RuntimeUpstream[] }>();
+export const runtimeState = new Map<string, { upstreams: RuntimeUpstream[]; sticky_session?: StickySessionConfig }>();
+
+function resolveRouteEndpoints(route: AppConfig['routes'][number], service?: Service): Endpoint[] {
+  const serviceEndpoints = service?.endpoints ?? [];
+  const routeEndpoints = route.endpoints ?? [];
+
+  if (!service) {
+    return routeEndpoints;
+  }
+
+  const merged = [...serviceEndpoints];
+  for (const endpoint of routeEndpoints) {
+    const existing = merged.findIndex(candidate => candidate.target === endpoint.target);
+    if (existing >= 0) {
+      merged[existing] = { ...merged[existing], ...endpoint };
+    } else {
+      merged.push(endpoint);
+    }
+  }
+  return merged;
+}
 
 /**
  * Initializes runtime state for all routes with failover enabled
@@ -25,7 +45,7 @@ export const runtimeState = new Map<string, { upstreams: RuntimeUpstream[] }>();
  *
  * **Initialization rules:**
  * - All upstreams start in HEALTHY status
- * - lastFailureTime is undefined initially
+ * - last_failure_time is undefined initially
  * - Only routes with `failover.enabled = true` are tracked
  * - Active health checks are started if configured
  *
@@ -55,30 +75,61 @@ export function initializeRuntimeState(config: AppConfig): void {
 
   runtimeState.clear();
 
+  const services = new Map<string, Service>();
+  forEach(config.services ?? [], (service) => {
+    services.set(service.name, service);
+  });
+
   forEach(config.routes, (route) => {
-    if (route.failover?.enabled && route.upstreams && route.upstreams.length > 0) {
-      const upstreams = map(route.upstreams, (up, index) => ({
-        ...up,
-        upstreamId: ('id' in up && typeof up.id === 'string' ? up.id : String(index)), // Use config id or fallback to index
-        status: 'HEALTHY' as const,
-        lastFailureTime: undefined,
-        consecutiveFailures: 0,
-        consecutiveSuccesses: 0,
-        healthCheckSuccesses: 0,
-        healthCheckFailures: 0,
-        recoveryAttemptCount: 0,
-      }));
+    const service = route.service ? services.get(route.service) : undefined;
+    const endpoints = resolveRouteEndpoints(route, service);
+    const state_key = service?.name ?? route.path;
+    const failover = service?.failover;
+    const sticky_session = service?.sticky_session;
 
-      runtimeState.set(route.path, { upstreams });
+    if ((!failover?.enabled && !sticky_session?.enabled) || endpoints.length === 0) {
+      return;
+    }
 
-      // Start active health check scheduler if enabled
-      if (route.failover.healthCheck?.enabled) {
-        startHealthCheckScheduler(route.path, route, upstreams);
-      }
+    const existing_state = runtimeState.get(state_key);
+    const upstreams = existing_state?.upstreams ?? createRuntimeUpstreams(endpoints);
+
+    if (!existing_state) {
+      runtimeState.set(state_key, { upstreams, sticky_session });
+    } else if (sticky_session) {
+      existing_state.sticky_session = sticky_session;
+    }
+
+    const health_check = service?.health_check ?? failover?.health_check;
+    if (failover && health_check?.enabled) {
+      const health_check_route: EffectiveRouteConfig = {
+        ...route,
+        endpoints,
+        failover: {
+          ...failover,
+          health_check,
+        },
+      };
+
+      startHealthCheckScheduler(state_key, health_check_route, upstreams);
     }
   });
 
   logger.info('Runtime state initialized.');
+}
+
+function createRuntimeUpstreams(endpoints: Endpoint[]): RuntimeUpstream[] {
+  return map(endpoints, (endpoint, index) => ({
+    ...endpoint,
+    upstream_id: ('id' in endpoint && typeof endpoint.id === 'string' ? endpoint.id : String(index)),
+    status: 'HEALTHY' as const,
+    last_failure_time: undefined,
+    consecutive_failures: 0,
+    consecutive_successes: 0,
+    health_check_successes: 0,
+    health_check_failures: 0,
+    recovery_attempt_count: 0,
+  })) as RuntimeUpstream[];
 }
 
 /**

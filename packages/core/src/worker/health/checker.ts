@@ -4,8 +4,7 @@
  */
 
 import { logger } from '../../logger';
-import type { RouteConfig } from '@jeffusion/bungee-types';
-import type { RuntimeUpstream } from '../types';
+import type { EffectiveRouteConfig, RuntimeUpstream } from '../types';
 import { evaluateExpression, type ExpressionContext } from '../../expression-engine';
 
 /**
@@ -25,16 +24,16 @@ export interface HealthCheckResult {
  */
 export interface HealthCheckConfig {
   enabled: boolean;
-  intervalMs: number;
-  timeoutMs: number;
+  interval_ms: number;
+  timeout_ms: number;
   path: string;
   method: string;
-  expectedStatus: number[];
-  unhealthyThreshold: number;
-  healthyThreshold: number;
-  autoEnableOnHealthCheck: boolean;
+  expected_status: number[];
+  unhealthy_threshold: number;
+  healthy_threshold: number;
+  auto_enable_on_health_check: boolean;
   body?: string;
-  contentType: string;
+  content_type: string;
   headers?: Record<string, string>;
   query?: Record<string, string>;
 }
@@ -42,24 +41,24 @@ export interface HealthCheckConfig {
 /**
  * Get health check configuration with defaults
  */
-export function getHealthCheckConfig(route: RouteConfig): HealthCheckConfig | null {
-  if (!route.failover?.healthCheck?.enabled) {
+export function getHealthCheckConfig(route: EffectiveRouteConfig): HealthCheckConfig | null {
+  if (!route.failover?.health_check?.enabled) {
     return null;
   }
 
-  const hc = route.failover.healthCheck;
+  const hc = route.failover.health_check;
   return {
     enabled: true,
-    intervalMs: hc.intervalMs ?? 10000,
-    timeoutMs: hc.timeoutMs ?? 3000,
+    interval_ms: hc.interval_ms ?? 10000,
+    timeout_ms: hc.timeout_ms ?? 3000,
     path: hc.path ?? '/health',
     method: hc.method ?? 'GET',
-    expectedStatus: hc.expectedStatus ?? [200],
-    unhealthyThreshold: hc.unhealthyThreshold ?? 3,
-    healthyThreshold: hc.healthyThreshold ?? 2,
-    autoEnableOnHealthCheck: route.failover?.passiveHealth?.autoEnableOnActiveHealthCheck ?? true,
+    expected_status: hc.expected_status ?? [200],
+    unhealthy_threshold: hc.unhealthy_threshold ?? 3,
+    healthy_threshold: hc.healthy_threshold ?? 2,
+    auto_enable_on_health_check: route.failover?.passive_health?.auto_enable_on_active_health_check ?? true,
     body: hc.body,
-    contentType: hc.contentType ?? 'application/json',
+    content_type: hc.content_type ?? 'application/json',
     headers: hc.headers,
     query: hc.query,
   };
@@ -92,12 +91,12 @@ export async function performHealthCheck(
   };
 
   // Construct health check URL
-  const healthCheckUrl = new URL(config.path, upstream.target);
+  const health_checkUrl = new URL(config.path, upstream.target);
   if (config.query) {
     for (const [key, value] of Object.entries(config.query)) {
       try {
         const evaluatedValue = evaluateExpression(value, expressionContext);
-        healthCheckUrl.searchParams.set(key, evaluatedValue);
+        health_checkUrl.searchParams.set(key, evaluatedValue);
       } catch (error) {
         logger.warn(
           {
@@ -108,7 +107,7 @@ export async function performHealthCheck(
           },
           'Failed to evaluate expression in health check query parameter, using raw value'
         );
-        healthCheckUrl.searchParams.set(key, value);
+        health_checkUrl.searchParams.set(key, value);
       }
     }
   }
@@ -121,11 +120,11 @@ export async function performHealthCheck(
       upstream: upstream.target,
       path: config.path,
       method,
-      timeout: config.timeoutMs,
-      bodyConfigured: Boolean(config.body),
-      bodyApplied: Boolean(config.body && supportsRequestBody),
-      customHeaders: config.headers ? Object.keys(config.headers) : [],
-      customQuery: config.query ? Object.keys(config.query) : [],
+      timeout: config.timeout_ms,
+      body_configured: Boolean(config.body),
+      body_applied: Boolean(config.body && supportsRequestBody),
+      custom_headers: config.headers ? Object.keys(config.headers) : [],
+      custom_query: config.query ? Object.keys(config.query) : [],
     },
     'Performing health check'
   );
@@ -133,7 +132,7 @@ export async function performHealthCheck(
   try {
     // Create abort controller for timeout
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), config.timeoutMs);
+    const timeoutId = setTimeout(() => controller.abort(), config.timeout_ms);
 
     const headers: Record<string, string> = {
       'User-Agent': 'Bungee-HealthCheck/1.0',
@@ -164,7 +163,7 @@ export async function performHealthCheck(
 
     if (config.body && supportsRequestBody) {
       requestOptions.body = config.body;
-      headers['Content-Type'] = config.contentType;
+      headers['Content-Type'] = config.content_type;
     } else if (config.body && !supportsRequestBody) {
       logger.warn(
         {
@@ -175,13 +174,13 @@ export async function performHealthCheck(
       );
     }
 
-    const response = await fetch(healthCheckUrl.href, requestOptions);
+    const response = await fetch(health_checkUrl.href, requestOptions);
 
     clearTimeout(timeoutId);
     const latency = Date.now() - startTime;
 
     // Check if status is expected
-    const success = config.expectedStatus.includes(response.status);
+    const success = config.expected_status.includes(response.status);
 
     logger.debug(
       {
@@ -236,31 +235,31 @@ export function processHealthCheckResult(
   config: HealthCheckConfig
 ): void {
   // Initialize health check counters if not present
-  if (upstream.healthCheckSuccesses === undefined) {
-    upstream.healthCheckSuccesses = 0;
+  if (upstream.health_check_successes === undefined) {
+    upstream.health_check_successes = 0;
   }
-  if (upstream.healthCheckFailures === undefined) {
-    upstream.healthCheckFailures = 0;
+  if (upstream.health_check_failures === undefined) {
+    upstream.health_check_failures = 0;
   }
 
   if (result.success) {
     // Success: increment success counter, reset failure counter
-    upstream.healthCheckSuccesses++;
-    upstream.healthCheckFailures = 0;
+    upstream.health_check_successes++;
+    upstream.health_check_failures = 0;
 
     let recoveredByHealthCheck = false;
     // Check if we should mark as HEALTHY
     if (upstream.status === 'UNHEALTHY' || upstream.status === 'HALF_OPEN') {
-      if (upstream.healthCheckSuccesses >= config.healthyThreshold) {
+      if (upstream.health_check_successes >= config.healthy_threshold) {
         recoveredByHealthCheck = true;
         upstream.status = 'HEALTHY';
-        upstream.lastFailureTime = undefined;
-        upstream.healthCheckSuccesses = 0; // Reset counter
+        upstream.last_failure_time = undefined;
+        upstream.health_check_successes = 0; // Reset counter
         logger.info(
           {
             upstream: upstream.target,
-            consecutiveSuccesses: upstream.healthCheckSuccesses,
-            healthyThreshold: config.healthyThreshold,
+            consecutive_successes: upstream.health_check_successes,
+            healthy_threshold: config.healthy_threshold,
           },
           'Upstream marked HEALTHY by active health check'
         );
@@ -268,41 +267,41 @@ export function processHealthCheckResult(
         logger.debug(
           {
             upstream: upstream.target,
-            consecutiveSuccesses: upstream.healthCheckSuccesses,
-            healthyThreshold: config.healthyThreshold,
+            consecutive_successes: upstream.health_check_successes,
+            healthy_threshold: config.healthy_threshold,
           },
           'Health check success recorded, not yet marked HEALTHY'
         );
       }
     }
 
-    if (config.autoEnableOnHealthCheck && upstream.disabled && recoveredByHealthCheck) {
-      upstream.disabled = false;
-      upstream.consecutiveFailures = 0;
+    if (config.auto_enable_on_health_check && upstream.is_disabled && recoveredByHealthCheck) {
+      upstream.is_disabled = false;
+      upstream.consecutive_failures = 0;
       logger.info(
         {
           upstream: upstream.target,
-          autoEnabled: true
+          auto_enabled: true
         },
         'Previously disabled upstream automatically re-enabled after successful health checks'
       );
     }
   } else {
     // Failure: increment failure counter, reset success counter
-    upstream.healthCheckFailures++;
-    upstream.healthCheckSuccesses = 0;
+    upstream.health_check_failures++;
+    upstream.health_check_successes = 0;
 
     // Check if we should mark as UNHEALTHY
     if (upstream.status === 'HEALTHY') {
-      if (upstream.healthCheckFailures >= config.unhealthyThreshold) {
+      if (upstream.health_check_failures >= config.unhealthy_threshold) {
         upstream.status = 'UNHEALTHY';
-        upstream.lastFailureTime = Date.now();
-        upstream.healthCheckFailures = 0; // Reset counter
+        upstream.last_failure_time = Date.now();
+        upstream.health_check_failures = 0; // Reset counter
         logger.warn(
           {
             upstream: upstream.target,
-            consecutiveFailures: upstream.healthCheckFailures,
-            unhealthyThreshold: config.unhealthyThreshold,
+            consecutive_failures: upstream.health_check_failures,
+            unhealthy_threshold: config.unhealthy_threshold,
             error: result.error,
             status: result.status,
           },
@@ -312,15 +311,15 @@ export function processHealthCheckResult(
         logger.debug(
           {
             upstream: upstream.target,
-            consecutiveFailures: upstream.healthCheckFailures,
-            unhealthyThreshold: config.unhealthyThreshold,
+            consecutive_failures: upstream.health_check_failures,
+            unhealthy_threshold: config.unhealthy_threshold,
           },
           'Health check failure recorded, not yet marked UNHEALTHY'
         );
       }
     } else if (upstream.status === 'UNHEALTHY' || upstream.status === 'HALF_OPEN') {
       // Already unhealthy, just update failure time
-      upstream.lastFailureTime = Date.now();
+      upstream.last_failure_time = Date.now();
       logger.debug(
         {
           upstream: upstream.target,

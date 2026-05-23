@@ -61,13 +61,13 @@ export async function createRequestSnapshot(req: Request): Promise<RequestSnapsh
     headers[key] = value;
   });
 
-  const contentType = req.headers.get('content-type') || '';
-  const isJsonBody = contentType.includes('application/json');
+  const content_type = req.headers.get('content-type') || '';
+  const is_json_body = content_type.includes('application/json');
 
   let body: any = null;
 
   if (req.body) {
-    if (isJsonBody) {
+    if (is_json_body) {
       // JSON body - parse but DO NOT clone immediately (lazy clone optimization)
       // Clone will be done on-demand when failover retry is needed
       try {
@@ -89,9 +89,9 @@ export async function createRequestSnapshot(req: Request): Promise<RequestSnapsh
     url: req.url,
     headers,  // Already a new object from forEach, no need to clone
     body,
-    contentType,
-    isJsonBody,
-    isBodyCloned: false  // 标记为未克隆
+    content_type,
+    is_json_body,
+    is_body_cloned: false  // 标记为未克隆
   };
 }
 
@@ -124,9 +124,9 @@ export async function createRequestSnapshot(req: Request): Promise<RequestSnapsh
  */
 export function ensureSnapshotCloned(snapshot: RequestSnapshot): RequestSnapshot {
   // Clone headers if not already cloned
-  if (!snapshot.isHeadersCloned) {
+  if (!snapshot.is_headers_cloned) {
     snapshot.headers = structuredClone(snapshot.headers);
-    snapshot.isHeadersCloned = true;
+    snapshot.is_headers_cloned = true;
 
     logger.debug(
       { headerCount: Object.keys(snapshot.headers).length },
@@ -135,9 +135,9 @@ export function ensureSnapshotCloned(snapshot: RequestSnapshot): RequestSnapshot
   }
 
   // Clone JSON body if not already cloned
-  if (!snapshot.isBodyCloned && snapshot.isJsonBody && snapshot.body !== null) {
+  if (!snapshot.is_body_cloned && snapshot.is_json_body && snapshot.body !== null) {
     snapshot.body = structuredClone(snapshot.body);
-    snapshot.isBodyCloned = true;
+    snapshot.is_body_cloned = true;
 
     logger.debug(
       { bodySize: JSON.stringify(snapshot.body).length },

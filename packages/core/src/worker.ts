@@ -78,7 +78,9 @@ export async function startServer(config: AppConfig): Promise<{
   logger.info(`📋 Health check: http://localhost:${PORT}/health`);
   logger.info('\n📝 Configured routes:');
   forEach(config.routes, (route) => {
-    const targets = map(route.upstreams, (up) => `${up.target} (w: ${up.weight}, p: ${up.priority || 1})`).join(', ');
+    const service = route.service ? config.services?.find((candidate) => candidate.name === route.service) : undefined;
+    const endpoints = service?.endpoints ?? route.endpoints ?? [];
+    const targets = map(endpoints, (endpoint) => `${endpoint.target} (w: ${endpoint.weight}, p: ${endpoint.priority || 1})`).join(', ');
     logger.info(`  ${route.path} -> [${targets}]`);
   });
   logger.info('\n');
@@ -129,8 +131,8 @@ async function startWorker() {
     if (config.logging?.body) {
       bodyStorageManager.updateConfig({
         enabled: config.logging.body.enabled,
-        maxSize: config.logging.body.maxSize,
-        retentionDays: config.logging.body.retentionDays,
+        maxSize: config.logging.body.max_size,
+        retentionDays: config.logging.body.retention_days,
       });
       logger.info({ bodyLogging: config.logging.body }, 'Body storage configured');
     }

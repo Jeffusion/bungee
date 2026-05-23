@@ -3,8 +3,7 @@
  * Manages upstreams within the same priority level
  */
 
-import type { RuntimeUpstream } from '../types';
-import type { RouteConfig } from '@jeffusion/bungee-types';
+import type { EffectiveRouteConfig, RuntimeUpstream } from '../types';
 import type { ExpressionContext } from '../../expression-engine';
 import { selectUpstream } from './selector';
 import { canAttemptUpstream } from './filter';
@@ -20,11 +19,11 @@ import { canAttemptUpstream } from './filter';
 export class PriorityGroup {
   private priority: number;
   private upstreams: RuntimeUpstream[];
-  private route: RouteConfig;
+  private route: EffectiveRouteConfig;
   private recoveryIntervalMs: number;
   private context?: ExpressionContext;
 
-  constructor(priority: number, route: RouteConfig, recoveryIntervalMs: number, context?: ExpressionContext) {
+  constructor(priority: number, route: EffectiveRouteConfig, recoveryIntervalMs: number, context?: ExpressionContext) {
     this.priority = priority;
     this.upstreams = [];
     this.route = route;

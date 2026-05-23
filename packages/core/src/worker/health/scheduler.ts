@@ -5,8 +5,7 @@
 
 import { logger } from '../../logger';
 import { forEach } from 'lodash-es';
-import type { RouteConfig } from '@jeffusion/bungee-types';
-import type { RuntimeUpstream } from '../types';
+import type { EffectiveRouteConfig, RuntimeUpstream } from '../types';
 import { addJitter } from '../utils/jitter';
 import {
   getHealthCheckConfig,
@@ -40,7 +39,7 @@ const schedulers = new Map<string, HealthCheckScheduler>();
  */
 export function startHealthCheckScheduler(
   routePath: string,
-  route: RouteConfig,
+  route: EffectiveRouteConfig,
   upstreams: RuntimeUpstream[]
 ): void {
   // Get health check configuration
@@ -56,8 +55,8 @@ export function startHealthCheckScheduler(
   logger.info(
     {
       routePath,
-      intervalMs: config.intervalMs,
-      upstreamCount: upstreams.length,
+      interval_ms: config.interval_ms,
+      upstream_count: upstreams.length,
     },
     'Starting health check scheduler'
   );
@@ -89,7 +88,7 @@ export function startHealthCheckScheduler(
         }
       }, jitteredDelay);
     }
-  }, config.intervalMs);
+  }, config.interval_ms);
 
   schedulers.set(routePath, scheduler);
 }
@@ -146,7 +145,7 @@ async function performHealthChecksForRoute(scheduler: HealthCheckScheduler): Pro
   logger.debug(
     {
       routePath: scheduler.routePath,
-      upstreamCount: scheduler.upstreams.length,
+      upstream_count: scheduler.upstreams.length,
     },
     'Performing health checks for route'
   );
@@ -173,9 +172,9 @@ async function performHealthChecksForRoute(scheduler: HealthCheckScheduler): Pro
   logger.debug(
     {
       routePath: scheduler.routePath,
-      healthyCount: scheduler.upstreams.filter((u) => u.status === 'HEALTHY').length,
-      unhealthyCount: scheduler.upstreams.filter((u) => u.status === 'UNHEALTHY').length,
-      halfOpenCount: scheduler.upstreams.filter((u) => u.status === 'HALF_OPEN').length,
+      healthy_count: scheduler.upstreams.filter((u) => u.status === 'HEALTHY').length,
+      unhealthy_count: scheduler.upstreams.filter((u) => u.status === 'UNHEALTHY').length,
+      half_open_count: scheduler.upstreams.filter((u) => u.status === 'HALF_OPEN').length,
     },
     'Health checks completed for route'
   );
