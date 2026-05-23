@@ -16,6 +16,10 @@ export default {
   ],
   daisyui: {
     themes: themeConfig.daisyui.themes,
-    darkTheme: 'dark',
-  }
-}
+    darkTheme: 'industrial',
+    base: true,
+    styled: true,
+    utils: true,
+    logs: false,
+  },
+};
