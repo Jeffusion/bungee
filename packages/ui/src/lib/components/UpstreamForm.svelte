@@ -7,6 +7,7 @@
   import PluginEditor from './PluginEditor.svelte';
   import { _ } from '../i18n';
   import { UrlInput, ExpressionInput, NumberInput } from './smart-input';
+  import { IconButton } from './industrial';
 
   export let upstream: Upstream;
   export let index: number;
@@ -16,169 +17,182 @@
 
   $: errors = validateUpstreamSync(upstream, index);
 
-  // 确保基本结构
   $: {
     upstream.headers = upstream.headers || { add: {}, remove: [], default: {} };
     upstream.body = upstream.body || { add: {}, remove: [], replace: {}, default: {} };
     upstream.query = upstream.query || { add: {}, remove: [], replace: {}, default: {} };
-    if (!upstream.plugins) {
-      upstream.plugins = [];
-    }
+    if (!upstream.plugins) upstream.plugins = [];
+  }
+
+  // Collapsible sub-section state
+  let openSection: 'headers' | 'body' | 'query' | null = null;
+  function toggleSection(name: 'headers' | 'body' | 'query') {
+    openSection = openSection === name ? null : name;
   }
 </script>
 
-<div class="card bg-base-100 shadow-sm border border-base-300">
-  <div class="card-body p-4">
-    {#if showHeader}
-    <div class="flex justify-between items-center mb-4">
-      <h3 class="font-semibold">{$_('upstream.title', { values: { index: index + 1 } })}</h3>
-      <div class="flex gap-2">
-        <button
-          type="button"
-          class="btn btn-sm btn-outline btn-square"
-          on:click={onDuplicate}
-          title={$_('routeCard.duplicate')}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+<div class="nx-panel-raised">
+  {#if showHeader}
+    <header class="nx-panel-head">
+      <div class="nx-panel-head-title">
+        <span class="nx-stripe" aria-hidden="true"></span>
+        <span>{$_('upstream.title', { values: { index: index + 1 } })}</span>
+      </div>
+      <div class="flex items-center gap-1">
+        <IconButton size="sm" title={$_('routeCard.duplicate')} on:click={onDuplicate}>
+          <svg viewBox="0 0 24 24" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
           </svg>
-        </button>
-        <button
-          type="button"
-          class="btn btn-sm btn-error btn-square"
-          on:click={onRemove}
-          title={$_('upstream.remove')}
-        >
-          ✕
-        </button>
+        </IconButton>
+        <IconButton size="sm" variant="danger" title={$_('upstream.remove')} on:click={onRemove}>
+          <svg viewBox="0 0 24 24" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </IconButton>
+      </div>
+    </header>
+  {/if}
+
+  <div class="nx-panel-body grid grid-cols-1 gap-4">
+    <!-- Target URL -->
+    <UrlInput
+      label={$_('upstream.targetUrl') + ' *'}
+      placeholder={$_('upstream.targetPlaceholder')}
+      bind:value={upstream.target}
+      required={true}
+    />
+
+    <!-- Description -->
+    <label class="block space-y-1.5">
+      <span class="nx-label">// {$_('upstream.description')}</span>
+      <input
+        type="text"
+        placeholder={$_('upstream.descriptionPlaceholder')}
+        class="nx-input"
+        bind:value={upstream.description}
+      />
+      <span class="font-mono text-[10px] uppercase tracking-command text-zinc-500">{$_('upstream.descriptionHelp')}</span>
+    </label>
+
+    <!-- Condition -->
+    <div class="space-y-1.5">
+      <ExpressionInput
+        label={$_('upstream.condition')}
+        placeholder={$_('upstream.conditionPlaceholder')}
+        bind:value={upstream.condition}
+      />
+      <span class="font-mono text-[10px] uppercase tracking-command text-zinc-500">{$_('upstream.conditionHelp')}</span>
+    </div>
+
+    <!-- Disabled toggle -->
+    <label class="flex items-start gap-3 cursor-pointer">
+      <input type="checkbox" class="checkbox checkbox-primary mt-0.5" bind:checked={upstream.is_disabled} />
+      <div class="flex flex-col">
+        <span class="font-mono text-[11px] uppercase tracking-command text-zinc-200">{$_('upstream.disabled')}</span>
+        <span class="font-mono text-[10px] uppercase tracking-command text-zinc-500">{$_('upstream.disabledHelp')}</span>
+      </div>
+    </label>
+
+    <!-- Weight and Priority -->
+    <div class="grid grid-cols-2 gap-3">
+      <div class="space-y-1.5">
+        <NumberInput
+          label={$_('upstream.weight')}
+          placeholder="100"
+          min={1}
+          bind:value={upstream.weight}
+        />
+        <span class="font-mono text-[10px] uppercase tracking-command text-zinc-500">{$_('upstream.weightHelp')}</span>
+      </div>
+      <div class="space-y-1.5">
+        <NumberInput
+          label={$_('upstream.priority')}
+          placeholder="1"
+          min={0}
+          bind:value={upstream.priority}
+        />
+        <span class="font-mono text-[10px] uppercase tracking-command text-zinc-500">{$_('upstream.priorityHelp')}</span>
       </div>
     </div>
-    {/if}
 
-    <div class="grid grid-cols-1 gap-4">
-      <!-- Target URL -->
-      <div class="form-control">
-        <UrlInput
-          label={$_('upstream.targetUrl') + ' *'}
-          placeholder={$_('upstream.targetPlaceholder')}
-          bind:value={upstream.target}
-          required={true}
-        />
-      </div>
+    <!-- Plugins -->
+    <div class="space-y-2">
+      <span class="nx-label">// {$_('upstream.upstreamPlugins')}</span>
+      <p class="font-mono text-[10px] uppercase tracking-command text-zinc-500">{$_('upstream.upstreamPluginsHelp')}</p>
+      <PluginEditor bind:plugins={upstream.plugins} label="" />
+    </div>
 
-      <!-- Description -->
-      <div class="form-control">
-        <label class="label" for="upstream-description-{index}">
-          <span class="label-text">{$_('upstream.description')}</span>
-          <span class="label-text-alt text-xs">{$_('upstream.descriptionHelp')}</span>
-        </label>
-        <input
-          id="upstream-description-{index}"
-          type="text"
-          placeholder={$_('upstream.descriptionPlaceholder')}
-          class="input input-bordered"
-          bind:value={upstream.description}
-        />
-      </div>
+    <!-- Advanced sections separator -->
+    <div class="flex items-center gap-3 pt-2">
+      <span class="h-px flex-1 bg-carbon-600"></span>
+      <span class="nx-label">// {$_('routeEditor.requestModification')}</span>
+      <span class="h-px flex-1 bg-carbon-600"></span>
+    </div>
 
-      <!-- Condition Expression -->
-      <div class="form-control">
-        <ExpressionInput
-          label={$_('upstream.condition')}
-          placeholder={$_('upstream.conditionPlaceholder')}
-          bind:value={upstream.condition}
-        />
-        <div class="label">
-          <span class="label-text-alt text-xs">{$_('upstream.conditionHelp')}</span>
-        </div>
-      </div>
-
-      <!-- Disabled Toggle -->
-      <div class="form-control">
-        <label class="label cursor-pointer justify-start gap-3">
-          <input
-            type="checkbox"
-            class="checkbox checkbox-primary"
-            bind:checked={upstream.disabled}
-          />
-          <div class="flex flex-col">
-            <span class="label-text font-medium">{$_('upstream.disabled')}</span>
-            <span class="label-text-alt text-gray-500">{$_('upstream.disabledHelp')}</span>
-          </div>
-        </label>
-      </div>
-
-      <!-- Weight and Priority -->
-      <div class="grid grid-cols-2 gap-4">
-        <div class="form-control">
-          <NumberInput
-            label={$_('upstream.weight')}
-            placeholder="100"
-            min={1}
-            bind:value={upstream.weight}
-          />
-          <div class="label">
-            <span class="label-text-alt text-xs">{$_('upstream.weightHelp')}</span>
-          </div>
-        </div>
-
-        <div class="form-control">
-          <NumberInput
-            label={$_('upstream.priority')}
-            placeholder="1"
-            min={0}
-            bind:value={upstream.priority}
-          />
-          <div class="label">
-            <span class="label-text-alt text-xs">{$_('upstream.priorityHelp')}</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Plugin -->
-      <div>
-        <h4 class="text-sm font-semibold mb-1">{$_('upstream.upstreamPlugins')}</h4>
-        <p class="text-xs text-gray-500 mb-2">
-          {$_('upstream.upstreamPluginsHelp')}
-        </p>
-        <PluginEditor bind:plugins={upstream.plugins} label="" />
-      </div>
-
-      <!-- Advanced Settings Section -->
-      <div class="divider text-sm font-semibold">{$_('routeEditor.requestModification')}</div>
-
-      <!-- Advanced Settings - Headers -->
-      <div class="collapse collapse-arrow bg-base-200">
-        <input type="checkbox" />
-        <div class="collapse-title text-sm font-medium">
+    <!-- Collapsible Headers -->
+    <div class="border border-carbon-600 bg-carbon-950/60">
+      <button
+        type="button"
+        class="w-full flex items-center justify-between px-3 py-2 font-mono text-[11px] uppercase tracking-command text-zinc-200 hover:text-nexus-300 hover:bg-carbon-700/30 transition-colors"
+        on:click={() => toggleSection('headers')}
+      >
+        <span class="flex items-center gap-2">
+          <span class={openSection === 'headers' ? 'nx-stripe' : 'nx-stripe nx-stripe-zinc'} aria-hidden="true"></span>
           {$_('headers.title')}
-        </div>
-        <div class="collapse-content">
+        </span>
+        <svg viewBox="0 0 24 24" class="h-3.5 w-3.5 transition-transform" style:transform={openSection === 'headers' ? 'rotate(180deg)' : ''} fill="none" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {#if openSection === 'headers'}
+        <div class="border-t border-carbon-600 p-3">
           <HeadersEditor bind:value={upstream.headers} label={$_('headers.title')} showHelp={false} showLabel={false} />
         </div>
-      </div>
+      {/if}
+    </div>
 
-      <!-- Advanced Settings - Body -->
-      <div class="collapse collapse-arrow bg-base-200">
-        <input type="checkbox" />
-        <div class="collapse-title text-sm font-medium">
+    <!-- Collapsible Body -->
+    <div class="border border-carbon-600 bg-carbon-950/60">
+      <button
+        type="button"
+        class="w-full flex items-center justify-between px-3 py-2 font-mono text-[11px] uppercase tracking-command text-zinc-200 hover:text-nexus-300 hover:bg-carbon-700/30 transition-colors"
+        on:click={() => toggleSection('body')}
+      >
+        <span class="flex items-center gap-2">
+          <span class={openSection === 'body' ? 'nx-stripe' : 'nx-stripe nx-stripe-zinc'} aria-hidden="true"></span>
           {$_('body.title')}
-        </div>
-        <div class="collapse-content">
+        </span>
+        <svg viewBox="0 0 24 24" class="h-3.5 w-3.5 transition-transform" style:transform={openSection === 'body' ? 'rotate(180deg)' : ''} fill="none" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {#if openSection === 'body'}
+        <div class="border-t border-carbon-600 p-3">
           <BodyEditor bind:value={upstream.body} label={$_('body.title')} showHelp={false} showLabel={false} />
         </div>
-      </div>
+      {/if}
+    </div>
 
-      <!-- Advanced Settings - Query -->
-      <div class="collapse collapse-arrow bg-base-200">
-        <input type="checkbox" />
-        <div class="collapse-title text-sm font-medium">
+    <!-- Collapsible Query -->
+    <div class="border border-carbon-600 bg-carbon-950/60">
+      <button
+        type="button"
+        class="w-full flex items-center justify-between px-3 py-2 font-mono text-[11px] uppercase tracking-command text-zinc-200 hover:text-nexus-300 hover:bg-carbon-700/30 transition-colors"
+        on:click={() => toggleSection('query')}
+      >
+        <span class="flex items-center gap-2">
+          <span class={openSection === 'query' ? 'nx-stripe' : 'nx-stripe nx-stripe-zinc'} aria-hidden="true"></span>
           {$_('query.title')}
-        </div>
-        <div class="collapse-content">
+        </span>
+        <svg viewBox="0 0 24 24" class="h-3.5 w-3.5 transition-transform" style:transform={openSection === 'query' ? 'rotate(180deg)' : ''} fill="none" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {#if openSection === 'query'}
+        <div class="border-t border-carbon-600 p-3">
           <QueryEditor bind:value={upstream.query} label={$_('query.title')} showHelp={false} showLabel={false} />
         </div>
-      </div>
+      {/if}
     </div>
   </div>
 </div>

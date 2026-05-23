@@ -6,10 +6,9 @@
   import LineChart from '../components/LineChart.svelte';
   import PieChart from '../components/PieChart.svelte';
   import StackedBarChart from '../components/StackedBarChart.svelte';
+  import { PanelCard, SectionDivider, StatusBadge } from '../components/industrial';
 
-  // 受控组件：从父组件接收时间范围
   export let selectedRange: TimeRange = '1h';
-  // 数据加载回调，向父组件传递历史数据
   export let onDataLoaded: (history: StatsHistoryV2 | null) => void = () => {};
 
   let history: StatsHistoryV2 | null = null;
@@ -17,11 +16,9 @@
   let error: string | null = null;
   let interval: number;
 
-  // Upstream 统计数据
   let upstreamSuccess: UnifiedUpstreamStats[] = [];
   let upstreamFailures: UnifiedUpstreamStats[] = [];
   let upstreamStatusCodes: UpstreamStatusCodeStats[] = [];
-  let loadingUpstream = false;
 
   async function loadHistory() {
     try {
@@ -36,20 +33,17 @@
   }
 
   async function loadUpstreamStats() {
-    loadingUpstream = true;
     try {
       const [successResult, failResult, statusResult] = await Promise.all([
         getUnifiedUpstreamStats(selectedRange, 'success'),
         getUnifiedUpstreamStats(selectedRange, 'failure'),
-        getUpstreamStatusCodes(selectedRange)
+        getUpstreamStatusCodes(selectedRange),
       ]);
       upstreamSuccess = successResult.data;
       upstreamFailures = failResult.data;
       upstreamStatusCodes = statusResult.data;
     } catch (error) {
       console.error('Failed to load upstream stats:', error);
-    } finally {
-      loadingUpstream = false;
     }
   }
 
@@ -59,7 +53,6 @@
 
   onMount(() => {
     loadAllData();
-    // 每 30 秒刷新一次（适应新的长时间范围）
     interval = setInterval(loadAllData, 30000);
   });
 
@@ -67,251 +60,211 @@
     if (interval) clearInterval(interval);
   });
 
-  // 当时间范围改变时重新加载
-  $: if (selectedRange) {
-    loadAllData();
-  }
+  $: if (selectedRange) loadAllData();
 
-  // 数据加载后通知父组件
   $: if (history !== null || error !== null) {
     onDataLoaded(error ? null : history);
   }
 
-  // 时间标签格式化
-  $: timeLabels = history?.timestamps.map(ts => {
+  $: timeLabels = history?.timestamps.map((ts) => {
     const date = new Date(ts);
     switch (selectedRange) {
       case '1h':
-        return date.toLocaleTimeString('zh-CN', {
-          hour: '2-digit',
-          minute: '2-digit'
-        });
+        return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
       case '12h':
-        return date.toLocaleString('zh-CN', {
-          month: 'short',
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit'
-        });
+        return date.toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
       case '24h':
-        return date.toLocaleString('zh-CN', {
-          month: 'short',
-          day: 'numeric',
-          hour: '2-digit'
-        });
+        return date.toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit' });
       default:
         return date.toLocaleTimeString('zh-CN');
     }
   }) || [];
 
-  // 数据直接使用，无需差值计算
   $: requestsData = history?.requests || [];
   $: errorsData = history?.errors || [];
   $: responseTimeData = history?.responseTime || [];
   $: successRateData = history?.successRate || [];
 
-  // 转换上游数据格式供图表使用
-  $: pieChartData = upstreamSuccess.map(d => ({
+  $: pieChartData = upstreamSuccess.map((d) => ({
     label: new URL(d.upstream).host,
     value: d.count,
-    percentage: d.percentage
+    percentage: d.percentage,
   }));
 
-  // 失败次数占比饼图数据
   $: failurePieChartData = upstreamFailures
-    .filter(d => d.failedRequests > 0) // 只显示有失败的upstream
+    .filter((d) => d.failedRequests > 0)
     .sort((a, b) => b.failedRequests - a.failedRequests)
-    .map(d => ({
+    .map((d) => ({
       label: new URL(d.upstream).host,
       value: d.failedRequests,
-      percentage: d.percentage
+      percentage: d.percentage,
     }));
 
-  $: stackedBarChartData = upstreamStatusCodes.map(d => ({
+  $: stackedBarChartData = upstreamStatusCodes.map((d) => ({
     label: new URL(d.upstream).host,
     status2xx: d.status2xx,
     status3xx: d.status3xx,
     status4xx: d.status4xx,
-    status5xx: d.status5xx
+    status5xx: d.status5xx,
   }));
+
+  // Industrial chart palette — orange-led.
+  const COLOR_ORANGE = 'rgb(249, 115, 22)';
+  const COLOR_ORANGE_FILL = 'rgba(249, 115, 22, 0.14)';
+  const COLOR_SKY = 'rgb(56, 189, 248)';
+  const COLOR_SKY_FILL = 'rgba(56, 189, 248, 0.12)';
+  const COLOR_EMERALD = 'rgb(16, 185, 129)';
+  const COLOR_EMERALD_FILL = 'rgba(16, 185, 129, 0.12)';
+  const COLOR_RED = 'rgb(239, 68, 68)';
+  const COLOR_RED_FILL = 'rgba(239, 68, 68, 0.14)';
 </script>
 
-<div class="space-y-6">
-  <!-- 标题（时间范围选择器已移至父组件） -->
-  <div>
-    <h2 class="text-2xl font-bold">{$_('monitoring.title')}</h2>
+<div class="space-y-3">
+  <div class="flex items-center justify-between gap-3">
+    <SectionDivider label={$_('monitoring.title')} />
+    <StatusBadge variant="online" dot>LIVE</StatusBadge>
   </div>
 
   {#if loading && !history}
-    <div class="flex justify-center items-center h-64">
-      <span class="loading loading-spinner loading-lg"></span>
-    </div>
+    <PanelCard title="TELEMETRY" tag="LOADING">
+      <div class="flex justify-center items-center h-56">
+        <div class="flex flex-col items-center gap-3">
+          <div class="relative h-10 w-10">
+            <div class="absolute inset-0 border border-nexus-500/30"></div>
+            <div class="absolute inset-0 border-t-2 border-nexus-500 animate-spin"></div>
+          </div>
+          <span class="nx-label">LOADING</span>
+        </div>
+      </div>
+    </PanelCard>
   {:else if error}
-    <div class="alert alert-error">
-      <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
-      <span>{$_('common.error')}: {error}</span>
-    </div>
+    <PanelCard title={$_('common.error')} tag="ERR" stripe="red">
+      <p class="font-mono text-xs uppercase tracking-command text-red-300">{error}</p>
+    </PanelCard>
   {:else if history && history.timestamps.length > 0}
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <!-- 请求数趋势图 -->
-      <div class="card bg-base-100 shadow-xl">
-        <div class="card-body p-4">
-          <h3 class="text-base font-semibold mb-3">{$_('monitoring.charts.requestsTrend')}</h3>
-          <div class="h-64">
-            <LineChart
-              labels={timeLabels}
-              datasets={[
-                {
-                  label: $_('monitoring.charts.periodRequests'),
-                  data: requestsData,
-                  borderColor: 'rgb(59, 130, 246)',
-                  backgroundColor: 'rgba(59, 130, 246, 0.1)'
-                }
-              ]}
-              yAxisLabel={$_('monitoring.charts.requests')}
-              syncGroup="monitoring-trends"
-            />
-          </div>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      <PanelCard title={$_('monitoring.charts.requestsTrend')} tag="CH-01">
+        <div class="h-52">
+          <LineChart
+            labels={timeLabels}
+            datasets={[
+              {
+                label: $_('monitoring.charts.periodRequests'),
+                data: requestsData,
+                borderColor: COLOR_ORANGE,
+                backgroundColor: COLOR_ORANGE_FILL,
+              },
+            ]}
+            yAxisLabel={$_('monitoring.charts.requests')}
+            syncGroup="monitoring-trends"
+          />
         </div>
-      </div>
+      </PanelCard>
 
-      <!-- 响应时间趋势图 -->
-      <div class="card bg-base-100 shadow-xl">
-        <div class="card-body p-4">
-          <h3 class="text-base font-semibold mb-3">{$_('monitoring.charts.responseTimeTrend')}</h3>
-          <div class="h-64">
-            <LineChart
-              labels={timeLabels}
-              datasets={[
-                {
-                  label: $_('monitoring.charts.avgResponseTime'),
-                  data: responseTimeData,
-                  borderColor: 'rgb(34, 197, 94)',
-                  backgroundColor: 'rgba(34, 197, 94, 0.1)'
-                }
-              ]}
-              yAxisLabel={$_('monitoring.charts.milliseconds')}
-              syncGroup="monitoring-trends"
-            />
-          </div>
+      <PanelCard title={$_('monitoring.charts.responseTimeTrend')} tag="CH-02">
+        <div class="h-52">
+          <LineChart
+            labels={timeLabels}
+            datasets={[
+              {
+                label: $_('monitoring.charts.avgResponseTime'),
+                data: responseTimeData,
+                borderColor: COLOR_SKY,
+                backgroundColor: COLOR_SKY_FILL,
+              },
+            ]}
+            yAxisLabel={$_('monitoring.charts.milliseconds')}
+            syncGroup="monitoring-trends"
+          />
         </div>
-      </div>
+      </PanelCard>
 
-      <!-- 成功率趋势图 -->
-      <div class="card bg-base-100 shadow-xl">
-        <div class="card-body p-4">
-          <h3 class="text-base font-semibold mb-3">{$_('monitoring.charts.successRateTrend')}</h3>
-          <div class="h-64">
-            <LineChart
-              labels={timeLabels}
-              datasets={[
-                {
-                  label: $_('monitoring.charts.successRate'),
-                  data: successRateData,
-                  borderColor: 'rgb(16, 185, 129)',
-                  backgroundColor: 'rgba(16, 185, 129, 0.1)'
-                }
-              ]}
-              yAxisLabel={$_('monitoring.charts.percentage')}
-              syncGroup="monitoring-trends"
-            />
-          </div>
+      <PanelCard title={$_('monitoring.charts.successRateTrend')} tag="CH-03" stripe="emerald">
+        <div class="h-52">
+          <LineChart
+            labels={timeLabels}
+            datasets={[
+              {
+                label: $_('monitoring.charts.successRate'),
+                data: successRateData,
+                borderColor: COLOR_EMERALD,
+                backgroundColor: COLOR_EMERALD_FILL,
+              },
+            ]}
+            yAxisLabel={$_('monitoring.charts.percentage')}
+            syncGroup="monitoring-trends"
+          />
         </div>
-      </div>
+      </PanelCard>
 
-      <!-- 错误数趋势图 -->
-      <div class="card bg-base-100 shadow-xl">
-        <div class="card-body p-4">
-          <h3 class="text-base font-semibold mb-3">{$_('monitoring.charts.errorsTrend')}</h3>
-          <div class="h-64">
-            <LineChart
-              labels={timeLabels}
-              datasets={[
-                {
-                  label: $_('monitoring.charts.periodErrors'),
-                  data: errorsData,
-                  borderColor: 'rgb(239, 68, 68)',
-                  backgroundColor: 'rgba(239, 68, 68, 0.1)'
-                }
-              ]}
-              yAxisLabel={$_('monitoring.charts.errors')}
-              syncGroup="monitoring-trends"
-            />
-          </div>
+      <PanelCard title={$_('monitoring.charts.errorsTrend')} tag="CH-04" stripe="red">
+        <div class="h-52">
+          <LineChart
+            labels={timeLabels}
+            datasets={[
+              {
+                label: $_('monitoring.charts.periodErrors'),
+                data: errorsData,
+                borderColor: COLOR_RED,
+                backgroundColor: COLOR_RED_FILL,
+              },
+            ]}
+            yAxisLabel={$_('monitoring.charts.errors')}
+            syncGroup="monitoring-trends"
+          />
         </div>
-      </div>
+      </PanelCard>
 
-      <!-- Upstream 成功统计 -->
-      <div class="card bg-base-100 shadow-xl">
-        <div class="card-body p-4">
-          <h3 class="text-base font-semibold mb-3">上游成功统计</h3>
-          <div class="h-64">
-            {#if pieChartData.length > 0}
-              <PieChart
-                data={pieChartData}
-              />
-            {:else}
-              <div class="flex flex-col items-center justify-center h-full gap-3 opacity-60">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-                <span class="text-sm">{$_('dashboard.noData')}</span>
-              </div>
-            {/if}
-          </div>
+      <PanelCard title={$_('dashboard.upstreamDistribution')} tag="SECTOR-A">
+        <div class="h-52">
+          {#if pieChartData.length > 0}
+            <PieChart data={pieChartData} />
+          {:else}
+            <div class="flex flex-col items-center justify-center h-full gap-3 text-zinc-600">
+              <svg viewBox="0 0 24 24" class="h-10 w-10" fill="none" stroke="currentColor" stroke-width="1.4">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+              <span class="nx-label">{$_('dashboard.noData')}</span>
+            </div>
+          {/if}
         </div>
-      </div>
+      </PanelCard>
 
-      <!-- Upstream 失败统计 -->
-      <div class="card bg-base-100 shadow-xl">
-        <div class="card-body p-4">
-          <h3 class="text-base font-semibold mb-3">{$_('dashboard.upstreamFailures')}</h3>
-          <div class="h-64">
-            {#if failurePieChartData.length > 0}
-              <PieChart
-                data={failurePieChartData}
-              />
-            {:else}
-              <div class="flex flex-col items-center justify-center h-full gap-3 opacity-60">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-                <span class="text-sm">{$_('dashboard.noData')}</span>
-              </div>
-            {/if}
-          </div>
+      <PanelCard title={$_('dashboard.upstreamFailures')} tag="SECTOR-B" stripe="red">
+        <div class="h-52">
+          {#if failurePieChartData.length > 0}
+            <PieChart data={failurePieChartData} />
+          {:else}
+            <div class="flex flex-col items-center justify-center h-full gap-3 text-zinc-600">
+              <svg viewBox="0 0 24 24" class="h-10 w-10" fill="none" stroke="currentColor" stroke-width="1.4">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+              <span class="nx-label">{$_('dashboard.noData')}</span>
+            </div>
+          {/if}
         </div>
-      </div>
+      </PanelCard>
 
-      <!-- Upstream 状态码统计（占据 2 列全宽） -->
-      <div class="card bg-base-100 shadow-xl lg:col-span-2">
-        <div class="card-body p-4">
-          <h3 class="text-base font-semibold mb-3">{$_('dashboard.upstreamStatusCodes')}</h3>
-          <div class="h-64">
-            {#if stackedBarChartData.length > 0}
-              <StackedBarChart
-                data={stackedBarChartData}
-              />
-            {:else}
-              <div class="flex flex-col items-center justify-center h-full gap-3 opacity-60">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-                <span class="text-sm">{$_('dashboard.noData')}</span>
-              </div>
-            {/if}
-          </div>
+      <PanelCard title={$_('dashboard.upstreamStatusCodes')} tag="MATRIX" class="lg:col-span-2">
+        <div class="h-52">
+          {#if stackedBarChartData.length > 0}
+            <StackedBarChart data={stackedBarChartData} />
+          {:else}
+            <div class="flex flex-col items-center justify-center h-full gap-3 text-zinc-600">
+              <svg viewBox="0 0 24 24" class="h-10 w-10" fill="none" stroke="currentColor" stroke-width="1.4">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+              <span class="nx-label">{$_('dashboard.noData')}</span>
+            </div>
+          {/if}
         </div>
-      </div>
+      </PanelCard>
     </div>
   {:else}
-    <div class="alert alert-info">
-      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-      </svg>
-      <span>{$_('monitoring.noData')}</span>
-    </div>
+    <PanelCard title={$_('monitoring.noData')} tag="IDLE" stripe="zinc">
+      <p class="font-mono text-xs uppercase tracking-command text-zinc-500">
+        — no telemetry data for the selected range —
+      </p>
+    </PanelCard>
   {/if}
 </div>

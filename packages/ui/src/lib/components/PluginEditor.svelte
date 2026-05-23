@@ -163,7 +163,7 @@
     {/if}
     <button
       type="button"
-      class="btn btn-sm btn-outline"
+      class="nx-btn-outline nx-btn-sm"
       on:click={handleAddPlugin}
     >
       <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -180,7 +180,7 @@
         {@const pluginName = typeof plugin === 'string' ? plugin : plugin.name}
         {@const pluginOptions = typeof plugin === 'string' ? null : plugin.options}
         {@const pluginMeta = availablePlugins.find(p => p.name === pluginName)}
-        <div class="card bg-base-200 shadow-sm">
+        <div class="card bg-carbon-950/60 shadow-sm">
           <div class="card-body p-3">
             <div class="flex items-start justify-between gap-3">
               <div class="flex-1 min-w-0">
@@ -235,7 +235,7 @@
         </label>
         <select
           id="plugin-select"
-          class="select select-bordered"
+          class="nx-input pr-7"
           value={selectedPluginName || ''}
           on:change={handlePluginSelect}
           disabled={editingPluginIndex !== null || availablePlugins.length === 0}
@@ -260,7 +260,7 @@
           {@const plugin = availablePlugins.find(p => p.name === selectedPluginName)}
           {#if plugin?.description}
             <div class="label">
-              <span class="label-text-alt text-gray-500">{getPluginText(plugin.description, plugin.name, $_)}</span>
+              <span class="label-text-alt text-zinc-500">{getPluginText(plugin.description, plugin.name, $_)}</span>
             </div>
           {/if}
         {/if}
@@ -268,7 +268,7 @@
 
       <!-- 动态配置表单 -->
       {#if selectedPluginName && selectedPluginSchema.length > 0}
-        <div class="divider my-2">{$_('plugin.pluginConfiguration')}</div>
+        <div class="border-t border-carbon-600 my-2 my-2">{$_('plugin.pluginConfiguration')}</div>
         <DynamicPluginForm
           pluginName={selectedPluginName || ''}
           schema={selectedPluginSchema}

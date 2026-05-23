@@ -455,9 +455,9 @@
 {:else}
   <div class="space-y-2 viewer-shell relative" bind:this={viewerRoot}>
     <div class="flex flex-wrap items-center gap-2">
-      <button class="btn btn-xs btn-ghost" on:click={expandAll}>{expandAllText}</button>
-      <button class="btn btn-xs btn-ghost" on:click={collapseAll}>{collapseAllText}</button>
-      <button class="btn btn-xs btn-outline" on:click={copyAll}>
+      <button class="nx-btn-ghost nx-btn-sm" on:click={expandAll}>{expandAllText}</button>
+      <button class="nx-btn-ghost nx-btn-sm" on:click={collapseAll}>{collapseAllText}</button>
+      <button class="nx-btn-ghost nx-btn-sm" on:click={copyAll}>
         {#if copyFeedback}
           <span class="text-success">{copiedText}</span>
         {:else if copyFailed}
@@ -468,7 +468,7 @@
       </button>
     </div>
     <div
-      class="rounded bg-base-300/30 border border-base-300 p-2 max-h-96 overflow-auto"
+      class="bg-carbon-900 border border-carbon-600 p-2 max-h-96 overflow-auto"
       bind:this={viewerContentArea}
       role="button"
       tabindex="0"
@@ -489,20 +489,20 @@
     {#if contextMenuVisible}
       <div
         bind:this={contextMenuElement}
-        class="absolute z-50 w-[148px] rounded-md border border-base-300 bg-base-100 p-1 shadow-xl"
+        class="absolute z-50 w-[148px] border border-carbon-500 bg-carbon-900 p-1 shadow-industrial-lg"
         style={`left: ${contextMenuLeft}px; top: ${contextMenuTop}px;`}
         role="menu"
         tabindex="0"
         on:contextmenu|preventDefault
       >
         <button
-          class="w-full rounded px-2 py-1.5 text-left text-sm hover:bg-base-200 disabled:opacity-40 disabled:cursor-not-allowed"
+          class="w-full rounded px-2 py-1.5 text-left text-sm hover:bg-carbon-950/60 disabled:opacity-40 disabled:cursor-not-allowed"
           on:click={copySelectionFromMenu}
           disabled={!hasSelectionInViewer}
         >
           {copySelectionText}
         </button>
-        <button class="mt-0.5 w-full rounded px-2 py-1.5 text-left text-sm hover:bg-base-200" on:click={copyAll}>
+        <button class="mt-0.5 w-full rounded px-2 py-1.5 text-left text-sm hover:bg-carbon-950/60" on:click={copyAll}>
           {copyAllContentText}
         </button>
       </div>

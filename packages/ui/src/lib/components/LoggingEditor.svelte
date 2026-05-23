@@ -19,8 +19,8 @@
     value = {
       body: {
         enabled: false,
-        maxSize: 5120,
-        retentionDays: 1
+        max_size: 5120,
+        retention_days: 1
       }
     };
   }
@@ -28,8 +28,8 @@
   $: if (value && !value.body) {
     value.body = {
       enabled: false,
-      maxSize: 5120,
-      retentionDays: 1
+      max_size: 5120,
+      retention_days: 1
     };
   }
 
@@ -88,7 +88,7 @@
       />
       <div class="flex-1">
         <span class="label-text font-semibold">{$_('logging.bodyRecording')}</span>
-        <p class="text-xs text-gray-500 mt-1">{$_('logging.bodyRecordingHelp')}</p>
+        <p class="text-xs text-zinc-500 mt-1">{$_('logging.bodyRecordingHelp')}</p>
       </div>
     </label>
   </div>
@@ -104,14 +104,14 @@
           <input
             id="logging-max-size"
             type="number"
-            class="input input-bordered flex-1"
-            bind:value={value.body.maxSize}
+            class="nx-input flex-1"
+            bind:value={value.body.max_size}
             on:input={handleInput}
             min="1024"
             max="102400"
             step="1024"
           />
-          <span class="text-sm text-gray-500">KB</span>
+          <span class="text-sm text-zinc-500">KB</span>
         </div>
         <div class="label">
           <span class="label-text-alt">{$_('logging.maxSizeHelp')}</span>
@@ -127,13 +127,13 @@
           <input
             id="logging-retention-days"
             type="number"
-            class="input input-bordered flex-1"
-            bind:value={value.body.retentionDays}
+            class="nx-input flex-1"
+            bind:value={value.body.retention_days}
             on:input={handleInput}
             min="1"
             max="30"
           />
-          <span class="text-sm text-gray-500">{$_('logging.days')}</span>
+          <span class="text-sm text-zinc-500">{$_('logging.days')}</span>
         </div>
         <div class="label">
           <span class="label-text-alt">{$_('logging.retentionDaysHelp')}</span>
@@ -142,31 +142,31 @@
     </div>
   {/if}
 
-  <div class="divider"></div>
+  <div class="border-t border-carbon-600 my-2"></div>
 
   <!-- Cleanup Configuration -->
   <h4 class="font-semibold">{$_('logging.cleanupConfig')}</h4>
 
   {#if cleanupLoading}
     <div class="flex items-center gap-2">
-      <span class="loading loading-spinner loading-sm"></span>
+      <span class="inline-block h-3 w-3 border border-current border-t-transparent animate-spin"></span>
       <span class="text-sm">{$_('common.loading')}</span>
     </div>
   {:else if cleanupConfig}
-    <div class="bg-base-200 p-4 rounded-lg space-y-2">
+    <div class="bg-carbon-950/60 p-4 rounded-lg space-y-2">
       <div class="flex justify-between text-sm">
-        <span class="text-gray-500">{$_('logging.cleanupStatus')}</span>
-        <span class="font-semibold {cleanupConfig.isActive ? 'text-success' : 'text-error'}">
-          {cleanupConfig.isActive ? $_('logging.active') : $_('logging.inactive')}
+        <span class="text-zinc-500">{$_('logging.cleanupStatus')}</span>
+        <span class="font-semibold {cleanupConfig.is_active ? 'text-success' : 'text-error'}">
+          {cleanupConfig.is_active ? $_('logging.active') : $_('logging.inactive')}
         </span>
       </div>
       <div class="flex justify-between text-sm">
-        <span class="text-gray-500">{$_('logging.cleanupRetention')}</span>
-        <span class="font-semibold">{cleanupConfig.retentionDays} {$_('logging.days')}</span>
+        <span class="text-zinc-500">{$_('logging.cleanupRetention')}</span>
+        <span class="font-semibold">{cleanupConfig.retention_days} {$_('logging.days')}</span>
       </div>
       <div class="flex justify-between text-sm">
-        <span class="text-gray-500">{$_('logging.cleanupInterval')}</span>
-        <span class="font-semibold">{cleanupConfig.scheduleIntervalHours} {$_('logging.hours')}</span>
+        <span class="text-zinc-500">{$_('logging.cleanupInterval')}</span>
+        <span class="font-semibold">{cleanupConfig.schedule_interval_hours} {$_('logging.hours')}</span>
       </div>
     </div>
 
@@ -176,7 +176,7 @@
       disabled={cleaningUp}
     >
       {#if cleaningUp}
-        <span class="loading loading-spinner loading-xs"></span>
+        <span class="inline-block h-2.5 w-2.5 border border-current border-t-transparent animate-spin"></span>
       {:else}
         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -193,10 +193,10 @@
         <div class="text-sm">
           <div class="font-semibold">{$_('logging.lastCleanup')}</div>
           <div class="mt-1 space-y-1">
-            <div>{$_('logging.deletedSqliteRecords')}: {lastCleanupResult.deletedSqliteRecords}</div>
-            <div>{$_('logging.deletedFileLogFiles')}: {lastCleanupResult.deletedFileLogFiles}</div>
-            <div>{$_('logging.deletedBodyFiles')}: {lastCleanupResult.deletedBodyDirs} {$_('logging.dirs')}, {lastCleanupResult.deletedBodyFiles} {$_('logging.files')}</div>
-            <div>{$_('logging.duration')}: {lastCleanupResult.durationMs}ms</div>
+            <div>{$_('logging.deletedSqliteRecords')}: {lastCleanupResult.deleted_sqlite_records}</div>
+            <div>{$_('logging.deletedFileLogFiles')}: {lastCleanupResult.deleted_file_log_files}</div>
+            <div>{$_('logging.deletedBodyFiles')}: {lastCleanupResult.deleted_body_dirs} {$_('logging.dirs')}, {lastCleanupResult.deleted_body_files} {$_('logging.files')}</div>
+            <div>{$_('logging.duration')}: {lastCleanupResult.duration_ms}ms</div>
           </div>
         </div>
       </div>

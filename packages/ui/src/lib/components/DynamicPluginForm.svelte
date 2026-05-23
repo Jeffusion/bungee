@@ -219,7 +219,7 @@
           <input
             id={field.name}
             type="text"
-            class="input input-bordered"
+            class="nx-input"
             class:input-error={errors[field.name]}
             placeholder={field.placeholder ? $_(field.placeholder) : undefined}
             value={getFieldValue(field)}
@@ -231,7 +231,7 @@
           <input
             id={field.name}
             type="number"
-            class="input input-bordered"
+            class="nx-input"
             class:input-error={errors[field.name]}
             placeholder={field.placeholder ? $_(field.placeholder) : undefined}
             value={getFieldValue(field)}
@@ -251,7 +251,7 @@
         {:else if field.type === 'select'}
           <select
             id={field.name}
-            class="select select-bordered"
+            class="nx-input pr-7"
             class:select-error={errors[field.name]}
             value={getFieldValue(field)}
             on:change={(e) => handleChange(field.name, e.currentTarget.value)}
@@ -266,7 +266,7 @@
         {:else if field.type === 'multiselect'}
           <select
             id={field.name}
-            class="select select-bordered"
+            class="nx-input pr-7"
             class:select-error={errors[field.name]}
             multiple
             value={formattedValues[field.name] || []}
@@ -284,7 +284,7 @@
         {:else if field.type === 'textarea'}
           <textarea
             id={field.name}
-            class="textarea textarea-bordered"
+            class="nx-input py-2 resize-y"
             class:textarea-error={errors[field.name]}
             placeholder={field.placeholder ? $_(field.placeholder) : undefined}
             rows="4"
@@ -296,7 +296,7 @@
         {:else if field.type === 'json'}
           <textarea
             id={field.name}
-            class="textarea textarea-bordered font-mono text-xs"
+            class="nx-input py-2 resize-y font-mono text-xs"
             class:textarea-error={errors[field.name]}
             placeholder={field.placeholder ? $_(field.placeholder) : '{}'}
             rows="6"
@@ -328,7 +328,7 @@
 
         {#if field.description}
           <div class="label">
-            <span class="label-text-alt text-gray-500">{$_(field.description)}</span>
+            <span class="label-text-alt text-zinc-500">{$_(field.description)}</span>
           </div>
         {/if}
 

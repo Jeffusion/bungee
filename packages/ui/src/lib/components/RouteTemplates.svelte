@@ -12,7 +12,7 @@
       description: 'Basic reverse proxy to a single upstream',
       template: {
         path: '/api',
-        upstreams: [
+        endpoints: [
           {
             target: 'https://api.example.com',
             weight: 100,
@@ -26,7 +26,7 @@
       description: 'Multiple upstreams with load balancing',
       template: {
         path: '/api',
-        upstreams: [
+        endpoints: [
           {
             target: 'https://api1.example.com',
             weight: 100,
@@ -45,7 +45,7 @@
       description: 'Primary and backup upstreams with failover',
       template: {
         path: '/api',
-        upstreams: [
+        endpoints: [
           {
             target: 'https://primary.example.com',
             weight: 200,
@@ -59,7 +59,7 @@
         ],
         failover: {
           enabled: true,
-          retryOn: [500, 502, 503, 504]
+          retry_on: [500, 502, 503, 504]
         }
       }
     },
@@ -69,7 +69,7 @@
       template: {
         path: '/v1/messages',
         transformer: 'anthropic-to-gemini',
-        upstreams: [
+        endpoints: [
           {
             target: 'https://generativelanguage.googleapis.com',
             weight: 100,
@@ -84,7 +84,7 @@
       template: {
         path: '/v1/messages',
         transformer: 'anthropic-to-openai',
-        upstreams: [
+        endpoints: [
           {
             target: 'https://api.openai.com',
             weight: 100,
@@ -98,7 +98,7 @@
       description: 'API with health checks enabled',
       template: {
         path: '/api',
-        upstreams: [
+        endpoints: [
           {
             target: 'https://api.example.com',
             weight: 100,
@@ -107,10 +107,10 @@
         ],
         failover: {
           enabled: true,
-          healthCheck: {
+          health_check: {
             enabled: true,
-            intervalMs: 30000,
-            timeoutMs: 5000,
+            interval_ms: 30000,
+            timeout_ms: 5000,
             path: '/health'
           }
         }
@@ -121,14 +121,14 @@
       description: 'Route with path rewriting',
       template: {
         path: '/api/v2',
-        upstreams: [
+        endpoints: [
           {
             target: 'https://api.example.com',
             weight: 100,
             priority: 1
           }
         ],
-        pathRewrite: {
+        path_rewrite: {
           '^/api/v2': '/v1'
         }
       }

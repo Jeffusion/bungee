@@ -8,6 +8,8 @@
 
   export let open = false;
   export let route: Route;
+  export let endpoints: Upstream[] = [];
+  export let readOnly = false;
   export let onSaved: (() => void) | undefined = undefined;
 
   // 克隆数据用于编辑
@@ -24,13 +26,13 @@
   // 1. 弹窗打开时克隆数据（只执行一次）
   $: {
     if (open && !wasOpen) {
-      editingUpstreams = JSON.parse(JSON.stringify(route.upstreams));
+      editingUpstreams = JSON.parse(JSON.stringify(endpoints));
     }
     wasOpen = open;
   }
 
   // 2. 自动检测是否有修改
-  $: hasChanges = JSON.stringify(editingUpstreams) !== JSON.stringify(route.upstreams);
+  $: hasChanges = !readOnly && JSON.stringify(editingUpstreams) !== JSON.stringify(route.endpoints ?? []);
 
   // 3. 就地编辑的验证
   $: editingFieldErrors = editingIndex >= 0 && editingField
@@ -73,11 +75,11 @@
     editingField = null;
   }
 
-  function getUpstreamStatus(upstream: Upstream): 'healthy' | 'unhealthy' | 'unknown' {
-    if (!upstream.status) {
-      return 'unknown';
+  function getUpstreamStatus(upstream: Upstream): 'healthy' | 'unhealthy' | 'half_open' {
+    if (!upstream.status || upstream.status === 'HEALTHY') {
+      return 'healthy';
     }
-    return upstream.status === 'HEALTHY' ? 'healthy' : 'unhealthy';
+    return upstream.status === 'HALF_OPEN' ? 'half_open' : 'unhealthy';
   }
 
   function formatLastFailureTime(timestamp: number | undefined): string {
@@ -97,14 +99,14 @@
 
   // 切换启用/禁用状态
   async function toggleUpstreamStatus(index: number) {
-    editingUpstreams[index].disabled = !editingUpstreams[index].disabled;
+    if (readOnly) return;
+    editingUpstreams[index].is_disabled = !editingUpstreams[index].is_disabled;
     editingUpstreams = editingUpstreams;
     
     // 立即保存更改
     await saveToBackend();
     
-    const status = editingUpstreams[index].disabled ? $_('routeEditor.upstreamDisabledSuccess') : $_('routeEditor.upstreamEnabledSuccess');
-    // saveToBackend 已经显示了 toast，这里可能不需要重复显示，或者 saveToBackend 显示的是 generic saved message
+    // saveToBackend 已经显示了 toast，这里不重复显示 enable/disable 状态消息
   }
 
   // 开始编辑字段
@@ -161,10 +163,10 @@
 
     saving = true;
     try {
-      // 构造完整的 route 对象，剔除 _uid, status, lastFailureTime
+      // 构造完整的 route 对象，剔除 _uid, status, last_failure_time
       const updatedRoute = {
         ...route,
-        upstreams: editingUpstreams.map(({ _uid, status, lastFailureTime, ...upstream }) => upstream)
+        endpoints: editingUpstreams.map(({ _uid, status, last_failure_time, ...upstream }) => upstream)
       };
 
       await RoutesAPI.update(route.path, updatedRoute);
@@ -207,14 +209,14 @@
 
 <svelte:window on:keydown={handleKeydown} />
 
-<dialog class="modal" class:modal-open={open}>
-  <div class="modal-box max-w-4xl">
+<dialog class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" class:hidden={!open}>
+  <div class="nx-panel-raised nx-bracketed relative w-full max-w-4xl flex flex-col max-h-[90vh]">
     <h3 class="font-bold text-lg mb-4">
       {$_('upstreamsModal.title')} - <code class="text-primary">{route.path}</code>
     </h3>
 
     <div class="overflow-x-auto max-h-[60vh]">
-      <table class="table table-zebra w-full">
+      <table class="w-full">
         <thead>
           <tr>
             <th class="w-24">{$_('routeCard.tableHeaders.status')}</th>
@@ -227,25 +229,25 @@
         </thead>
         <tbody>
           {#each editingUpstreams as upstream, index (upstream._uid || index)}
-            <tr class="hover" class:opacity-50={upstream.disabled || saving}>
+            <tr class="hover" class:opacity-50={upstream.is_disabled || saving}>
               <!-- 健康状态列 -->
               <td>
                 <div class="flex items-center gap-2">
-                  {#if upstream.disabled}
-                    <span class="badge badge-error badge-sm">{$_('routeEditor.upstreamDisabled')}</span>
+                  {#if upstream.is_disabled}
+                    <span class="nx-badge-fault">{$_('routeEditor.upstreamDisabled')}</span>
                   {:else}
                     <div
                       class="w-3 h-3 rounded-full tooltip tooltip-right"
                       class:bg-success={getUpstreamStatus(upstream) === 'healthy'}
                       class:bg-error={getUpstreamStatus(upstream) === 'unhealthy'}
-                      class:bg-warning={getUpstreamStatus(upstream) === 'unknown'}
-                      data-tip={upstream.lastFailureTime
-                        ? `最后失败: ${formatLastFailureTime(upstream.lastFailureTime)}`
+                      class:bg-warning={getUpstreamStatus(upstream) === 'half_open'}
+                      data-tip={upstream.last_failure_time
+                        ? `最后失败: ${formatLastFailureTime(upstream.last_failure_time)}`
                         : getUpstreamStatus(upstream) === 'healthy'
                           ? $_('upstreamsModal.statusHealthy')
-                          : getUpstreamStatus(upstream) === 'unhealthy'
-                            ? $_('upstreamsModal.statusUnhealthy')
-                            : $_('upstreamsModal.statusUnknown')}
+                        : getUpstreamStatus(upstream) === 'unhealthy'
+                          ? $_('upstreamsModal.statusUnhealthy')
+                            : $_('upstreamsModal.statusHalfOpen')}
                     ></div>
                     <span class="text-sm">{$_('routeEditor.upstreamEnabled')}</span>
                   {/if}
@@ -262,7 +264,7 @@
                   <div class="flex items-center gap-1">
                     <input
                       type="text"
-                      class="input input-sm input-bordered w-full"
+                      class="nx-input"
                       bind:value={upstream.description}
                       on:blur={saveField}
                       on:keydown={handleInputKeydown}
@@ -273,7 +275,7 @@
                 {:else}
                   {#if upstream.description}
                     <span
-                      class="text-xs text-gray-500 truncate block cursor-pointer hover:bg-base-200 px-2 py-1 rounded"
+                      class="text-xs text-zinc-500 truncate block cursor-pointer hover:bg-carbon-950/60 px-2 py-1 rounded"
                       class:pointer-events-none={saving}
                       title={upstream.description}
                       on:click={() => startEditing(index, 'description')}
@@ -285,7 +287,7 @@
                     </span>
                   {:else}
                     <span
-                      class="text-xs text-gray-400 cursor-pointer hover:bg-base-200 px-2 py-1 rounded"
+                      class="text-xs text-zinc-500 cursor-pointer hover:bg-carbon-950/60 px-2 py-1 rounded"
                       class:pointer-events-none={saving}
                       on:click={() => startEditing(index, 'description')}
                       on:keydown={(e) => handleClickableKeydown(e, () => startEditing(index, 'description'))}
@@ -304,7 +306,7 @@
                   <div class="flex items-center justify-end gap-1">
                     <input
                       type="number"
-                      class="input input-sm input-bordered w-16 text-right"
+                      class="nx-input w-16 text-right"
                       class:input-error={editingFieldErrors.length > 0}
                       bind:value={upstream.priority}
                       on:blur={saveField}
@@ -321,7 +323,7 @@
                   </div>
                 {:else}
                   <span
-                    class="cursor-pointer hover:bg-base-200 px-2 py-1 rounded"
+                    class="cursor-pointer hover:bg-carbon-950/60 px-2 py-1 rounded"
                     class:pointer-events-none={saving}
                     on:click={() => startEditing(index, 'priority')}
                     on:keydown={(e) => handleClickableKeydown(e, () => startEditing(index, 'priority'))}
@@ -339,7 +341,7 @@
                   <div class="flex items-center justify-end gap-1">
                     <input
                       type="number"
-                      class="input input-sm input-bordered w-16 text-right"
+                      class="nx-input w-16 text-right"
                       class:input-error={editingFieldErrors.length > 0}
                       bind:value={upstream.weight}
                       on:blur={saveField}
@@ -356,7 +358,7 @@
                   </div>
                 {:else}
                   <span
-                    class="cursor-pointer hover:bg-base-200 px-2 py-1 rounded"
+                    class="cursor-pointer hover:bg-carbon-950/60 px-2 py-1 rounded"
                     class:pointer-events-none={saving}
                     on:click={() => startEditing(index, 'weight')}
                     on:keydown={(e) => handleClickableKeydown(e, () => startEditing(index, 'weight'))}
@@ -371,13 +373,13 @@
               <!-- Actions 列 -->
               <td class="text-center">
                  <button 
-                  class="btn btn-xs"
-                  class:btn-success={upstream.disabled}
-                  class:btn-error={!upstream.disabled}
+                  class="nx-btn-ghost nx-btn-sm"
+                  class:btn-success={upstream.is_disabled}
+                  class:btn-error={!upstream.is_disabled}
                   on:click={() => toggleUpstreamStatus(index)}
-                  disabled={saving}
+                  disabled={saving || readOnly}
                 >
-                  {upstream.disabled ? $_('routeEditor.enableUpstream') : $_('routeEditor.disableUpstream')}
+                  {upstream.is_disabled ? $_('routeEditor.enableUpstream') : $_('routeEditor.disableUpstream')}
                 </button>
               </td>
             </tr>
@@ -388,20 +390,20 @@
 
     <!-- 保存状态提示 -->
     {#if saving}
-      <div class="alert alert-info mt-2">
-        <span class="loading loading-spinner loading-sm"></span>
+      <div class="border-l-2 border-l-nexus-500 bg-nexus-500/5 px-3 py-2 mt-2 flex items-center gap-2 font-mono text-[11px] uppercase tracking-command text-nexus-200">
+        <span class="inline-block h-3 w-3 border border-current border-t-transparent animate-spin"></span>
         <span>{$_('upstreamsModal.saving')}</span>
       </div>
     {/if}
 
-    <div class="modal-action">
+    <div class="border-t border-carbon-600 px-4 py-3 flex justify-end gap-2 bg-carbon-900/60">
       <button
-        class="btn"
+        class="nx-btn-ghost"
         on:click={closeModal}
         disabled={saving}
       >
         {#if saving}
-          <span class="loading loading-spinner loading-sm"></span>
+          <span class="inline-block h-3 w-3 border border-current border-t-transparent animate-spin"></span>
         {/if}
         {$_('upstreamsModal.close')}
       </button>

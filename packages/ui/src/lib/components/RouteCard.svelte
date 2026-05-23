@@ -1,10 +1,11 @@
 <script lang="ts">
-  import type { Route } from '../api/routes';
+  import { resolveRouteEndpoints, type Route, type Service } from '../api/routes';
   import { push } from 'svelte-spa-router';
   import { _ } from '../i18n';
   import UpstreamsModal from './UpstreamsModal.svelte';
 
   export let route: Route;
+  export let services: Service[] = [];
   export let onDelete: () => void;
   export let onDuplicate: () => void;
   export let isDeleting = false;
@@ -13,8 +14,9 @@
   const PREVIEW_COUNT = 5;
   let showUpstreamsModal = false;
 
-  $: previewUpstreams = route.upstreams.slice(0, PREVIEW_COUNT);
-  $: hasMore = route.upstreams.length > PREVIEW_COUNT;
+  $: endpoints = resolveRouteEndpoints(route, services);
+  $: previewUpstreams = endpoints.slice(0, PREVIEW_COUNT);
+  $: hasMore = endpoints.length > PREVIEW_COUNT;
 
   function handleEdit() {
     push(`/routes/edit/${encodeURIComponent(route.path)}`);
@@ -24,12 +26,11 @@
     showUpstreamsModal = true;
   }
 
-  function getUpstreamStatus(upstream: any): 'healthy' | 'unhealthy' | 'unknown' {
-    // 从运行时状态获取健康状态
-    if (!upstream.status) {
-      return 'unknown';
+  function getUpstreamStatus(upstream: any): 'healthy' | 'unhealthy' | 'half_open' {
+    if (!upstream.status || upstream.status === 'HEALTHY') {
+      return 'healthy';
     }
-    return upstream.status === 'HEALTHY' ? 'healthy' : 'unhealthy';
+    return upstream.status === 'HALF_OPEN' ? 'half_open' : 'unhealthy';
   }
 
   function formatLastFailureTime(timestamp: number | undefined): string {
@@ -58,8 +59,11 @@
         </h2>
         <div class="flex gap-2 mt-2 flex-wrap">
           <span class="badge badge-sm">
-            {$_('routeCard.upstreams', { values: { count: route.upstreams.length } })}
+            {$_('routeCard.upstreams', { values: { count: endpoints.length } })}
           </span>
+          {#if route.service}
+            <span class="badge badge-sm badge-outline">service: {route.service}</span>
+          {/if}
           {#if route.transformer}
             <span class="badge badge-sm badge-info">
               {$_('routeCard.hasTransformer')}
@@ -137,23 +141,23 @@
           </thead>
           <tbody>
             {#each previewUpstreams as upstream}
-              <tr class="hover" class:opacity-50={upstream.disabled}>
+              <tr class="hover" class:opacity-50={upstream.is_disabled}>
                 <td>
                   <div
                     class="w-2.5 h-2.5 rounded-full tooltip tooltip-right"
-                    class:bg-success={getUpstreamStatus(upstream) === 'healthy' && !upstream.disabled}
-                    class:bg-error={getUpstreamStatus(upstream) === 'unhealthy' && !upstream.disabled}
-                    class:bg-warning={getUpstreamStatus(upstream) === 'unknown' && !upstream.disabled}
-                    class:bg-gray-400={upstream.disabled}
-                    data-tip={upstream.disabled
+                    class:bg-success={getUpstreamStatus(upstream) === 'healthy' && !upstream.is_disabled}
+                    class:bg-error={getUpstreamStatus(upstream) === 'unhealthy' && !upstream.is_disabled}
+                    class:bg-warning={getUpstreamStatus(upstream) === 'half_open' && !upstream.is_disabled}
+                    class:bg-gray-400={upstream.is_disabled}
+                    data-tip={upstream.is_disabled
                       ? $_('upstream.disabled')
-                      : upstream.lastFailureTime
-                        ? `最后失败: ${formatLastFailureTime(upstream.lastFailureTime)}`
+                      : upstream.last_failure_time
+                        ? `最后失败: ${formatLastFailureTime(upstream.last_failure_time)}`
                         : getUpstreamStatus(upstream) === 'healthy'
                           ? '健康'
-                          : getUpstreamStatus(upstream) === 'unhealthy'
-                            ? '异常'
-                            : '未知'}
+                        : getUpstreamStatus(upstream) === 'unhealthy'
+                          ? '异常'
+                            : '半开恢复中'}
                   ></div>
                 </td>
                 <td>
@@ -180,17 +184,17 @@
       {#if hasMore}
         <div class="mt-2">
           <button class="btn btn-sm btn-outline w-full" on:click={openUpstreamsModal}>
-            {$_('routeCard.viewAll', { values: { count: route.upstreams.length } })}
+            {$_('routeCard.viewAll', { values: { count: endpoints.length } })}
           </button>
         </div>
       {/if}
     </div>
 
     <!-- Path Rewrite -->
-    {#if route.pathRewrite}
+    {#if route.path_rewrite}
       <div class="mt-3">
         <p class="text-sm font-semibold mb-1">Path Rewrite:</p>
-        {#each Object.entries(route.pathRewrite) as [pattern, replacement]}
+        {#each Object.entries(route.path_rewrite) as [pattern, replacement]}
           <div class="text-sm text-gray-600">
             {$_('routeCard.pathRewrite.original')} <code class="bg-base-200 px-1.5 py-0.5 rounded text-sm font-mono">{pattern}</code> → {$_('routeCard.pathRewrite.rewriteTo')} <code class="bg-base-200 px-1.5 py-0.5 rounded text-sm font-mono">{replacement}</code>
           </div>
@@ -202,4 +206,4 @@
 </div>
 
 <!-- Upstreams Modal -->
-<UpstreamsModal bind:open={showUpstreamsModal} {route} />
+<UpstreamsModal bind:open={showUpstreamsModal} {route} {endpoints} readOnly={Boolean(route.service && (!route.endpoints || route.endpoints.length === 0))} />

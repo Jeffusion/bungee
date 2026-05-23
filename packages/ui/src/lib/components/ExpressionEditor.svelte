@@ -122,16 +122,16 @@
   </div>
 
   {#if showTemplates}
-    <div class="bg-base-200 p-3 rounded-lg space-y-2 max-h-60 overflow-y-auto">
+    <div class="bg-carbon-950/60 p-3 rounded-lg space-y-2 max-h-60 overflow-y-auto">
       <p class="text-xs font-semibold text-gray-600">Expression Templates</p>
       {#each templates as template}
         <button
           type="button"
-          class="block w-full text-left p-2 hover:bg-base-300 rounded text-sm"
+          class="block w-full text-left p-2 hover:bg-carbon-700 rounded text-sm"
           on:click={() => insertTemplate(template)}
         >
           <div class="font-medium">{template.name}</div>
-          <div class="text-xs text-gray-500">{template.description}</div>
+          <div class="text-xs text-zinc-500">{template.description}</div>
           <code class="text-xs bg-base-100 px-1 rounded">{template.expression}</code>
         </button>
       {/each}
@@ -139,7 +139,7 @@
   {/if}
 
   <textarea
-    class="textarea textarea-bordered font-mono text-sm w-full"
+    class="nx-input py-2 resize-y font-mono text-sm w-full"
     bind:value={expression}
     on:input={handleChange}
     {placeholder}
@@ -186,13 +186,13 @@
         </svg>
         <span class="text-xs">
           Result: <code class="bg-base-100 px-1 rounded">{JSON.stringify(testResult.value)}</code>
-          <span class="text-gray-500">({testResult.type})</span>
+          <span class="text-zinc-500">({testResult.type})</span>
         </span>
       </div>
     {/if}
   {/if}
 
-  <p class="text-xs text-gray-500">
+  <p class="text-xs text-zinc-500">
     Available variables: <code>req</code> (request), <code>res</code> (response), <code>body</code> (response body)
   </p>
 </div>
