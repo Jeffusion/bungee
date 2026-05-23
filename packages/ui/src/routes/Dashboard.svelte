@@ -1,20 +1,27 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { _ } from '../lib/i18n';
-  import type { StatsHistoryV2, TimeRange } from '../lib/types';
+  import type { StatsHistoryV2, TimeRange, Service } from '../lib/types';
   import MonitoringCharts from '../lib/components/MonitoringCharts.svelte';
   import PluginHost from '../lib/components/PluginHost.svelte';
   import { pluginList, refreshPlugins } from '../lib/stores/plugins';
   import { getNativeWidget } from '../lib/components/native-widgets';
   import type { ComponentType, SvelteComponent } from 'svelte';
+  import { getConfig } from '../lib/api/config';
+  import {
+    KpiCard,
+    PanelCard,
+    SegmentedControl,
+    SectionDivider,
+    StatusBadge,
+    StatusDot,
+    MetricBar,
+    SystemAlertBar,
+  } from '../lib/components/industrial';
 
-  // 时间范围状态（受控）
   let selectedRange: TimeRange = '1h';
 
-  // 插件面板（iframe）
   let pluginPanels: Array<{pluginName: string, path: string, title: string, w: number, h: number}> = [];
-
-  // 原生组件面板
   let nativeWidgetPanels: Array<{
     pluginName: string;
     id: string;
@@ -25,7 +32,6 @@
     h: number;
   }> = [];
 
-  // 计算的统计数据
   let calculatedStats: {
     totalRequests: number;
     requestsPerSecond: number;
@@ -33,44 +39,90 @@
     avgResponseTime: number;
   } | null = null;
 
-  // 处理数据加载回调
+  let servicesStats: {
+    totalServices: number;
+    healthyServices: number;
+    degradedServices: number;
+    totalEndpoints: number;
+    healthyEndpoints: number;
+    unhealthyEndpoints: number;
+    halfOpenEndpoints: number;
+    services: Service[];
+  } | null = null;
+
+  let configInterval: any;
+
   function handleDataLoaded(data: StatsHistoryV2 | null) {
     calculatedStats = calculateStats(data);
   }
 
-  // 基于历史数据计算统计指标
-  function calculateStats(history: StatsHistoryV2 | null) {
-    if (!history || history.requests.length === 0) {
-      return null;
+  async function loadConfig() {
+    try {
+      const config = await getConfig();
+      if (config.services) {
+        servicesStats = calculateServicesStats(config.services);
+      }
+    } catch (e) {
+      console.error('Failed to load config for services stats:', e);
     }
+  }
 
-    // 总请求数：时间范围内所有请求的总和
-    const totalRequests = history.requests.reduce((sum, val) => sum + val, 0);
+  function calculateServicesStats(services: Service[]) {
+    let totalServices = services.length;
+    let healthyServices = 0;
+    let degradedServices = 0;
+    let totalEndpoints = 0;
+    let healthyEndpoints = 0;
+    let unhealthyEndpoints = 0;
+    let halfOpenEndpoints = 0;
 
-    // 每秒请求数：总请求数 ÷ 时间范围秒数
-    const rangeInSeconds = getRangeInSeconds(selectedRange);
-    const requestsPerSecond = totalRequests / rangeInSeconds;
-
-    // 成功率：基于所有时间点的加权平均
-    const totalErrors = history.errors.reduce((sum, val) => sum + val, 0);
-    const successRate = totalRequests > 0
-      ? ((totalRequests - totalErrors) / totalRequests) * 100
-      : 100;
-
-    // 平均响应时间：所有时间点响应时间的简单平均
-    const avgResponseTime = history.responseTime.length > 0
-      ? history.responseTime.reduce((sum, val) => sum + val, 0) / history.responseTime.length
-      : 0;
+    services.forEach((s) => {
+      let allHealthy = s.endpoints.length > 0;
+      s.endpoints.forEach((e) => {
+        totalEndpoints++;
+        if (e.status === 'HEALTHY') {
+          healthyEndpoints++;
+        } else if (e.status === 'UNHEALTHY') {
+          unhealthyEndpoints++;
+          allHealthy = false;
+        } else if (e.status === 'HALF_OPEN') {
+          halfOpenEndpoints++;
+          allHealthy = false;
+        } else {
+          healthyEndpoints++;
+        }
+      });
+      if (allHealthy) healthyServices++;
+      else degradedServices++;
+    });
 
     return {
-      totalRequests,
-      requestsPerSecond,
-      successRate,
-      avgResponseTime
+      totalServices,
+      healthyServices,
+      degradedServices,
+      totalEndpoints,
+      healthyEndpoints,
+      unhealthyEndpoints,
+      halfOpenEndpoints,
+      services,
     };
   }
 
-  // 获取时间范围对应的秒数
+  function calculateStats(history: StatsHistoryV2 | null) {
+    if (!history || history.requests.length === 0) return null;
+    const totalRequests = history.requests.reduce((s, v) => s + v, 0);
+    const rangeInSeconds = getRangeInSeconds(selectedRange);
+    const requestsPerSecond = totalRequests / rangeInSeconds;
+    const totalErrors = history.errors.reduce((s, v) => s + v, 0);
+    const successRate =
+      totalRequests > 0 ? ((totalRequests - totalErrors) / totalRequests) * 100 : 100;
+    const avgResponseTime =
+      history.responseTime.length > 0
+        ? history.responseTime.reduce((s, v) => s + v, 0) / history.responseTime.length
+        : 0;
+    return { totalRequests, requestsPerSecond, successRate, avgResponseTime };
+  }
+
   function getRangeInSeconds(range: TimeRange): number {
     switch (range) {
       case '1h': return 3600;
@@ -80,22 +132,31 @@
     }
   }
 
-  // Reactive update of panels based on pluginList store
+  function formatCount(n: number | null | undefined): string {
+    if (n === null || n === undefined || !Number.isFinite(n)) return '—';
+    if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M';
+    if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+    return String(Math.round(n));
+  }
+
+  // Map success rate to a tone for the KPI card
+  function rateTone(rate: number): 'ok' | 'warn' | 'danger' {
+    if (rate >= 99) return 'ok';
+    if (rate >= 95) return 'warn';
+    return 'danger';
+  }
+
   $: {
     const panels: any[] = [];
     const nativePanels: any[] = [];
 
-    $pluginList.forEach(p => {
+    $pluginList.forEach((p) => {
       if (!p.enabled || !p.metadata) return;
 
-      // 处理原生组件（nativeWidgets）- 优先处理
       if (p.metadata.contributes?.nativeWidgets) {
         p.metadata.contributes.nativeWidgets.forEach((widget: any) => {
           const Component = getNativeWidget(widget.component);
-          if (!Component) {
-            console.warn(`Native widget component not found: ${widget.component}`);
-            return;
-          }
+          if (!Component) return;
 
           let w = 1, h = 1;
           switch (widget.size) {
@@ -112,14 +173,13 @@
             title: `plugins.${p.name}.${widget.title}`,
             component: Component,
             props: { pluginName: p.name, selectedRange, ...widget.props },
-            w, h
+            w, h,
           });
         });
       }
 
-      // 处理 iframe 组件（widgets）
       if (p.metadata.contributes?.widgets) {
-        p.metadata.contributes.widgets.forEach(widget => {
+        p.metadata.contributes.widgets.forEach((widget) => {
           let w = 1, h = 1;
           switch (widget.size) {
             case 'medium': w = 2; h = 1; break;
@@ -128,24 +188,16 @@
             case 'small':
             default: w = 1; h = 1; break;
           }
-
-          panels.push({
-            pluginName: p.name,
-            path: widget.path,
-            title: widget.title,
-            w, h
-          });
+          panels.push({ pluginName: p.name, path: widget.path, title: widget.title, w, h });
         });
-      }
-      // Legacy structure: ui.dashboard
-      else if (p.metadata.ui?.dashboard) {
-        p.metadata.ui.dashboard.forEach(panel => {
+      } else if (p.metadata.ui?.dashboard) {
+        p.metadata.ui.dashboard.forEach((panel) => {
           panels.push({
             pluginName: p.name,
             path: panel.path,
             title: panel.title,
             w: panel.size?.w || 1,
-            h: panel.size?.h || 1
+            h: panel.size?.h || 1,
           });
         });
       }
@@ -156,195 +208,253 @@
   }
 
   onMount(() => {
-    // Ensure we have the latest plugins loaded
     refreshPlugins();
+    loadConfig();
+    configInterval = setInterval(loadConfig, 30000);
+  });
+
+  onDestroy(() => {
+    if (configInterval) clearInterval(configInterval);
+  });
+
+  const RANGE_OPTIONS = [
+    { value: '1h',  key: 'monitoring.range.oneHour' },
+    { value: '12h', key: 'monitoring.range.twelveHours' },
+    { value: '24h', key: 'monitoring.range.twentyFourHours' },
+  ];
+
+  $: rangeSegmentOptions = RANGE_OPTIONS.map((o) => ({ value: o.value, label: $_(o.key) }));
+
+  // Build the rows for the SERVICE HEALTH list (parallel to the reference's
+  // CORE CLUSTER list). Pulled from the services config when available.
+  $: serviceRows = (servicesStats?.services ?? []).slice(0, 6).map((s) => {
+    const total = s.endpoints.length;
+    const healthy = s.endpoints.filter((e) => !e.status || e.status === 'HEALTHY').length;
+    const unhealthy = s.endpoints.filter((e) => e.status === 'UNHEALTHY').length;
+    const halfOpen = s.endpoints.filter((e) => e.status === 'HALF_OPEN').length;
+    const ratio = total === 0 ? 0 : (healthy / total) * 100;
+    let status: 'ok' | 'warn' | 'danger' | 'idle' = 'idle';
+    if (total === 0) status = 'idle';
+    else if (unhealthy > 0) status = 'danger';
+    else if (halfOpen > 0) status = 'warn';
+    else status = 'ok';
+    return { name: s.name, total, healthy, unhealthy, halfOpen, ratio, status };
   });
 </script>
 
-<div class="p-6">
-  <h1 class="text-3xl font-bold mb-6">{$_('dashboard.title')}</h1>
-
-  <!-- 时间范围选择器 -->
-  <div class="flex justify-between items-center mb-6">
-    <p class="text-sm text-gray-500">
-      {$_('dashboard.dataRange')}: {$_('monitoring.range.' + selectedRange)}
-    </p>
-    <div class="inline-flex gap-1 p-1 bg-white dark:bg-gray-800 rounded-lg shadow-sm">
-      <label class="cursor-pointer">
-        <input
-          class="sr-only"
-          type="radio"
-          name="range"
-          value="1h"
-          bind:group={selectedRange}
-        />
-        <span
-          class="block px-4 py-1.5 text-sm font-medium rounded-md transition-all"
-          class:bg-primary={selectedRange === '1h'}
-          class:text-primary-content={selectedRange === '1h'}
-          class:shadow={selectedRange === '1h'}
-          class:text-gray-700={selectedRange !== '1h'}
-          class:dark:text-gray-300={selectedRange !== '1h'}
-          class:hover:text-gray-900={selectedRange !== '1h'}
-          class:dark:hover:text-gray-100={selectedRange !== '1h'}
-        >
-          {$_('monitoring.range.oneHour')}
-        </span>
-      </label>
-      <label class="cursor-pointer">
-        <input
-          class="sr-only"
-          type="radio"
-          name="range"
-          value="12h"
-          bind:group={selectedRange}
-        />
-        <span
-          class="block px-4 py-1.5 text-sm font-medium rounded-md transition-all"
-          class:bg-primary={selectedRange === '12h'}
-          class:text-primary-content={selectedRange === '12h'}
-          class:shadow={selectedRange === '12h'}
-          class:text-gray-700={selectedRange !== '12h'}
-          class:dark:text-gray-300={selectedRange !== '12h'}
-          class:hover:text-gray-900={selectedRange !== '12h'}
-          class:dark:hover:text-gray-100={selectedRange !== '12h'}
-        >
-          {$_('monitoring.range.twelveHours')}
-        </span>
-      </label>
-      <label class="cursor-pointer">
-        <input
-          class="sr-only"
-          type="radio"
-          name="range"
-          value="24h"
-          bind:group={selectedRange}
-        />
-        <span
-          class="block px-4 py-1.5 text-sm font-medium rounded-md transition-all"
-          class:bg-primary={selectedRange === '24h'}
-          class:text-primary-content={selectedRange === '24h'}
-          class:shadow={selectedRange === '24h'}
-          class:text-gray-700={selectedRange !== '24h'}
-          class:dark:text-gray-300={selectedRange !== '24h'}
-          class:hover:text-gray-900={selectedRange !== '24h'}
-          class:dark:hover:text-gray-100={selectedRange !== '24h'}
-        >
-          {$_('monitoring.range.twentyFourHours')}
-        </span>
-      </label>
+<div class="px-6 py-5 space-y-5">
+  <!-- ===== Page header bar ============================================ -->
+  <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+    <div class="flex items-center gap-3">
+      <span class="nx-stripe" aria-hidden="true"></span>
+      <div class="flex flex-col leading-tight">
+        <span class="nx-label">// {$_('dashboard.dataRange')}</span>
+        <h1 class="nx-display text-xl text-zinc-50 tracking-[0.02em]">
+          {$_('dashboard.title')}
+        </h1>
+      </div>
     </div>
+    <SegmentedControl
+      ariaLabel={$_('dashboard.dataRange')}
+      options={rangeSegmentOptions}
+      bind:value={selectedRange}
+    />
   </div>
 
-  <!-- 统计卡片 -->
-  {#if calculatedStats}
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-      <div class="card bg-base-100 shadow-xl">
-        <div class="card-body">
-          <h2 class="card-title text-sm">{$_('dashboard.totalRequests')}</h2>
-          <p class="text-3xl font-bold">{calculatedStats.totalRequests}</p>
-        </div>
-      </div>
+  <!-- ===== KPI strip ================================================== -->
+  <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+    <KpiCard
+      label={$_('dashboard.totalRequests')}
+      value={calculatedStats ? formatCount(calculatedStats.totalRequests) : null}
+      unit="REQ"
+    >
+      <svg slot="icon-head" viewBox="0 0 24 24" class="h-3.5 w-3.5 text-zinc-500" fill="none" stroke="currentColor" stroke-width="1.8">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M7 8h10M7 12h6m-6 4h10M5 4h14a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z" />
+      </svg>
+    </KpiCard>
 
-      <div class="card bg-base-100 shadow-xl">
-        <div class="card-body">
-          <h2 class="card-title text-sm">{$_('dashboard.requestsPerSecond')}</h2>
-          <p class="text-3xl font-bold">{calculatedStats.requestsPerSecond.toFixed(2)}</p>
-        </div>
-      </div>
+    <KpiCard
+      label={$_('dashboard.requestsPerSecond')}
+      value={calculatedStats ? calculatedStats.requestsPerSecond.toFixed(2) : null}
+      unit="REQ/S"
+    >
+      <svg slot="icon-head" viewBox="0 0 24 24" class="h-3.5 w-3.5 text-zinc-500" fill="none" stroke="currentColor" stroke-width="1.8">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+      </svg>
+    </KpiCard>
 
-      <div class="card bg-base-100 shadow-xl">
-        <div class="card-body">
-          <h2 class="card-title text-sm">{$_('dashboard.successRate')}</h2>
-          <p class="text-3xl font-bold">{calculatedStats.successRate.toFixed(1)}%</p>
-        </div>
-      </div>
+    <KpiCard
+      label={$_('dashboard.successRate')}
+      value={calculatedStats ? calculatedStats.successRate.toFixed(1) : null}
+      unit="%"
+      tone={calculatedStats ? rateTone(calculatedStats.successRate) : 'auto'}
+    >
+      <svg slot="icon-head" viewBox="0 0 24 24" class="h-3.5 w-3.5 text-zinc-500" fill="none" stroke="currentColor" stroke-width="1.8">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+      </svg>
+    </KpiCard>
 
-      <div class="card bg-base-100 shadow-xl">
-        <div class="card-body">
-          <h2 class="card-title text-sm">{$_('dashboard.avgResponseTime')}</h2>
-          <p class="text-3xl font-bold">{calculatedStats.avgResponseTime.toFixed(0)}ms</p>
-        </div>
+    <KpiCard
+      label={$_('dashboard.avgResponseTime')}
+      value={calculatedStats ? calculatedStats.avgResponseTime.toFixed(0) : null}
+      unit="MS"
+    >
+      <svg slot="icon-head" viewBox="0 0 24 24" class="h-3.5 w-3.5 text-zinc-500" fill="none" stroke="currentColor" stroke-width="1.8">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    </KpiCard>
+
+    <KpiCard
+      label={$_('nav.services')}
+      value={servicesStats ? servicesStats.totalServices : null}
+      unit="UNITS"
+      href="/__ui/#/services"
+      stripe={servicesStats && servicesStats.unhealthyEndpoints > 0 ? 'red' : servicesStats && servicesStats.halfOpenEndpoints > 0 ? 'amber' : 'orange'}
+    >
+      <svg slot="icon-head" viewBox="0 0 24 24" class="h-3.5 w-3.5 text-nexus-500" fill="none" stroke="currentColor" stroke-width="1.8">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+      </svg>
+      <div slot="foot" class="flex flex-wrap items-center gap-x-3 gap-y-1">
+        {#if servicesStats}
+          <span class="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-command">
+            {#if servicesStats.degradedServices === 0}
+              <StatusDot status="ok" />
+              <span class="text-emerald-300">{$_('dashboard.servicesCompact', { values: { healthy: servicesStats.healthyServices, total: servicesStats.totalServices } })}</span>
+            {:else}
+              <StatusDot status="warn" />
+              <span class="text-amber-300">{$_('dashboard.servicesCompact', { values: { healthy: servicesStats.healthyServices, total: servicesStats.totalServices } })}</span>
+            {/if}
+          </span>
+          <span class="font-mono text-[10px] uppercase tracking-command text-zinc-500">
+            {$_('dashboard.endpointsCompact', { values: { total: servicesStats.totalEndpoints } })}
+          </span>
+          {#if servicesStats.unhealthyEndpoints > 0}
+            <span class="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-command">
+              <StatusDot status="danger" />
+              <span class="text-red-300">{$_('dashboard.unhealthyEndpoints', { values: { count: servicesStats.unhealthyEndpoints } })}</span>
+            </span>
+          {/if}
+        {/if}
       </div>
+    </KpiCard>
+  </section>
+
+  <!-- ===== Services health + Monitoring layout ========================= -->
+  <section class="grid grid-cols-1 lg:grid-cols-3 gap-3">
+    <!-- Service health column (left) -->
+    <PanelCard
+      title={$_('nav.services')}
+      tag="HEALTH"
+      class="lg:col-span-1"
+    >
+      <svelte:fragment slot="actions">
+        {#if servicesStats}
+          {#if servicesStats.unhealthyEndpoints > 0}
+            <StatusBadge variant="fault" dot>FAULT</StatusBadge>
+          {:else if servicesStats.halfOpenEndpoints > 0}
+            <StatusBadge variant="standby" dot>WARN</StatusBadge>
+          {:else}
+            <StatusBadge variant="active" dot>NOMINAL</StatusBadge>
+          {/if}
+        {/if}
+      </svelte:fragment>
+
+      {#if serviceRows.length === 0}
+        <div class="py-8 text-center">
+          <p class="nx-label">{$_('dashboard.noData')}</p>
+        </div>
+      {:else}
+        <ul class="space-y-3">
+          {#each serviceRows as row}
+            <li>
+              <div class="flex items-center justify-between gap-3">
+                <div class="flex items-center gap-2 min-w-0">
+                  <StatusDot status={row.status} />
+                  <span class="font-mono text-[12px] font-semibold uppercase tracking-command text-zinc-200 truncate">
+                    {row.name}
+                  </span>
+                </div>
+                <span class="font-mono text-[11px] uppercase tracking-command text-zinc-400 shrink-0">
+                  {row.healthy}/{row.total}
+                </span>
+              </div>
+              <div class="mt-2">
+                <MetricBar
+                  label="HEALTH"
+                  value={row.ratio}
+                  valueLabel="{row.ratio.toFixed(0)}%"
+                  tone={row.status === 'idle' ? 'neutral' : 'auto'}
+                  warnAt={100}
+                  dangerAt={50}
+                />
+              </div>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </PanelCard>
+
+    <!-- Monitoring (right, spans 2 columns) -->
+    <div class="lg:col-span-2">
+      <MonitoringCharts selectedRange={selectedRange} onDataLoaded={handleDataLoaded} />
     </div>
-  {:else}
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-      <div class="card bg-base-100 shadow-xl">
-        <div class="card-body">
-          <h2 class="card-title text-sm">{$_('dashboard.totalRequests')}</h2>
-          <p class="text-3xl font-bold">-</p>
-        </div>
-      </div>
+  </section>
 
-      <div class="card bg-base-100 shadow-xl">
-        <div class="card-body">
-          <h2 class="card-title text-sm">{$_('dashboard.requestsPerSecond')}</h2>
-          <p class="text-3xl font-bold">-</p>
-        </div>
-      </div>
-
-      <div class="card bg-base-100 shadow-xl">
-        <div class="card-body">
-          <h2 class="card-title text-sm">{$_('dashboard.successRate')}</h2>
-          <p class="text-3xl font-bold">-</p>
-        </div>
-      </div>
-
-      <div class="card bg-base-100 shadow-xl">
-        <div class="card-body">
-          <h2 class="card-title text-sm">{$_('dashboard.avgResponseTime')}</h2>
-          <p class="text-3xl font-bold">-</p>
-        </div>
-      </div>
-    </div>
-  {/if}
-
-  <!-- 监控图表 -->
-  <MonitoringCharts
-    selectedRange={selectedRange}
-    onDataLoaded={handleDataLoaded}
-  />
-
-  <!-- 原生插件组件 -->
+  <!-- ===== Native plugin widgets ====================================== -->
   {#if nativeWidgetPanels.length > 0}
-    <div class="divider mt-8">{$_('dashboard.nativeExtensions')}</div>
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-      {#each nativeWidgetPanels as panel (panel.id)}
-        <div
-          class="card bg-base-100 shadow-xl overflow-hidden h-64"
-          class:md:col-span-2={panel.w >= 2}
-          class:lg:col-span-2={panel.w === 2}
-          class:lg:col-span-4={panel.w === 4}
-          class:row-span-2={panel.h >= 2}
-        >
-          <div class="card-body p-2 h-full">
-            <svelte:component this={panel.component} {...panel.props} />
-          </div>
-        </div>
-      {/each}
-    </div>
+    <section class="space-y-3">
+      <SectionDivider label={$_('dashboard.nativeExtensions')} />
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+        {#each nativeWidgetPanels as panel (panel.id)}
+          <PanelCard
+            title={$_(panel.title)}
+            tag={panel.pluginName.toUpperCase()}
+            flush
+            class="h-64 {panel.w >= 2 ? 'md:col-span-2' : ''} {panel.w === 2 ? 'lg:col-span-2' : ''} {panel.w === 4 ? 'lg:col-span-4' : ''} {panel.h >= 2 ? 'row-span-2' : ''}"
+          >
+            <div class="p-2 h-full">
+              <svelte:component this={panel.component} {...panel.props} />
+            </div>
+          </PanelCard>
+        {/each}
+      </div>
+    </section>
   {/if}
 
-  <!-- iframe 插件面板 -->
+  <!-- ===== iframe plugin panels ======================================= -->
   {#if pluginPanels.length > 0}
-    <div class="divider mt-8">Extensions</div>
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-      {#each pluginPanels as panel}
-        <div
-          class="card bg-base-100 shadow-xl overflow-hidden h-64"
-          class:md:col-span-2={panel.w >= 2}
-          class:lg:col-span-2={panel.w === 2}
-          class:lg:col-span-4={panel.w === 4}
-          class:row-span-2={panel.h >= 2}
-        >
-          <div class="card-body p-0 relative h-full">
-            <div class="absolute top-2 right-2 z-10 opacity-50 text-xs bg-base-200 px-2 py-1 rounded">
-              {panel.title}
-            </div>
+    <section class="space-y-3">
+      <SectionDivider label="EXTENSIONS" />
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+        {#each pluginPanels as panel}
+          <PanelCard
+            title={panel.title}
+            tag={panel.pluginName.toUpperCase()}
+            flush
+            class="h-64 {panel.w >= 2 ? 'md:col-span-2' : ''} {panel.w === 2 ? 'lg:col-span-2' : ''} {panel.w === 4 ? 'lg:col-span-4' : ''} {panel.h >= 2 ? 'row-span-2' : ''}"
+          >
             <PluginHost pluginName={panel.pluginName} path={panel.path} />
-          </div>
-        </div>
-      {/each}
-    </div>
+          </PanelCard>
+        {/each}
+      </div>
+    </section>
   {/if}
+
+  <!-- ===== Footer alert =============================================== -->
+  <SystemAlertBar
+    tone={servicesStats && servicesStats.unhealthyEndpoints > 0 ? 'warn' : 'info'}
+    title={servicesStats && servicesStats.unhealthyEndpoints > 0
+      ? $_('dashboard.unhealthyEndpoints', { values: { count: servicesStats.unhealthyEndpoints } })
+      : 'BUNGEE REVERSE PROXY'}
+    subtitle={servicesStats && servicesStats.unhealthyEndpoints > 0
+      ? `${servicesStats.totalEndpoints} endpoints monitored · ${servicesStats.healthyEndpoints} healthy`
+      : `${servicesStats?.totalEndpoints ?? 0} endpoints monitored · sync range ${selectedRange}`}
+  >
+    <a slot="action" href="/__ui/#/services" class="nx-btn-outline">
+      <span>{$_('nav.services')}</span>
+      <svg viewBox="0 0 24 24" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2.4">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+      </svg>
+    </a>
+  </SystemAlertBar>
 </div>

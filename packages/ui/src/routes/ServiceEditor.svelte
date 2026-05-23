@@ -1,0 +1,644 @@
+<script lang="ts">
+  import { onMount, onDestroy } from 'svelte';
+  import { pop } from 'svelte-spa-router';
+  import { sortBy } from 'lodash-es';
+  import { ServicesAPI, type Service } from '../lib/api/services';
+  import { RoutesAPI, type Route } from '../lib/api/routes';
+  import { validateWeights, type ValidationError } from '../lib/validation';
+  import UpstreamsSection from '../lib/components/sections/UpstreamsSection.svelte';
+  import FailoverSection from '../lib/components/sections/FailoverSection.svelte';
+  import StickySessionEditor from '../lib/components/StickySessionEditor.svelte';
+  import RelationshipLink from '../lib/components/RelationshipLink.svelte';
+  import HealthSummary from '../lib/components/HealthSummary.svelte';
+  import EndpointQuickPreview from '../lib/components/EndpointQuickPreview.svelte';
+  import FeatureBadge from '../lib/components/FeatureBadge.svelte';
+  import ConfirmDialog from '../lib/components/ConfirmDialog.svelte';
+  import { getServiceConsumers, getServiceHealthAggregate, getRouteFeatureBadges } from '../lib/utils/route-service-view-model';
+  import { toast } from '../lib/stores/toast';
+  import { _ } from '../lib/i18n';
+  import { v4 as uuidv4 } from 'uuid';
+  import { getModifierKey, isModifierPressed } from '../lib/utils/platform';
+  import { PanelCard, StatusBadge, StatusDot, SystemAlertBar } from '../lib/components/industrial';
+
+  export let params: { name?: string } = {};
+
+  let isEditMode = false;
+  let originalName = '';
+  let loading = true;
+  let saving = false;
+  type SectionId = 'identity' | 'endpoints' | 'availability' | 'consumers' | 'review';
+  let activeSection: SectionId = 'identity';
+  let showValidationDetails = false;
+  let allRoutes: Route[] = [];
+
+  let service: Service = {
+    name: '',
+    description: '',
+    endpoints: [{ _uid: uuidv4(), target: '', weight: 100, priority: 1 }],
+    failover: { enabled: false },
+    health_check: { enabled: false },
+    sticky_session: { enabled: false },
+  };
+
+  let errors: ValidationError[] = [];
+  let weightErrors: ValidationError[] = [];
+  let allErrors: ValidationError[] = [];
+  let isValid = false;
+  let validationDebounce: any = null;
+
+  let lastAutoSave: number | null = null;
+  let autoSaveInterval: any = null;
+
+  // Confirm dialog (uses industrial ConfirmDialog now)
+  let showConfirmDialog = false;
+  let confirmDialogTitle = '';
+  let confirmDialogMessage = '';
+  let confirmDialogCallback: (() => void) | null = null;
+
+  function showConfirm(title: string, message: string, callback: () => void) {
+    confirmDialogTitle = title;
+    confirmDialogMessage = message;
+    confirmDialogCallback = callback;
+    showConfirmDialog = true;
+  }
+
+  function handleConfirmYes() {
+    showConfirmDialog = false;
+    if (confirmDialogCallback) {
+      confirmDialogCallback();
+      confirmDialogCallback = null;
+    }
+  }
+
+  function handleConfirmNo() {
+    showConfirmDialog = false;
+    confirmDialogCallback = null;
+  }
+
+  function handleKeydown(event: KeyboardEvent) {
+    if ((event.metaKey || event.ctrlKey) && event.key === 's') {
+      event.preventDefault();
+      if (isValid && !saving) handleSave();
+    }
+    if (event.key === 'Escape') handleCancel();
+    if (event.key >= '1' && event.key <= '5' && isModifierPressed(event) && !event.altKey) {
+      const sections: SectionId[] = ['identity', 'endpoints', 'availability', 'consumers', 'review'];
+      const target = sections[parseInt(event.key) - 1];
+      if (target) {
+        activeSection = target;
+        event.preventDefault();
+      }
+    }
+  }
+
+  function autoSaveDraft() {
+    if (!isEditMode) {
+      try {
+        localStorage.setItem('bungee-service-draft', JSON.stringify(service));
+        lastAutoSave = Date.now();
+      } catch (e) {
+        console.error('Failed to auto-save draft:', e);
+      }
+    }
+  }
+
+  function formatRelativeTime(timestamp: number): string {
+    const seconds = Math.floor((Date.now() - timestamp) / 1000);
+    if (seconds < 60) return $_('autosave.justNow');
+    if (seconds < 3600) return $_('autosave.minutesAgo', { values: { minutes: Math.floor(seconds / 60) } });
+    return $_('autosave.hoursAgo', { values: { hours: Math.floor(seconds / 3600) } });
+  }
+
+  async function performValidation() {
+    const currentErrors: ValidationError[] = [];
+    if (!service.name) {
+      currentErrors.push({ field: 'name', message: $_('validation.fieldRequired') });
+    } else if (!/^[a-z0-9-]+$/.test(service.name)) {
+      currentErrors.push({ field: 'name', message: $_('serviceEditor.serviceNameHelp') });
+    }
+    if (!service.endpoints || service.endpoints.length === 0) {
+      currentErrors.push({ field: 'endpoints', message: $_('validation.upstreamRequired') });
+    }
+    const currentWeightErrors = validateWeights(service.endpoints);
+    errors = currentErrors;
+    weightErrors = currentWeightErrors;
+    allErrors = [...currentErrors, ...currentWeightErrors];
+    isValid = allErrors.length === 0;
+  }
+
+  $: {
+    service && (() => {
+      if (validationDebounce) clearTimeout(validationDebounce);
+      validationDebounce = setTimeout(() => performValidation(), 300);
+    })();
+  }
+
+  $: consumers = getServiceConsumers(service.name, allRoutes);
+  $: healthAggregate = getServiceHealthAggregate(service);
+
+  async function handleSave() {
+    if (!isValid) return;
+    try {
+      saving = true;
+      const sortedService = {
+        ...service,
+        endpoints: sortBy(service.endpoints, [(e: any) => e.priority ?? 1]).map(({ _uid, ...e }: any) => e),
+      };
+      if (isEditMode) {
+        await ServicesAPI.update(originalName, sortedService);
+        toast.show($_('serviceEditor.serviceUpdated'), 'success');
+      } else {
+        await ServicesAPI.create(sortedService);
+        toast.show($_('serviceEditor.serviceSaved'), 'success');
+        localStorage.removeItem('bungee-service-draft');
+      }
+      pop();
+    } catch (e: any) {
+      toast.show(e.message || $_('serviceEditor.saveFailed'), 'error');
+    } finally {
+      saving = false;
+    }
+  }
+
+  function handleCancel() {
+    showConfirm(
+      $_('confirmDialog.cancelTitle'),
+      $_('confirmDialog.cancelMessage'),
+      () => pop()
+    );
+  }
+
+  onMount(async () => {
+    window.addEventListener('keydown', handleKeydown);
+    autoSaveInterval = setInterval(() => autoSaveDraft(), 30000);
+
+    try {
+      allRoutes = await RoutesAPI.list();
+    } catch (e) {
+      console.error('Failed to load routes for consumers:', e);
+    }
+
+    if (params.name) {
+      isEditMode = true;
+      originalName = decodeURIComponent(params.name);
+      try {
+        const existingService = await ServicesAPI.get(originalName);
+        if (existingService) {
+          service = {
+            ...existingService,
+            health_check: existingService.health_check ?? { enabled: false },
+            failover: existingService.failover ?? { enabled: false },
+            sticky_session: existingService.sticky_session ?? { enabled: false },
+            endpoints: existingService.endpoints.map((e) => ({ ...e, _uid: uuidv4() })),
+          };
+        } else {
+          toast.show($_('serviceEditor.serviceNotFound'), 'error');
+          pop();
+        }
+      } catch (e: any) {
+        toast.show(e.message, 'error');
+        pop();
+      }
+    } else {
+      try {
+        const draft = localStorage.getItem('bungee-service-draft');
+        if (draft) {
+          const parsedDraft = JSON.parse(draft);
+          showConfirm(
+            $_('confirmDialog.restoreDraftTitle'),
+            $_('confirmDialog.restoreDraftMessage'),
+            () => {
+              service = {
+                ...parsedDraft,
+                sticky_session: parsedDraft.sticky_session ?? { enabled: false },
+              };
+            }
+          );
+        }
+      } catch (e) {
+        console.error('Failed to restore draft:', e);
+      }
+    }
+    loading = false;
+  });
+
+  onDestroy(() => {
+    window.removeEventListener('keydown', handleKeydown);
+    if (autoSaveInterval) clearInterval(autoSaveInterval);
+  });
+
+  // Navigation items for the side rail
+  $: navItems = loading ? [] : ([
+    {
+      id: 'identity'     as SectionId,
+      label: $_('serviceEditor.builder.identity'),
+      icon: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
+      badge: '',
+    },
+    {
+      id: 'endpoints'    as SectionId,
+      label: $_('serviceEditor.builder.endpoints'),
+      icon: 'M13 10V3L4 14h7v7l9-11h-7z',
+      badge: String(service.endpoints.length),
+    },
+    {
+      id: 'availability' as SectionId,
+      label: $_('serviceEditor.builder.availability'),
+      icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
+      badge: (service.health_check?.enabled || service.failover?.enabled || service.sticky_session?.enabled) ? '✓' : '',
+    },
+    {
+      id: 'consumers'    as SectionId,
+      label: $_('serviceEditor.builder.consumers'),
+      icon: 'M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z',
+      badge: consumers.count > 0 ? String(consumers.count) : '',
+    },
+    {
+      id: 'review'       as SectionId,
+      label: $_('serviceEditor.builder.review'),
+      icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4',
+      badge: '',
+    },
+  ]);
+</script>
+
+<div class="min-h-screen flex flex-col">
+  <!-- ===== Breadcrumb header ======================================= -->
+  <div class="border-b border-carbon-600 bg-carbon-900/70 backdrop-blur sticky top-16 z-30">
+    <div class="max-w-7xl mx-auto px-6 py-3">
+      <nav class="flex items-center gap-2 font-mono text-[11px] uppercase tracking-command">
+        <button type="button" class="text-zinc-500 hover:text-nexus-300 transition-colors" on:click={() => (window.location.hash = '/')}>
+          {$_('breadcrumb.home')}
+        </button>
+        <span class="text-zinc-700">/</span>
+        <button type="button" class="text-zinc-500 hover:text-nexus-300 transition-colors" on:click={() => (window.location.hash = '/services')}>
+          {$_('breadcrumb.services')}
+        </button>
+        <span class="text-zinc-700">/</span>
+        <span class="text-nexus-300 flex items-center gap-2">
+          <span>{isEditMode ? $_('breadcrumb.editService') : $_('breadcrumb.newService')}</span>
+          {#if isEditMode}
+            <code class="px-1.5 py-0.5 border border-carbon-500 bg-carbon-900 text-zinc-300 normal-case">{originalName}</code>
+          {/if}
+        </span>
+      </nav>
+    </div>
+  </div>
+
+  {#if loading}
+    <div class="flex-1 flex justify-center items-center">
+      <div class="flex flex-col items-center gap-3">
+        <div class="relative h-10 w-10">
+          <div class="absolute inset-0 border border-nexus-500/30"></div>
+          <div class="absolute inset-0 border-t-2 border-nexus-500 animate-spin"></div>
+        </div>
+        <span class="nx-label">LOADING SERVICE</span>
+      </div>
+    </div>
+  {:else}
+    <div class="max-w-7xl mx-auto w-full flex flex-col lg:flex-row gap-4 p-4 sm:p-6 pb-32">
+      <!-- ===== Side nav ============================================== -->
+      <aside class="w-full lg:w-56 flex-shrink-0" data-testid="service-builder-nav">
+        <div class="lg:sticky lg:top-32 space-y-3">
+          <PanelCard title="BUILDER" tag="NAV" flush>
+            <ul class="divide-y divide-carbon-600">
+              {#each navItems as item}
+                <li>
+                  <button
+                    class="nx-side-nav-btn"
+                    class:is-active={activeSection === item.id}
+                    on:click={() => (activeSection = item.id)}
+                  >
+                    {#if activeSection === item.id}
+                      <span class="nx-caret-left mr-1.5" aria-hidden="true"></span>
+                    {:else}
+                      <span class="inline-block w-[5px] h-2 mr-1.5"></span>
+                    {/if}
+                    <svg viewBox="0 0 24 24" class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" stroke-width="1.8">
+                      <path stroke-linecap="round" stroke-linejoin="round" d={item.icon} />
+                    </svg>
+                    <span class="flex-1 text-left truncate">{item.label}</span>
+                    {#if item.badge}
+                      <span class="font-mono text-[10px] uppercase tracking-command px-1.5 py-0.5 border border-carbon-500 text-zinc-400">
+                        {item.badge}
+                      </span>
+                    {/if}
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          </PanelCard>
+
+          <PanelCard title={$_('shortcuts.title')} tag="KEYS">
+            <ul class="space-y-1.5 font-mono text-[11px]">
+              <li class="flex items-center gap-1.5">
+                <kbd class="nx-kbd">{getModifierKey()}</kbd><span class="text-zinc-600">+</span><kbd class="nx-kbd">S</kbd>
+                <span class="text-zinc-400 ml-2">{$_('shortcuts.save')}</span>
+              </li>
+              <li class="flex items-center gap-1.5">
+                <kbd class="nx-kbd">{getModifierKey()}</kbd><span class="text-zinc-600">+</span><kbd class="nx-kbd">1-5</kbd>
+                <span class="text-zinc-400 ml-2">{$_('shortcuts.switchSection')}</span>
+              </li>
+              <li class="flex items-center gap-1.5">
+                <kbd class="nx-kbd">Esc</kbd>
+                <span class="text-zinc-400 ml-2">{$_('shortcuts.cancel')}</span>
+              </li>
+            </ul>
+          </PanelCard>
+        </div>
+      </aside>
+
+      <!-- ===== Content panel ======================================= -->
+      <section class="flex-1 min-w-0 space-y-4">
+        {#if activeSection === 'identity'}
+          <PanelCard title={$_('serviceEditor.builder.identity')} tag="ID-01">
+            <div class="space-y-5">
+              <label class="block space-y-1.5">
+                <span class="nx-label">// {$_('serviceEditor.serviceName')} <span class="text-red-400">*</span></span>
+                <input
+                  type="text"
+                  bind:value={service.name}
+                  placeholder={$_('serviceEditor.serviceNamePlaceholder')}
+                  class="nx-input"
+                  class:border-red-500={errors.some((e) => e.field === 'name')}
+                />
+                <span class="font-mono text-[10px] uppercase tracking-command text-zinc-500">
+                  {$_('serviceEditor.serviceNameHelp')}
+                </span>
+                {#if errors.some((e) => e.field === 'name')}
+                  <span class="block font-mono text-[10px] uppercase tracking-command text-red-300">
+                    {errors.find((e) => e.field === 'name')?.message}
+                  </span>
+                {/if}
+              </label>
+
+              <label class="block space-y-1.5">
+                <span class="nx-label">// {$_('upstream.description')}</span>
+                <textarea
+                  bind:value={service.description}
+                  placeholder={$_('upstream.descriptionPlaceholder')}
+                  class="nx-input h-24 py-2 resize-y"
+                ></textarea>
+              </label>
+            </div>
+          </PanelCard>
+
+        {:else if activeSection === 'endpoints'}
+          <PanelCard title={$_('serviceEditor.builder.endpoints')} tag="EP-{service.endpoints.length}">
+            <UpstreamsSection bind:route={service} {errors} {weightErrors} />
+          </PanelCard>
+
+        {:else if activeSection === 'availability'}
+          <div class="space-y-4" data-testid="service-section-availability">
+            <PanelCard title={$_('routeEditor.activeHealthCheck')} tag="HC-01">
+              <div class="flex items-center justify-between gap-4 pb-3 border-b border-carbon-600">
+                <p class="text-sm text-zinc-400">{$_('routeEditor.activeHealthCheckTooltip')}</p>
+                <input type="checkbox" class="toggle toggle-primary" bind:checked={service.health_check.enabled} />
+              </div>
+
+              {#if service.health_check.enabled}
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-4">
+                  <label class="block space-y-1.5">
+                    <span class="nx-label">// {$_('routeEditor.healthCheckPath')}</span>
+                    <input type="text" bind:value={service.health_check.path} placeholder="/health" class="nx-input" />
+                  </label>
+                  <label class="block space-y-1.5">
+                    <span class="nx-label">// {$_('routeEditor.healthCheckIntervalMs')}</span>
+                    <input type="number" bind:value={service.health_check.interval_ms} placeholder="10000" class="nx-input" />
+                  </label>
+                  <label class="block space-y-1.5">
+                    <span class="nx-label">// {$_('routeEditor.healthCheckTimeoutMs')}</span>
+                    <input type="number" bind:value={service.health_check.timeout_ms} placeholder="3000" class="nx-input" />
+                  </label>
+                  <label class="block space-y-1.5">
+                    <span class="nx-label">// {$_('routeEditor.healthCheckExpectedStatus')}</span>
+                    <input type="text" bind:value={service.health_check.expected_status} placeholder="200" class="nx-input" />
+                  </label>
+                </div>
+              {/if}
+            </PanelCard>
+
+            <PanelCard title="FAILOVER" tag="FO-01">
+              <FailoverSection bind:route={service} />
+            </PanelCard>
+
+            <PanelCard title={$_('routeEditor.stickySessionTitle')} tag="SS-01">
+              <p class="text-xs text-zinc-500 mb-3">{$_('routeEditor.stickySessionHelp')}</p>
+              <StickySessionEditor bind:service={service} />
+            </PanelCard>
+          </div>
+
+        {:else if activeSection === 'consumers'}
+          <PanelCard title={$_('serviceEditor.consumersTitle')} tag={consumers.count > 0 ? `N=${consumers.count}` : 'NONE'}>
+            <p class="text-xs text-zinc-500 mb-4">{$_('serviceEditor.consumersHelp')}</p>
+
+            {#if service.name}
+              {#if consumers.count > 0}
+                <div class="space-y-2" data-testid="service-consumers-list">
+                  {#each consumers.routes as consumerRoute}
+                    <div class="flex items-center justify-between gap-3 border border-carbon-600 bg-carbon-900/60 px-3 py-2 hover:bg-carbon-700/40 transition-colors">
+                      <RelationshipLink type="route" name={consumerRoute.path} />
+                      <div class="flex items-center gap-1 flex-wrap">
+                        {#each getRouteFeatureBadges(consumerRoute) as badge}
+                          <FeatureBadge {badge} />
+                        {/each}
+                      </div>
+                    </div>
+                  {/each}
+                </div>
+              {:else}
+                <div class="py-10 text-center border border-dashed border-carbon-500">
+                  <svg viewBox="0 0 24 24" class="h-10 w-10 mx-auto text-zinc-600 mb-3" fill="none" stroke="currentColor" stroke-width="1.4">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 010 5.656m-5.656 0a4 4 0 010-5.656m9.9-2.12a8 8 0 010 11.314m-14.142 0a8 8 0 010-11.314" />
+                  </svg>
+                  <p class="font-mono text-[11px] uppercase tracking-command text-zinc-500">{$_('serviceEditor.noConsumers')}</p>
+                </div>
+              {/if}
+            {:else}
+              <div class="py-8 text-center">
+                <p class="font-mono text-[11px] uppercase tracking-command text-zinc-500">{$_('serviceEditor.consumersNameRequired')}</p>
+              </div>
+            {/if}
+          </PanelCard>
+
+        {:else if activeSection === 'review'}
+          <div class="space-y-4" data-testid="service-review-summary">
+            <PanelCard title={$_('serviceEditor.reviewTitle')} tag="REVIEW">
+              <p class="text-xs text-zinc-500 mb-4">{$_('serviceEditor.reviewHelp')}</p>
+
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div class="border border-carbon-600 bg-carbon-900/60 px-3 py-2">
+                  <span class="nx-label-sm block mb-1">{$_('serviceEditor.serviceName')}</span>
+                  <p class="font-mono text-[12px] text-zinc-100 truncate" title={service.name}>{service.name || '—'}</p>
+                  <p class="font-mono text-[10px] text-zinc-500 mt-0.5 truncate">{service.description || $_('serviceEditor.reviewNoDescription')}</p>
+                </div>
+                <div class="border border-carbon-600 bg-carbon-900/60 px-3 py-2">
+                  <span class="nx-label-sm block mb-1">{$_('services.endpointLabel')}</span>
+                  <p class="nx-display text-2xl text-nexus-300">{service.endpoints.length}</p>
+                  <p class="font-mono text-[10px] text-zinc-500 mt-0.5">
+                    {$_('serviceEditor.reviewTotalWeight', { values: { weight: service.endpoints.reduce((sum, e) => sum + (e.weight || 100), 0) } })}
+                  </p>
+                </div>
+                <div class="border border-carbon-600 bg-carbon-900/60 px-3 py-2">
+                  <span class="nx-label-sm block mb-1">{$_('services.consumerLabel')}</span>
+                  <p class="nx-display text-2xl text-zinc-100">{consumers.count}</p>
+                  <p class="font-mono text-[10px] text-zinc-500 mt-0.5">
+                    {$_('serviceEditor.consumersRoutesCount', { values: { count: consumers.count } })}
+                  </p>
+                </div>
+              </div>
+            </PanelCard>
+
+            <PanelCard title={$_('routeEditor.upstreams')} tag="EP-LIST">
+              <EndpointQuickPreview endpoints={service.endpoints} limit={5} />
+            </PanelCard>
+
+            <PanelCard title={$_('serviceEditor.builder.availability')} tag="AVAIL">
+              <div class="space-y-2">
+                <div class="flex items-center gap-3">
+                  <HealthSummary aggregate={healthAggregate} />
+                  <span class="font-mono text-[11px] uppercase tracking-command text-zinc-400">{$_('serviceEditor.reviewHealthStatus')}</span>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 pt-2 border-t border-carbon-600">
+                  {#if service.health_check?.enabled}
+                    <StatusBadge variant="active" dot>{$_('serviceEditor.healthCheck')}</StatusBadge>
+                  {:else}
+                    <StatusBadge variant="muted">{$_('serviceEditor.healthCheck')}</StatusBadge>
+                  {/if}
+                  {#if service.failover?.enabled}
+                    <StatusBadge variant="active" dot>{$_('serviceEditor.failover')}</StatusBadge>
+                  {:else}
+                    <StatusBadge variant="muted">{$_('serviceEditor.failover')}</StatusBadge>
+                  {/if}
+                  {#if service.sticky_session?.enabled}
+                    <StatusBadge variant="active" dot>{$_('routeEditor.stickySessionTitle')}</StatusBadge>
+                  {:else}
+                    <StatusBadge variant="muted">{$_('routeEditor.stickySessionTitle')}</StatusBadge>
+                  {/if}
+                </div>
+              </div>
+            </PanelCard>
+          </div>
+        {/if}
+      </section>
+    </div>
+  {/if}
+
+  <!-- ===== Bottom action bar ===================================== -->
+  <div class="fixed bottom-0 left-0 right-0 bg-carbon-950 border-t border-carbon-600 shadow-industrial-lg z-40">
+    <div class="max-w-7xl mx-auto px-6 py-3">
+      <div class="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+        <div class="flex items-center gap-4 min-w-0">
+          {#if allErrors.length > 0}
+            <div class="flex items-center gap-2 min-w-0">
+              <StatusDot status="danger" />
+              <span class="font-mono text-[11px] uppercase tracking-command text-red-300">
+                {allErrors.length} {$_('validation.errors')}
+              </span>
+              <button class="font-mono text-[10px] uppercase tracking-command text-zinc-400 hover:text-nexus-300 hover:underline transition-colors" on:click={() => (showValidationDetails = !showValidationDetails)}>
+                [{showValidationDetails ? $_('common.hide') : $_('common.show')}]
+              </button>
+            </div>
+          {:else if isValid}
+            <div class="flex items-center gap-2">
+              <StatusDot status="ok" />
+              <span class="font-mono text-[11px] uppercase tracking-command text-emerald-300">
+                {$_('validation.allGood')}
+              </span>
+            </div>
+          {/if}
+          {#if lastAutoSave && !isEditMode}
+            <span class="font-mono text-[10px] uppercase tracking-command text-zinc-500 hidden md:inline">
+              {$_('autosave.lastSaved')}: {formatRelativeTime(lastAutoSave)}
+            </span>
+          {/if}
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button class="nx-btn-ghost" on:click={handleCancel} disabled={saving}>
+            {$_('common.cancel')}
+          </button>
+          <button class="nx-btn-primary" disabled={!isValid || saving} on:click={handleSave} data-testid="service-save-button">
+            {#if saving}
+              <span class="inline-block h-3 w-3 border border-current border-t-transparent animate-spin"></span>
+            {:else}
+              <svg viewBox="0 0 24 24" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2.4">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+              </svg>
+            {/if}
+            {$_('common.save')}
+          </button>
+        </div>
+      </div>
+
+      {#if showValidationDetails && allErrors.length > 0}
+        <div class="mt-3 border border-red-500/40 bg-red-500/5 px-3 py-2">
+          <ul class="space-y-1">
+            {#each allErrors as err}
+              <li class="flex items-start gap-2 font-mono text-[11px]">
+                <span class="text-red-400">×</span>
+                <span class="text-red-200">{err.field}:</span>
+                <span class="text-zinc-400">{err.message}</span>
+              </li>
+            {/each}
+          </ul>
+        </div>
+      {/if}
+    </div>
+  </div>
+
+  <!-- Confirm dialog (industrial) -->
+  <ConfirmDialog
+    bind:open={showConfirmDialog}
+    title={confirmDialogTitle}
+    message={confirmDialogMessage}
+    confirmText={$_('confirmDialog.yes')}
+    cancelText={$_('confirmDialog.no')}
+    confirmClass="btn-primary"
+    on:confirm={handleConfirmYes}
+    on:cancel={handleConfirmNo}
+  />
+</div>
+
+<style>
+  /* Side-nav button — flat industrial row in the BUILDER panel. */
+  :global(.nx-side-nav-btn) {
+    display: inline-flex;
+    width: 100%;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 0.875rem;
+    font-family: 'DM Mono', 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #a1a1aa;
+    background: transparent;
+    transition: color 0.12s ease-out, background-color 0.12s ease-out;
+  }
+  :global(.nx-side-nav-btn:hover) {
+    color: #fdba74;
+    background-color: rgba(249, 115, 22, 0.04);
+  }
+  :global(.nx-side-nav-btn.is-active) {
+    color: #fb923c;
+    background-color: rgba(249, 115, 22, 0.08);
+  }
+
+  /* Industrial keyboard glyph */
+  :global(.nx-kbd) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    padding: 0 4px;
+    height: 18px;
+    border: 1px solid #2a2f3a;
+    background: #15171c;
+    color: #d4d4d8;
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    line-height: 1;
+  }
+</style>
