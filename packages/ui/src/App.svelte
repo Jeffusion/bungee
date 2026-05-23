@@ -11,6 +11,8 @@
   import Configuration from './routes/Configuration.svelte';
   import RoutesIndex from './routes/RoutesIndex.svelte';
   import RouteEditor from './routes/RouteEditor.svelte';
+  import ServicesIndex from './routes/ServicesIndex.svelte';
+  import ServiceEditor from './routes/ServiceEditor.svelte';
   import Logs from './routes/Logs.svelte';
   import Login from './routes/Login.svelte';
   import NotFound from './routes/NotFound.svelte';
@@ -19,34 +21,28 @@
   import PluginsPage from './routes/Plugins.svelte';
   import PluginDetailLayout from './routes/PluginDetailLayout.svelte';
   import DesignSystem from './routes/DesignSystem.svelte';
+  import { HudClock, StatusBadge } from './lib/components/industrial';
 
-  // i18n 已在模块级别初始化，无需在组件中初始化
+  let secureChannel = false;
 
-  // 语言切换下拉菜单
   function handleLocaleChange(newLocale: string) {
     switchLocale(newLocale);
   }
 
-  // 认证检查
   onMount(async () => {
     try {
-      // 加载插件翻译（在应用启动时）
       await loadPluginTranslations();
-
-      // 加载插件列表 (Global Store)
       refreshPlugins();
 
-      // 1. 检查是否需要认证
       const config = await getConfig();
       const needAuth = config.auth?.enabled || false;
       authRequired.set(needAuth);
+      secureChannel = needAuth;
 
       if (needAuth) {
-        // 2. 检查是否已登录
         const token = getToken();
         isAuthenticated.set(!!token);
 
-        // 3. 如果未登录且不在登录页面，重定向到登录页面
         if (!token && $location !== '/login') {
           window.location.hash = '#/login';
         }
@@ -56,233 +52,261 @@
     }
   });
 
-  // 退出登录
   function handleLogout() {
     if (confirm($_('login.logoutConfirm'))) {
       logout();
       window.location.hash = '#/login';
     }
   }
+
+  // Navigation items — each renders as a tab with a left orange caret when active.
+  // Guard against $isLoading: svelte-i18n raises if `$_` is called before its
+  // initial locale resource finishes loading. The translation stores get
+  // re-evaluated automatically once $isLoading flips to false.
+  $: navItems = $isLoading
+    ? []
+    : (() => {
+        const items: Array<{ href: string; label: string; isActive: boolean }> = [
+          { href: '/__ui/#/',         label: $_('nav.dashboard'),     isActive: $location === '/' },
+          { href: '/__ui/#/routes',   label: $_('nav.routes'),        isActive: $location.startsWith('/routes') },
+          { href: '/__ui/#/services', label: $_('nav.services'),      isActive: $location.startsWith('/services') },
+          { href: '/__ui/#/logs',     label: $_('nav.logs'),          isActive: $location === '/logs' },
+          { href: '/__ui/#/config',   label: $_('nav.configuration'), isActive: $location === '/config' },
+          { href: '/__ui/#/plugins',  label: $_('nav.plugins'),       isActive: $location.startsWith('/plugins') },
+        ];
+        // Plugin nav contributions
+        $pluginList.forEach((plugin) => {
+          if (!plugin.enabled) return;
+          const navs = plugin.metadata?.contributes?.navigation;
+          if (navs) {
+            navs.forEach((nav: any) => {
+              if (nav.target === 'header') {
+                items.push({
+                  href: `/__ui/#/extensions/${plugin.name}${nav.path}`,
+                  label: nav.label,
+                  isActive: $location.startsWith(`/extensions/${plugin.name}${nav.path}`),
+                });
+              }
+            });
+          } else if (plugin.metadata?.menus) {
+            plugin.metadata.menus.forEach((menu: any) => {
+              if (menu.location === 'header') {
+                items.push({
+                  href: `/__ui/#/extensions/${plugin.name}${menu.path}`,
+                  label: menu.title,
+                  isActive: $location.startsWith(`/extensions/${plugin.name}${menu.path}`),
+                });
+              }
+            });
+          }
+        });
+        return items;
+      })();
+
+  $: isOnLogin = $location === '/login';
 </script>
 
 {#if $isLoading}
-  <!-- i18n 加载中 -->
-  <div class="min-h-screen bg-base-200 flex items-center justify-center">
+  <!-- i18n bootstrap -->
+  <div class="min-h-screen flex items-center justify-center bg-carbon-950">
     <div class="flex flex-col items-center gap-4">
-      <span class="loading loading-spinner loading-lg"></span>
-      <p class="text-base-content/60">Loading...</p>
+      <div class="relative h-12 w-12">
+        <div class="absolute inset-0 border border-nexus-500/30"></div>
+        <div class="absolute inset-0 border-t-2 border-nexus-500 animate-spin"></div>
+      </div>
+      <p class="nx-label">INITIALIZING</p>
     </div>
   </div>
 {:else}
-  <div class="min-h-screen bg-base-200">
-  <!-- Header -->
-  <div class="navbar bg-base-100 shadow-lg sticky top-0 z-50">
-    <div class="flex-1">
-      <a href="/__ui/#/" class="flex items-center gap-2 px-4 py-2 hover:bg-base-200 rounded-lg transition-colors">
-        <!-- Logo Icon -->
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 3L5 13h6l-1 8l8-11h-6l1-7z" />
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l3 0m0 0l0 -3" class="text-accent" />
-          <circle cx="20" cy="8" r="1.5" fill="currentColor" stroke="none" class="text-accent" />
-        </svg>
-        <!-- Brand -->
-        <div class="flex flex-col">
-          <span class="text-xl font-bold">Bungee</span>
-          <span class="text-xs text-base-content/60">Reverse Proxy</span>
-        </div>
-      </a>
-    </div>
+  <div class="min-h-screen bg-carbon-950 text-zinc-200 flex flex-col">
+    {#if !isOnLogin}
+      <!-- Top accent hairline -->
+      <div class="h-px bg-gradient-to-r from-transparent via-nexus-500 to-transparent"></div>
 
-    <!-- Navigation -->
-    <div class="flex-none">
-      <ul class="menu menu-horizontal px-1 gap-1">
-        <li>
-          <a
-            href="/__ui/#/"
-            class:active={$location === '/'}
-            class="flex items-center gap-2"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+      <!-- ===== HUD top bar — 64px =================================== -->
+      <header
+        class="sticky top-0 z-50 h-16 flex items-stretch border-b border-carbon-600 bg-carbon-950/95 backdrop-blur"
+      >
+        <!-- Brand block -->
+        <a
+          href="/__ui/#/"
+          class="flex items-center gap-3 px-5 hover:bg-carbon-800/60 transition-colors"
+        >
+          <span class="relative flex h-9 w-9 items-center justify-center border border-nexus-500/60 bg-carbon-900">
+            <svg viewBox="0 0 24 24" class="h-5 w-5 text-nexus-500" fill="none" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M13 3L5 13h6l-1 8l8-11h-6l1-7z" />
             </svg>
-            <span>{$_('nav.dashboard')}</span>
-          </a>
-        </li>
-        <li>
-          <a
-            href="/__ui/#/routes"
-            class:active={$location.startsWith('/routes')}
-            class="flex items-center gap-2"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-            </svg>
-            <span>{$_('nav.routes')}</span>
-          </a>
-        </li>
-        <li>
-          <a
-            href="/__ui/#/logs"
-            class:active={$location === '/logs'}
-            class="flex items-center gap-2"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-            <span>{$_('nav.logs')}</span>
-          </a>
-        </li>
-        <li>
-          <a
-            href="/__ui/#/config"
-            class:active={$location === '/config'}
-            class="flex items-center gap-2"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-            <span>{$_('nav.configuration')}</span>
-          </a>
-        </li>
-
-        <li>
-          <a
-            href="/__ui/#/plugins"
-            class:active={$location.startsWith('/plugins')}
-            class="flex items-center gap-2"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-            </svg>
-            <span>{$_('nav.plugins')}</span>
-          </a>
-        </li>
-
-        {#each $pluginList as plugin}
-          {#if plugin.enabled}
-            {#if plugin.metadata?.contributes?.navigation}
-              {#each plugin.metadata.contributes.navigation as nav}
-                {#if nav.target === 'header'}
-                  <li>
-                    <a
-                      href={`/__ui/#/extensions/${plugin.name}${nav.path}`}
-                      class:active={$location.startsWith(`/extensions/${plugin.name}${nav.path}`)}
-                      class="flex items-center gap-2"
-                    >
-                      {#if nav.icon && nav.icon.startsWith('<svg')}
-                        {@html nav.icon}
-                      {:else if nav.icon}
-                        <i class={nav.icon}></i>
-                      {:else}
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                        </svg>
-                      {/if}
-                      <span>{nav.label}</span>
-                    </a>
-                  </li>
-                {/if}
-              {/each}
-            {:else if plugin.metadata?.menus}
-              <!-- Deprecated: Support legacy menus structure -->
-              {#each plugin.metadata.menus as menu}
-                {#if menu.location === 'header'}
-                  <li>
-                    <a
-                      href={`/__ui/#/extensions/${plugin.name}${menu.path}`}
-                      class:active={$location.startsWith(`/extensions/${plugin.name}${menu.path}`)}
-                      class="flex items-center gap-2"
-                    >
-                      <span>{menu.title}</span>
-                    </a>
-                  </li>
-                {/if}
-              {/each}
-            {/if}
-          {/if}
-        {/each}
-      </ul>
-
-      <!-- 语言切换器 -->
-      <div class="dropdown dropdown-end mx-2">
-        <div role="button" tabindex="0" class="btn btn-ghost btn-sm gap-1">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
-          </svg>
-          <span class="text-xs">
-            {SUPPORTED_LOCALES.find(l => l.code === $locale)?.name}
+            <span class="absolute -bottom-1 -right-1 h-1.5 w-1.5 bg-nexus-500 shadow-glow-orange"></span>
           </span>
-        </div>
-        <ul role="menu" tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-32 mt-2 gap-1">
-          {#each SUPPORTED_LOCALES as supportedLocale}
-            <li>
-              <button
-                class:active={$locale === supportedLocale.code}
-                on:click={() => handleLocaleChange(supportedLocale.code)}
-              >
-                {supportedLocale.name}
-              </button>
-            </li>
-          {/each}
-        </ul>
-      </div>
+          <span class="flex flex-col leading-none">
+            <span class="nx-display text-base text-zinc-50 tracking-[0.04em]">BUNGEE</span>
+            <span class="mt-1 font-mono text-[9px] uppercase tracking-chiseled text-zinc-500">
+              REVERSE PROXY · v4.0
+            </span>
+          </span>
+        </a>
 
-      <!-- 退出登录按钮 -->
-      {#if $authRequired && $isAuthenticated}
-        <div class="mx-2">
-          <button class="btn btn-ghost btn-sm gap-1" on:click={handleLogout}>
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-            </svg>
-            <span class="text-xs hidden md:inline">{$_('login.logout')}</span>
+        <span class="self-stretch w-px bg-carbon-600"></span>
+
+        <!-- Navigation tabs -->
+        <nav class="flex-1 flex items-stretch overflow-x-auto">
+          <ul class="flex items-stretch">
+            {#each navItems as item}
+              <li>
+                <a
+                  href={item.href}
+                  class="nx-nav-tab"
+                  class:is-active={item.isActive}
+                >
+                  {#if item.isActive}
+                    <span class="nx-caret-left mr-1" aria-hidden="true"></span>
+                  {/if}
+                  <span>{item.label}</span>
+                </a>
+              </li>
+            {/each}
+          </ul>
+        </nav>
+
+        <span class="self-stretch w-px bg-carbon-600"></span>
+
+        <!-- HUD clock -->
+        <div class="hidden lg:flex items-center px-5">
+          <HudClock />
+        </div>
+
+        <span class="hidden lg:block self-stretch w-px bg-carbon-600"></span>
+
+        <!-- Channel security -->
+        <div class="hidden xl:flex items-center px-4">
+          {#if secureChannel}
+            <StatusBadge variant="online" dot>SECURE</StatusBadge>
+          {:else}
+            <StatusBadge variant="muted">OPEN</StatusBadge>
+          {/if}
+        </div>
+
+        <span class="hidden xl:block self-stretch w-px bg-carbon-600"></span>
+
+        <!-- Locale -->
+        <div class="dropdown dropdown-end flex items-center">
+          <button
+            tabindex="0"
+            class="h-full px-4 flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-command text-zinc-400 hover:text-nexus-300 hover:bg-carbon-800 transition-colors"
+          >
+            <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" /></svg>
+            <span>{($locale || '').toUpperCase()}</span>
           </button>
+          <ul role="menu" tabindex="0" class="dropdown-content z-50 mt-1 w-36 border border-carbon-500 bg-carbon-900 shadow-industrial-lg p-1">
+            {#each SUPPORTED_LOCALES as supportedLocale}
+              <li>
+                <button
+                  class="w-full text-left px-3 py-1.5 font-mono text-[11px] uppercase tracking-command transition-colors"
+                  class:text-nexus-300={$locale === supportedLocale.code}
+                  class:bg-carbon-800={$locale === supportedLocale.code}
+                  class:text-zinc-400={$locale !== supportedLocale.code}
+                  on:click={() => handleLocaleChange(supportedLocale.code)}
+                >
+                  {supportedLocale.name}
+                </button>
+              </li>
+            {/each}
+          </ul>
         </div>
-      {/if}
-    </div>
-  </div>
 
-  <!-- 手动路由（因为 svelte-spa-router 的 onMount 不工作） -->
-  {#if $location === '/login'}
-    <Login />
-  {:else if $location === '/'}
-    <Dashboard />
-  {:else if $location === '/routes'}
-    <RoutesIndex />
-  {:else if $location.startsWith('/routes/edit/')}
-    <RouteEditor params={{ path: $location.replace('/routes/edit/', '') }} />
-  {:else if $location === '/routes/new'}
-    <RouteEditor params={{}} />
-  {:else if $location === '/logs'}
-    <Logs />
-  {:else if $location === '/config'}
-    <Configuration />
-  {:else if $location === '/design'}
-    <DesignSystem />
-  {:else if $location === '/plugins'}
-    <PluginsPage />
-  {:else if $location.startsWith('/plugins/')}
-    {@const pathParts = $location.replace('/plugins/', '').split('/')}
-    {@const pluginName = pathParts[0]}
-    <!-- Render management detail layout (Settings, etc.) -->
-    <PluginDetailLayout params={{ name: pluginName }} />
-  {:else if $location.startsWith('/extensions/')}
-    {@const pathParts = $location.replace('/extensions/', '').split('/')}
-    {@const pluginName = pathParts[0]}
-    {@const pluginPath = '/' + pathParts.slice(1).join('/')}
-    <!-- Render feature page (Standalone) -->
-    <PluginHost pluginName={pluginName} path={pluginPath} />
-  {:else}
-    <NotFound />
-  {/if}
-</div>
+        <!-- Logout -->
+        {#if $authRequired && $isAuthenticated}
+          <button
+            class="px-4 flex items-center gap-1.5 border-l border-carbon-600 font-mono text-[11px] uppercase tracking-command text-zinc-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
+            on:click={handleLogout}
+          >
+            <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+            <span class="hidden md:inline">{$_('login.logout')}</span>
+          </button>
+        {/if}
+      </header>
+    {/if}
+
+    <!-- ===== Routed content ============================================ -->
+    <main class="flex-1 flex flex-col">
+      {#if $location === '/login'}
+        <Login />
+      {:else if $location === '/'}
+        <Dashboard />
+      {:else if $location === '/routes'}
+        <RoutesIndex />
+      {:else if $location.startsWith('/routes/edit/')}
+        <RouteEditor params={{ path: $location.replace('/routes/edit/', '') }} />
+      {:else if $location === '/routes/new'}
+        <RouteEditor params={{}} />
+      {:else if $location === '/services'}
+        <ServicesIndex />
+      {:else if $location.startsWith('/services/edit/')}
+        <ServiceEditor params={{ name: $location.replace('/services/edit/', '') }} />
+      {:else if $location === '/services/new'}
+        <ServiceEditor params={{}} />
+      {:else if $location === '/logs'}
+        <Logs />
+      {:else if $location === '/config'}
+        <Configuration />
+      {:else if $location === '/design'}
+        <DesignSystem />
+      {:else if $location === '/plugins'}
+        <PluginsPage />
+      {:else if $location.startsWith('/plugins/')}
+        {@const pathParts = $location.replace('/plugins/', '').split('/')}
+        {@const pluginName = pathParts[0]}
+        <PluginDetailLayout params={{ name: pluginName }} />
+      {:else if $location.startsWith('/extensions/')}
+        {@const pathParts = $location.replace('/extensions/', '').split('/')}
+        {@const pluginName = pathParts[0]}
+        {@const pluginPath = '/' + pathParts.slice(1).join('/')}
+        <PluginHost pluginName={pluginName} path={pluginPath} />
+      {:else}
+        <NotFound />
+      {/if}
+    </main>
+  </div>
 {/if}
 
-<!-- Toast 通知容器 -->
 <ToastContainer />
 
 <style>
-  .active {
-    background-color: hsl(var(--p) / 0.2);
+  /* ---- Navigation tab ----
+   * Active tab gets orange text + bottom accent bar; the orange caret is
+   * rendered inline by the markup (.nx-caret-left).
+   */
+  :global(.nx-nav-tab) {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    height: 100%;
+    padding-left: 1rem;
+    padding-right: 1rem;
+    font-family: 'DM Mono', 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #a1a1aa;
+    transition: color 0.12s ease-out, background-color 0.12s ease-out;
+    position: relative;
+    white-space: nowrap;
+  }
+  :global(.nx-nav-tab:hover) {
+    color: #fdba74; /* nexus-300 */
+    background-color: rgba(249, 115, 22, 0.04);
+  }
+  :global(.nx-nav-tab.is-active) {
+    color: #f97316; /* nexus-500 */
+  }
+  :global(.nx-nav-tab.is-active::after) {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0.5rem;
+    right: 0.5rem;
+    height: 2px;
+    background-color: #f97316;
   }
 </style>
