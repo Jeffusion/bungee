@@ -4,7 +4,7 @@ import { SystemHandler } from './handlers/system';
 import { TransformersHandler } from './handlers/transformers';
 import { LogsHandler } from './handlers/logs';
 import { RoutesHandler } from './handlers/routes';
-import { UpstreamControlHandler } from './handlers/upstreams';
+import { EndpointControlHandler } from './handlers/upstreams';
 import { AuthHandler } from './handlers/auth';
 import { handleGetPlugins, handleGetPluginModels, handleTogglePlugin, handleGetPluginSandbox, handleGetPluginSchemas, handleGetPluginTranslations, handlePluginApiRequest, handleGetModelMappingCatalogStatus, handleRefreshModelMappingCatalog } from './handlers/plugins';
 import { loadConfig } from '../config';
@@ -78,10 +78,10 @@ export async function handleAPIRequest(req: Request, path: string): Promise<Resp
     const upstreamControlMatch = path.match(/^\/api\/routes\/(.+?)\/upstreams\/(\d+)\/(enable|disable)$/);
     if (upstreamControlMatch && method === 'POST') {
       const [, encodedRoutePath, indexStr, action] = upstreamControlMatch;
-      const upstreamIndex = parseInt(indexStr, 10);
-      return UpstreamControlHandler.toggle(
+      const endpointIndex = parseInt(indexStr, 10);
+      return await EndpointControlHandler.toggle(
         decodeURIComponent(encodedRoutePath),
-        upstreamIndex,
+        endpointIndex,
         action === 'disable'
       );
     }

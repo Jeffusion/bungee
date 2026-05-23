@@ -36,7 +36,7 @@ export interface LogEntry {
   routePath?: string;
   upstream?: string;
   transformer?: string;
-  transformedPath?: string;       // 转换后的路径（经过 pathRewrite）
+  transformedPath?: string;       // 转换后的路径（经过 path_rewrite）
   processingSteps?: ProcessingStep[];
   authSuccess: boolean;
   authLevel?: string;
@@ -365,7 +365,7 @@ export class LogQueryService {
   }
 
   /**
-   * 获取 Upstream 请求分布统计
+   * 获取 Endpoint 请求分布统计
    */
   async getUpstreamDistribution(startTime: number, endTime: number, limit: number = 10): Promise<Array<{
     upstream: string;
@@ -395,7 +395,7 @@ export class LogQueryService {
   }
 
   /**
-   * 获取 Upstream 失败统计
+   * 获取 Endpoint 失败统计
    */
   async getUpstreamFailureStats(startTime: number, endTime: number, limit: number = 10): Promise<Array<{
     upstream: string;
@@ -431,7 +431,7 @@ export class LogQueryService {
   }
 
   /**
-   * 获取统一的 Upstream 统计（支持全部/成功/失败过滤）
+   * 获取统一的 Endpoint 统计（支持全部/成功/失败过滤）
    */
   async getUnifiedUpstreamStats(startTime: number, endTime: number, type: 'all' | 'success' | 'failure' = 'all', limit: number = 10): Promise<Array<{
     upstream: string;
@@ -476,7 +476,7 @@ export class LogQueryService {
   }
 
   /**
-   * 获取 Upstream 状态码统计
+   * 获取 Endpoint 状态码统计
    */
   async getUpstreamStatusCodeStats(startTime: number, endTime: number, limit: number = 10): Promise<Array<{
     upstream: string;

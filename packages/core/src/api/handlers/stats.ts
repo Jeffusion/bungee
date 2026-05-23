@@ -80,7 +80,7 @@ export class StatsHandler {
   }
 
   /**
-   * 获取 Upstream 请求分布统计
+   * 获取 Endpoint 请求分布统计
    */
   static async getUpstreamDistribution(req: Request): Promise<Response> {
     const url = new URL(req.url);
@@ -105,7 +105,7 @@ export class StatsHandler {
   }
 
   /**
-   * 获取 Upstream 失败统计
+   * 获取 Endpoint 失败统计
    */
   static async getUpstreamFailures(req: Request): Promise<Response> {
     const url = new URL(req.url);
@@ -130,7 +130,7 @@ export class StatsHandler {
   }
 
   /**
-   * 获取统一的 Upstream 统计（支持全部/成功/失败过滤）
+   * 获取统一的 Endpoint 统计（支持全部/成功/失败过滤）
    */
   static async getUnifiedUpstreamStats(req: Request): Promise<Response> {
     const url = new URL(req.url);
@@ -156,7 +156,7 @@ export class StatsHandler {
   }
 
   /**
-   * 获取 Upstream 状态码统计
+   * 获取 Endpoint 状态码统计
    */
   static async getUpstreamStatusCodes(req: Request): Promise<Response> {
     const url = new URL(req.url);

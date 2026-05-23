@@ -6,6 +6,8 @@
     "moduleResolution": "bundler",
     "baseUrl": ".",
     "paths": {
+      "@jeffusion/bungee-types": ["../types/src/index.ts"],
+      "@jeffusion/bungee-types/types": ["../types/src/types.ts"],
       "@jeffusion/bungee-llms": ["../llms/src/index.ts"],
       "@jeffusion/bungee-llms/plugin-api": ["../llms/src/plugin-api.ts"]
     },

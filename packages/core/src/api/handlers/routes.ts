@@ -1,8 +1,8 @@
 import { runtimeState } from '../../worker';
-import type { RouteConfig } from '@jeffusion/bungee-types';
+import type { Endpoint, RouteConfig, Service } from '@jeffusion/bungee-types';
 import { loadConfig } from '../../config';
 
-interface UpstreamWithStatus {
+interface EndpointWithStatus extends Endpoint {
   target: string;
   weight?: number;
   priority?: number;
@@ -11,11 +11,37 @@ interface UpstreamWithStatus {
   body?: any;
   query?: any;
   status?: 'HEALTHY' | 'UNHEALTHY' | 'HALF_OPEN';
-  lastFailureTime?: number;
+  last_failure_time?: number;
 }
 
-interface RouteWithStatus extends Omit<RouteConfig, 'upstreams'> {
-  upstreams: UpstreamWithStatus[];
+interface RouteWithStatus extends Omit<RouteConfig, 'endpoints'> {
+  endpoints: EndpointWithStatus[];
+  service_ref?: {
+    name: string;
+    found: boolean;
+    endpoint_count: number;
+  };
+}
+
+function resolveRouteEndpoints(route: RouteConfig, services?: Service[]): { endpoints: Endpoint[]; service?: Service } {
+  if (route.service) {
+    const service = services?.find((candidate) => candidate.name === route.service);
+    const merged = [...(service?.endpoints ?? [])];
+    for (const endpoint of route.endpoints ?? []) {
+      const existingIdx = merged.findIndex(candidate => candidate.target === endpoint.target);
+      if (existingIdx >= 0) {
+        merged[existingIdx] = { ...merged[existingIdx], ...endpoint };
+      } else {
+        merged.push(endpoint);
+      }
+    }
+    return {
+      endpoints: merged,
+      service,
+    };
+  }
+
+  return { endpoints: route.endpoints ?? [] };
 }
 
 export class RoutesHandler {
@@ -24,14 +50,16 @@ export class RoutesHandler {
       const config = await loadConfig();
 
       const routesWithStatus: RouteWithStatus[] = config.routes.map((route: RouteConfig) => {
-        const routeState = runtimeState.get(route.path);
+        const { endpoints, service } = resolveRouteEndpoints(route, config.services);
+        const runtime_state_key = route.service ?? route.path;
+        const routeState = runtimeState.get(runtime_state_key);
 
-        const upstreamsWithStatus: UpstreamWithStatus[] = route.upstreams.map((upstream, index) => {
+        const endpointsWithStatus: EndpointWithStatus[] = endpoints.map((endpoint, index) => {
           if (!routeState) {
             return {
-              ...upstream,
+              ...endpoint,
               status: 'HEALTHY' as const,
-              lastFailureTime: undefined
+              last_failure_time: undefined
             };
           }
 
@@ -39,24 +67,31 @@ export class RoutesHandler {
 
           if (!runtimeUpstream) {
             return {
-              ...upstream,
+              ...endpoint,
               status: 'HEALTHY' as const,
-              lastFailureTime: undefined,
-              disabled: upstream.disabled ?? false
+              last_failure_time: undefined,
+              is_disabled: endpoint.is_disabled ?? false
             };
           }
 
           return {
-            ...upstream,
+            ...endpoint,
             status: runtimeUpstream.status,
-            lastFailureTime: runtimeUpstream.lastFailureTime,
-            disabled: runtimeUpstream.disabled ?? upstream.disabled ?? false
+            last_failure_time: runtimeUpstream.last_failure_time,
+            is_disabled: runtimeUpstream.is_disabled ?? endpoint.is_disabled ?? false
           };
         });
 
         return {
           ...route,
-          upstreams: upstreamsWithStatus
+          endpoints: endpointsWithStatus,
+          ...(route.service && {
+            service_ref: {
+              name: route.service,
+              found: !!service,
+              endpoint_count: endpoints.length,
+            },
+          }),
         };
       });
 

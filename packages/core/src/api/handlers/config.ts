@@ -93,25 +93,58 @@ export class ConfigHandler {
         return { valid: false, error: `Route #${i + 1}: path is required` };
       }
 
-      if (!route.upstreams || !Array.isArray(route.upstreams)) {
-        return { valid: false, error: `Route "${route.path}": upstreams must be an array` };
+  const has_endpoints = route.endpoints && Array.isArray(route.endpoints) && route.endpoints.length > 0;
+  const has_service = !!route.service;
+  const has_direct_response = !!(route as any).direct_response?.enabled;
+  const has_redirect = !!(route as any).redirect?.enabled;
+  const has_response_rules = !!(route as any).response_rules?.some((rule: any) => rule.enabled);
+
+  if (!has_endpoints && !has_service && !has_direct_response && !has_redirect && !has_response_rules) {
+    return { valid: false, error: `Route "${route.path}": endpoints, service, response_rules, direct_response, or redirect is required` };
+  }
+
+      if (has_service) {
+        const service = config.services?.find((candidate) => candidate.name === route.service);
+        if (!service) {
+          return { valid: false, error: `Route "${route.path}": service "${route.service}" not found` };
+        }
       }
 
-      if (route.upstreams.length === 0) {
-        return { valid: false, error: `Route "${route.path}": at least one upstream is required` };
-      }
+      for (let j = 0; j < (route.endpoints ?? []).length; j++) {
+        const endpoint = route.endpoints![j];
 
-      for (let j = 0; j < route.upstreams.length; j++) {
-        const upstream = route.upstreams[j];
-
-        if (!upstream.target) {
-          return { valid: false, error: `Route "${route.path}", Upstream #${j + 1}: target is required` };
+        if (!endpoint.target) {
+          return { valid: false, error: `Route "${route.path}", Endpoint #${j + 1}: target is required` };
         }
 
         try {
-          new URL(upstream.target);
+          new URL(endpoint.target);
         } catch {
-          return { valid: false, error: `Route "${route.path}", Upstream #${j + 1}: invalid target URL "${upstream.target}"` };
+          return { valid: false, error: `Route "${route.path}", Endpoint #${j + 1}: invalid target URL "${endpoint.target}"` };
+        }
+      }
+    }
+
+    for (const service of config.services ?? []) {
+      if (!service.name) {
+        return { valid: false, error: 'Service name is required' };
+      }
+
+      if (!service.endpoints || !Array.isArray(service.endpoints) || service.endpoints.length === 0) {
+        return { valid: false, error: `Service "${service.name}": endpoints must be a non-empty array` };
+      }
+
+      for (let j = 0; j < service.endpoints.length; j++) {
+        const endpoint = service.endpoints[j];
+
+        if (!endpoint.target) {
+          return { valid: false, error: `Service "${service.name}", Endpoint #${j + 1}: target is required` };
+        }
+
+        try {
+          new URL(endpoint.target);
+        } catch {
+          return { valid: false, error: `Service "${service.name}", Endpoint #${j + 1}: invalid target URL "${endpoint.target}"` };
         }
       }
     }
@@ -121,40 +154,57 @@ export class ConfigHandler {
 
   private static sanitizeConfig(config: AppConfig): AppConfig {
     return {
-      configVersion: config.configVersion,
-      ...(config.bodyParserLimit && { bodyParserLimit: config.bodyParserLimit }),
+      config_version: config.config_version,
+      ...(config.body_parser_limit && { body_parser_limit: config.body_parser_limit }),
       ...(config.auth && { auth: this.sanitizeAuth(config.auth) }),
       ...(config.logging && { logging: config.logging }),
       ...(config.plugins && { plugins: config.plugins }),
-      ...(config.logLevel && { logLevel: (config as any).logLevel }),
+      ...(config.log_level && { log_level: config.log_level }),
+      ...(config.services && { services: config.services.map((s: any) => this.sanitizeService(s)) }),
       routes: config.routes.map((r: any) => this.sanitizeRoute(r))
+    };
+  }
+
+  private static sanitizeService(service: any): any {
+    return {
+      name: service.name,
+      endpoints: service.endpoints.map((e: any) => this.sanitizeEndpoint(e)),
+      ...(service.health_check && { health_check: service.health_check }),
+      ...(service.failover && { failover: service.failover }),
+      ...(service.sticky_session && { sticky_session: service.sticky_session })
     };
   }
 
   private static sanitizeRoute(route: any): any {
     return {
       path: route.path,
-      ...(route.pathRewrite && { pathRewrite: route.pathRewrite }),
+      ...(route.path_rewrite && { path_rewrite: route.path_rewrite }),
       ...(route.auth && { auth: this.sanitizeAuth(route.auth) }),
       ...(route.plugins && { plugins: route.plugins }),
       ...(route.timeouts && { timeouts: route.timeouts }),
-      ...(route.failover && { failover: route.failover }),
-      ...(route.stickySession && { stickySession: route.stickySession }),
+      ...(route.service && { service: route.service }),
+      ...(route.rate_limit && { rate_limit: route.rate_limit }),
+      ...(route.cors && { cors: route.cors }),
+      ...(route.response_rules && { response_rules: route.response_rules }),
+      ...(route.direct_response && { direct_response: route.direct_response }),
+      ...(route.redirect && { redirect: route.redirect }),
+      ...(route.retry && { retry: route.retry }),
       ...this.sanitizeModificationRules(route),
-      upstreams: route.upstreams.map((u: any) => this.sanitizeUpstream(u))
+      ...(route.endpoints && { endpoints: route.endpoints.map((e: any) => this.sanitizeEndpoint(e)) })
     };
   }
 
-  private static sanitizeUpstream(upstream: any): any {
+  private static sanitizeEndpoint(endpoint: any): any {
     return {
-      target: upstream.target,
-      ...(upstream.weight !== undefined && { weight: upstream.weight }),
-      ...(upstream.priority !== undefined && { priority: upstream.priority }),
-      ...(upstream.disabled !== undefined && { disabled: upstream.disabled }),
-      ...(upstream.description && { description: upstream.description }),
-      ...(upstream.condition !== undefined && { condition: upstream.condition }),
-      ...(upstream.plugins && { plugins: upstream.plugins }),
-      ...this.sanitizeModificationRules(upstream)
+      ...(endpoint.id && { id: endpoint.id }),
+      target: endpoint.target,
+      ...(endpoint.weight !== undefined && { weight: endpoint.weight }),
+      ...(endpoint.priority !== undefined && { priority: endpoint.priority }),
+      ...(endpoint.is_disabled !== undefined && { is_disabled: endpoint.is_disabled }),
+      ...(endpoint.description && { description: endpoint.description }),
+      ...(endpoint.condition !== undefined && { condition: endpoint.condition }),
+      ...(endpoint.plugins && { plugins: endpoint.plugins }),
+      ...this.sanitizeModificationRules(endpoint)
     };
   }
 
