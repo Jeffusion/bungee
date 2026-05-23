@@ -1,4 +1,4 @@
-import type { Route } from '../api/routes';
+import { resolveRouteEndpoints, type Route, type Service } from '../api/routes';
 import { validateUpstream } from './upstream-validator';
 import { _ } from '../i18n';
 import { get } from 'svelte/store';
@@ -8,69 +8,9 @@ export interface ValidationError {
   message: string;
 }
 
-function normalizeRetryableStatusCodeRules(
-  rules: number | string | (number | string)[]
-): Array<number | string> {
-  const inputArray = Array.isArray(rules) ? rules : [rules];
-  const normalized: Array<number | string> = [];
-
-  inputArray.forEach((rule) => {
-    if (typeof rule === 'number') {
-      normalized.push(rule);
-      return;
-    }
-
-    if (typeof rule !== 'string') {
-      return;
-    }
-
-    rule.split(',').forEach((part) => {
-      const trimmed = part.trim();
-      if (!trimmed) {
-        return;
-      }
-
-      const numeric = Number(trimmed);
-      if (Number.isInteger(numeric) && numeric.toString() === trimmed) {
-        normalized.push(numeric);
-      } else {
-        normalized.push(trimmed);
-      }
-    });
-  });
-
-  return normalized;
-}
-
-function isValidNumericStatusCode(code: number): boolean {
-  return Number.isInteger(code) && code >= 100 && code <= 599;
-}
-
-function isValidRetryableStatusCodeRule(rule: number | string): boolean {
-  if (typeof rule === 'number') {
-    return isValidNumericStatusCode(rule);
-  }
-
-  const trimmedRule = rule.trim();
-  if (!trimmedRule) {
-    return false;
-  }
-
-  const exactMatch = trimmedRule.match(/^(\d{3})$/);
-  if (exactMatch) {
-    return isValidNumericStatusCode(Number(exactMatch[1]));
-  }
-
-  const comparatorMatch = trimmedRule.match(/^(>=|>|<=|<|!)\s*(\d{3})$/);
-  if (comparatorMatch) {
-    return isValidNumericStatusCode(Number(comparatorMatch[2]));
-  }
-
-  return /^([0-9])xx$/i.test(trimmedRule);
-}
-
-export async function validateRoute(route: Partial<Route>): Promise<ValidationError[]> {
+export async function validateRoute(route: Partial<Route>, services: Service[] = []): Promise<ValidationError[]> {
   const errors: ValidationError[] = [];
+  const endpoints = resolveRouteEndpoints(route, services);
 
   if (!route.path) {
     errors.push({ field: 'path', message: get(_)('validation.pathRequired') });
@@ -78,10 +18,26 @@ export async function validateRoute(route: Partial<Route>): Promise<ValidationEr
     errors.push({ field: 'path', message: get(_)('validation.pathStartSlash') });
   }
 
-  if (!route.upstreams || route.upstreams.length === 0) {
-    errors.push({ field: 'upstreams', message: get(_)('validation.upstreamRequired') });
-  } else {
-    const upstreamValidations = route.upstreams.map((upstream, index) =>
+  if (route.service && !services.some((service) => service.name === route.service)) {
+    errors.push({ field: 'service', message: `Service "${route.service}" not found` });
+  }
+
+  const hasGlobalResponseBypass = route.direct_response?.enabled || route.redirect?.enabled;
+
+  route.response_rules?.forEach((rule, index) => {
+    if (!rule.enabled) return;
+    if (!rule.path?.trim()) {
+      errors.push({ field: `response_rules.${index}.path`, message: get(_)('validation.pathRequired') });
+    }
+    if (rule.type === 'redirect' && !rule.url?.trim()) {
+      errors.push({ field: `response_rules.${index}.url`, message: get(_)('validation.urlRequired') });
+    }
+  });
+
+  if (!hasGlobalResponseBypass && !route.service && endpoints.length === 0) {
+    errors.push({ field: 'endpoints', message: get(_)('validation.upstreamRequired') });
+  } else if (!hasGlobalResponseBypass) {
+    const upstreamValidations = endpoints.map((upstream, index) =>
       validateUpstream(upstream, index)
     );
     const upstreamErrors = await Promise.all(upstreamValidations);
@@ -90,80 +46,32 @@ export async function validateRoute(route: Partial<Route>): Promise<ValidationEr
     });
   }
 
-  if (route.pathRewrite) {
-    Object.keys(route.pathRewrite).forEach(pattern => {
+  if (route.path_rewrite) {
+    Object.keys(route.path_rewrite).forEach(pattern => {
       try {
         new RegExp(pattern);
       } catch {
         const t = get(_);
         errors.push({
-          field: `pathRewrite.${pattern}`,
+          field: `path_rewrite.${pattern}`,
           message: t('validation.invalidRegex', { values: { pattern } })
         });
       }
     });
   }
 
-  if (route.failover?.enabled) {
-    if (route.failover.retryOn) {
-      const retryableStatusCodes = normalizeRetryableStatusCodeRules(route.failover.retryOn);
-
-      retryableStatusCodes.forEach((code) => {
-        if (!isValidRetryableStatusCodeRule(code)) {
-          const t = get(_);
-          errors.push({
-            field: 'failover.retryOn',
-            message: t('validation.invalidStatusCode', { values: { code } })
-          });
-        }
-      });
-    }
-
-    if (route.failover.recovery?.probeIntervalMs !== undefined && route.failover.recovery.probeIntervalMs <= 0) {
-      errors.push({
-        field: 'failover.recovery.probeIntervalMs',
-        message: get(_)('validation.recoveryIntervalPositive')
-      });
-    }
-
-    if (route.failover.recovery?.probeTimeoutMs !== undefined && route.failover.recovery.probeTimeoutMs <= 0) {
-      errors.push({
-        field: 'failover.recovery.probeTimeoutMs',
-        message: get(_)('validation.recoveryTimeoutPositive')
-      });
-    }
-  }
-
-  if (route.timeouts?.requestMs !== undefined && route.timeouts.requestMs <= 0) {
+  if (route.timeouts?.request_ms !== undefined && route.timeouts.request_ms <= 0) {
     errors.push({
-      field: 'timeouts.requestMs',
+      field: 'timeouts.request_ms',
       message: get(_)('validation.requestTimeoutPositive')
     });
   }
 
-  if (route.timeouts?.connectMs !== undefined && route.timeouts.connectMs <= 0) {
+  if (route.timeouts?.connect_ms !== undefined && route.timeouts.connect_ms <= 0) {
     errors.push({
-      field: 'timeouts.connectMs',
+      field: 'timeouts.connect_ms',
       message: get(_)('validation.connectTimeoutPositive')
     });
-  }
-
-  if (route.stickySession?.enabled && route.stickySession.keyExpression !== undefined) {
-    const stickyExpression = route.stickySession.keyExpression;
-    if (!stickyExpression.trim()) {
-      errors.push({
-        field: 'stickySession.keyExpression',
-        message: get(_)('validation.expressionEmpty')
-      });
-    } else {
-      const expressionValidation = validateExpression(stickyExpression);
-      if (!expressionValidation.valid) {
-        errors.push({
-          field: 'stickySession.keyExpression',
-          message: expressionValidation.error || get(_)('validation.expressionEmpty')
-        });
-      }
-    }
   }
 
   return errors;

@@ -35,7 +35,7 @@ export function clearTransformersCache(): void {
  */
 export function validateUpstreamSync(upstream: Partial<Upstream>, index: number): ValidationError[] {
   const errors: ValidationError[] = [];
-  const prefix = `upstreams[${index}]`;
+  const prefix = `endpoints[${index}]`;
 
   // 验证 target
   if (!upstream.target) {
@@ -93,10 +93,10 @@ export function validateWeights(upstreams: Upstream[]): ValidationError[] {
   const errors: ValidationError[] = [];
 
   // 检查是否所有上游都被禁用
-  const allDisabled = upstreams.length > 0 && upstreams.every(u => u.disabled === true);
+  const allDisabled = upstreams.length > 0 && upstreams.every(u => u.is_disabled === true);
   if (allDisabled) {
     errors.push({
-      field: 'upstreams',
+      field: 'endpoints',
       message: '警告：所有上游服务器都已禁用，路由将无法处理请求',
       level: 'warning' as any // 警告级别，不阻止保存
     });
@@ -107,7 +107,7 @@ export function validateWeights(upstreams: Upstream[]): ValidationError[] {
     const totalWeight = upstreams.reduce((sum, u) => sum + (u.weight || 0), 0);
     if (totalWeight === 0) {
       errors.push({
-        field: 'upstreams',
+        field: 'endpoints',
         message: get(_)('validation.totalWeightPositive')
       });
     }
@@ -123,7 +123,7 @@ export function validateWeights(upstreams: Upstream[]): ValidationError[] {
 export async function validateUpstream(upstream: Partial<Upstream>, index: number): Promise<ValidationError[]> {
   // 首先执行同步验证
   const errors = validateUpstreamSync(upstream, index);
-  const prefix = `upstreams[${index}]`;
+  const prefix = `endpoints[${index}]`;
 
   // 添加plugin的异步验证
   if (upstream.plugins && upstream.plugins.length > 0) {

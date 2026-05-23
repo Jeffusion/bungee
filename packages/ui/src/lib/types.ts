@@ -78,16 +78,20 @@ export interface AuthConfig {
 }
 
 export interface AppConfig {
-  configVersion?: number;
+  config_version?: number;
+  log_level?: string;
+  body_parser_limit?: string;
   auth?: AuthConfig;
+  services?: Service[];
   routes?: Route[];
   [key: string]: any;
 }
 
 export interface Route {
   path: string;
-  pathRewrite?: { [pattern: string]: string };
-  upstreams: Upstream[];
+  path_rewrite?: { [pattern: string]: string };
+  service?: string;
+  endpoints?: Upstream[];
   headers?: ModificationRules;
   body?: ModificationRules;
   query?: ModificationRules;
@@ -95,16 +99,24 @@ export interface Route {
   auth?: AuthConfig;
   timeouts?: RouteTimeoutsConfig;
   failover?: FailoverConfig;
-  stickySession?: StickySessionConfig;
+  sticky_session?: StickySessionConfig;
+}
+
+export interface Service {
+  name: string;
+  endpoints: Upstream[];
+  health_check?: FailoverConfig['health_check'];
+  failover?: FailoverConfig;
 }
 
 export interface StickySessionConfig {
   enabled: boolean;
-  keyExpression?: string;
+  key_expression?: string;
 }
 
 export interface Upstream {
   _uid?: string;
+  id?: string;
   target: string;
   weight?: number;
   priority?: number;
@@ -112,11 +124,17 @@ export interface Upstream {
   headers?: ModificationRules;
   body?: ModificationRules;
   query?: ModificationRules;
-  disabled?: boolean;
+  is_disabled?: boolean;
   description?: string;
   condition?: string;
   status?: 'HEALTHY' | 'UNHEALTHY' | 'HALF_OPEN';
-  lastFailureTime?: number;
+  upstream_id?: string;
+  last_failure_time?: number;
+  consecutive_failures?: number;
+  consecutive_successes?: number;
+  recovery_attempt_count?: number;
+  health_check_successes?: number;
+  health_check_failures?: number;
 }
 
 export interface ModificationRules {
@@ -127,43 +145,43 @@ export interface ModificationRules {
 }
 
 export interface RouteTimeoutsConfig {
-  connectMs?: number;
-  requestMs?: number;
+  connect_ms?: number;
+  request_ms?: number;
 }
 
 export interface FailoverPassiveHealthConfig {
-  consecutiveFailures?: number;
-  healthySuccesses?: number;
-  autoDisableThreshold?: number;
-  autoEnableOnActiveHealthCheck?: boolean;
+  consecutive_failures?: number;
+  healthy_successes?: number;
+  auto_disable_threshold?: number;
+  auto_enable_on_active_health_check?: boolean;
 }
 
 export interface FailoverRecoveryConfig {
-  probeIntervalMs?: number;
-  probeTimeoutMs?: number;
+  probe_interval_ms?: number;
+  probe_timeout_ms?: number;
 }
 
 export interface FailoverConfig {
   enabled: boolean;
-  retryOn?: number | string | (number | string)[];
-  passiveHealth?: FailoverPassiveHealthConfig;
+  retry_on?: number | string | (number | string)[];
+  passive_health?: FailoverPassiveHealthConfig;
   recovery?: FailoverRecoveryConfig;
-  slowStart?: {
+  slow_start?: {
     enabled: boolean;
-    durationMs?: number;
-    initialWeightFactor?: number;
+    duration_ms?: number;
+    initial_weight_factor?: number;
   };
-  healthCheck?: {
+  health_check?: {
     enabled: boolean;
-    intervalMs?: number;
-    timeoutMs?: number;
+    interval_ms?: number;
+    timeout_ms?: number;
     path?: string;
     method?: string;
-    expectedStatus?: number[];
-    unhealthyThreshold?: number;
-    healthyThreshold?: number;
+    expected_status?: number[];
+    unhealthy_threshold?: number;
+    healthy_threshold?: number;
     body?: string;
-    contentType?: string;
+    content_type?: string;
     headers?: Record<string, string>;
     query?: Record<string, string>;
   };
