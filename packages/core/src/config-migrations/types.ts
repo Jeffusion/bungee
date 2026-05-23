@@ -1,6 +1,6 @@
 import type { AppConfig } from '@jeffusion/bungee-types';
 
-export const LATEST_CONFIG_VERSION = 2;
+export const LATEST_CONFIG_VERSION = 4;
 
 export type MigrationChangeType = 'rename' | 'move' | 'delete' | 'normalize' | 'default';
 

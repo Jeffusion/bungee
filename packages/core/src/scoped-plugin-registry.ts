@@ -33,7 +33,7 @@ import type {
   PluginInitContext,
 } from './hooks';
 import { createPluginHooks } from './hooks';
-import type { PluginConfig } from '@jeffusion/bungee-types';
+import type { Endpoint, PluginConfig, Service } from '@jeffusion/bungee-types';
 import type { PluginStorage, PluginMetadata, PluginConfigField, PluginTranslations } from './plugin.types';
 import { getPluginContextManager, isPluginContextManagerInitialized } from './plugin-context-manager';
 import { getHandlerKey } from './utils/stable-hash';
@@ -1072,6 +1072,8 @@ export class ScopedPluginRegistry {
       id?: string;
       path: string;
       plugins?: Array<PluginConfig | string>;
+      endpoints?: Endpoint[];
+      service?: string;
       upstreams?: Array<{
         id?: string;
         target: string;
@@ -1080,6 +1082,7 @@ export class ScopedPluginRegistry {
       }>;
       [key: string]: any; // 允许额外字段
     }>;
+    services?: Service[];
     [key: string]: any; // 允许额外字段
   }): Promise<{ success: number; failed: number }> {
     this.initStartTime = Date.now();
@@ -1142,7 +1145,10 @@ export class ScopedPluginRegistry {
       }
 
       // 3. 加载上游级插件
-      for (const [upstreamIndex, upstream] of (route.upstreams || []).entries()) {
+      const service = route.service ? config.services?.find((candidate) => candidate.name === route.service) : undefined;
+      const endpoints = service?.endpoints ?? route.endpoints ?? [];
+
+      for (const [upstreamIndex, upstream] of endpoints.entries()) {
         const upstreamId = upstream.id || String(upstreamIndex); // Use config id or fallback to index
 
         for (const pluginConfig of upstream.plugins || []) {

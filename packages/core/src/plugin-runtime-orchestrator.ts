@@ -358,12 +358,19 @@ function createRuntimeEligibleConfig(config: AppConfig, registry: PluginRegistry
   return {
     ...config,
     plugins: (config.plugins || []).filter(isRuntimeEligible),
+    services: (config.services || []).map((service) => ({
+      ...service,
+      endpoints: (service.endpoints || []).map((endpoint) => ({
+        ...endpoint,
+        plugins: (endpoint.plugins || []).filter(isRuntimeEligible),
+      })),
+    })),
     routes: (config.routes || []).map((route) => ({
       ...route,
       plugins: (route.plugins || []).filter(isRuntimeEligible),
-      upstreams: (route.upstreams || []).map((upstream) => ({
-        ...upstream,
-        plugins: (upstream.plugins || []).filter(isRuntimeEligible),
+      endpoints: (route.endpoints || []).map((endpoint) => ({
+        ...endpoint,
+        plugins: (endpoint.plugins || []).filter(isRuntimeEligible),
       })),
     })),
   };
@@ -394,8 +401,16 @@ function collectDeclaredPluginConfigs(config: AppConfig): PluginConfig[] {
       addPluginConfig(pluginConfig);
     }
 
-    for (const upstream of route.upstreams || []) {
-      for (const pluginConfig of upstream.plugins || []) {
+    for (const endpoint of route.endpoints || []) {
+      for (const pluginConfig of endpoint.plugins || []) {
+        addPluginConfig(pluginConfig);
+      }
+    }
+  }
+
+  for (const service of config.services || []) {
+    for (const endpoint of service.endpoints || []) {
+      for (const pluginConfig of endpoint.plugins || []) {
         addPluginConfig(pluginConfig);
       }
     }

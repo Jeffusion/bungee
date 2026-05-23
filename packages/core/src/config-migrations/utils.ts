@@ -71,7 +71,8 @@ export function detectConfigVersion(rawConfig: unknown): number {
     return 1;
   }
 
-  const version = rawConfig.configVersion;
+  // Support both configVersion (V1/V2 legacy) and config_version (V3+ snake_case)
+  const version = rawConfig.configVersion ?? rawConfig.config_version;
   return typeof version === 'number' && Number.isInteger(version) && version > 0 ? version : 1;
 }
 
