@@ -4,13 +4,13 @@
  */
 
 import type { RuntimeUpstream } from '../types';
-import type { RouteConfig } from '@jeffusion/bungee-types';
+import type { EffectiveRouteConfig } from '../types';
 
 /**
  * Calculate slow start weight factor for an upstream
  *
  * Slow start gradually increases the effective weight of a recently recovered
- * upstream from initialWeightFactor to 1.0 over the configured duration.
+ * upstream from initial_weight_factor to 1.0 over the configured duration.
  *
  * @param upstream - Runtime upstream to calculate weight for
  * @param route - Route configuration
@@ -28,38 +28,38 @@ import type { RouteConfig } from '@jeffusion/bungee-types';
  */
 export function calculateSlowStartFactor(
   upstream: RuntimeUpstream,
-  route: RouteConfig
+  route: EffectiveRouteConfig
 ): number {
   // If slow start is not enabled, return 1.0 (full weight)
-  if (!route.failover?.slowStart?.enabled) {
+  if (!route.failover?.slow_start?.enabled) {
     return 1.0;
   }
 
   // If no recovery time is set, return 1.0 (not in slow start)
-  if (!upstream.slowStartRecoveryTime) {
+  if (!upstream.slow_start_recovery_time) {
     return 1.0;
   }
 
-  const config = route.failover.slowStart;
-  const durationMs = config.durationMs ?? 30000; // Default 30 seconds
-  const initialFactor = config.initialWeightFactor ?? 0.1; // Default 10%
+  const config = route.failover.slow_start;
+  const duration_ms = config.duration_ms ?? 30000; // Default 30 seconds
+  const initialFactor = config.initial_weight_factor ?? 0.1; // Default 10%
 
-  const elapsed = Date.now() - upstream.slowStartRecoveryTime;
+  const elapsed = Date.now() - upstream.slow_start_recovery_time;
 
   // If slow start period has passed, return 1.0 (full weight)
-  if (elapsed >= durationMs) {
+  if (elapsed >= duration_ms) {
     // Clear slow start state
-    upstream.slowStartRecoveryTime = undefined;
-    upstream.slowStartWeightFactor = 1.0;
+    upstream.slow_start_recovery_time = undefined;
+    upstream.slow_start_weight_factor = 1.0;
     return 1.0;
   }
 
   // Calculate linear progression from initialFactor to 1.0
-  const progress = elapsed / durationMs;
+  const progress = elapsed / duration_ms;
   const factor = initialFactor + (1.0 - initialFactor) * progress;
 
   // Update cached factor
-  upstream.slowStartWeightFactor = factor;
+  upstream.slow_start_weight_factor = factor;
 
   return factor;
 }
@@ -73,11 +73,11 @@ export function calculateSlowStartFactor(
  */
 export function getEffectiveWeight(
   upstream: RuntimeUpstream,
-  route: RouteConfig
+  route: EffectiveRouteConfig
 ): number {
   const baseWeight = upstream.weight ?? 100;
-  const slowStartFactor = calculateSlowStartFactor(upstream, route);
-  return Math.max(1, Math.round(baseWeight * slowStartFactor));
+  const slow_startFactor = calculateSlowStartFactor(upstream, route);
+  return Math.max(1, Math.round(baseWeight * slow_startFactor));
 }
 
 /**
@@ -90,14 +90,14 @@ export function getEffectiveWeight(
  */
 export function activateSlowStart(
   upstream: RuntimeUpstream,
-  route: RouteConfig
+  route: EffectiveRouteConfig
 ): void {
-  if (!route.failover?.slowStart?.enabled) {
+  if (!route.failover?.slow_start?.enabled) {
     return;
   }
 
-  upstream.slowStartRecoveryTime = Date.now();
-  upstream.slowStartWeightFactor = route.failover.slowStart.initialWeightFactor ?? 0.1;
+  upstream.slow_start_recovery_time = Date.now();
+  upstream.slow_start_weight_factor = route.failover.slow_start.initial_weight_factor ?? 0.1;
 }
 
 /**
@@ -108,8 +108,8 @@ export function activateSlowStart(
  * @param upstream - Runtime upstream to deactivate slow start for
  */
 export function deactivateSlowStart(upstream: RuntimeUpstream): void {
-  upstream.slowStartRecoveryTime = undefined;
-  upstream.slowStartWeightFactor = undefined;
+  upstream.slow_start_recovery_time = undefined;
+  upstream.slow_start_weight_factor = undefined;
 }
 
 /**
@@ -119,7 +119,7 @@ export function deactivateSlowStart(upstream: RuntimeUpstream): void {
  * @returns True if in slow start period
  */
 export function isInSlowStart(upstream: RuntimeUpstream): boolean {
-  return upstream.slowStartRecoveryTime !== undefined;
+  return upstream.slow_start_recovery_time !== undefined;
 }
 
 /**
@@ -131,15 +131,15 @@ export function isInSlowStart(upstream: RuntimeUpstream): boolean {
  */
 export function getSlowStartProgress(
   upstream: RuntimeUpstream,
-  route: RouteConfig
+  route: EffectiveRouteConfig
 ): number {
-  if (!upstream.slowStartRecoveryTime) {
+  if (!upstream.slow_start_recovery_time) {
     return 100; // Not in slow start or completed
   }
 
-  const durationMs = route.failover?.slowStart?.durationMs ?? 30000;
-  const elapsed = Date.now() - upstream.slowStartRecoveryTime;
-  const progress = Math.min(100, (elapsed / durationMs) * 100);
+  const duration_ms = route.failover?.slow_start?.duration_ms ?? 30000;
+  const elapsed = Date.now() - upstream.slow_start_recovery_time;
+  const progress = Math.min(100, (elapsed / duration_ms) * 100);
 
   return Math.round(progress);
 }
