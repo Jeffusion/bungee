@@ -96,12 +96,12 @@ npx bungee status
 
 ### Configuration model
 
-Bungee now uses **Config Model V2** for route failover settings:
+Bungee now uses **Config Model V3**:
 
-- Route request timeouts live under `timeouts`
-- Retry / passive health / recovery live under `failover`
-- Legacy failover timeout fields are migrated in memory to V2 on load
-- Mixed legacy/V2 failover fields in the same route are rejected
+- Reusable backend pools live under `services[].endpoints`
+- Routes usually reference a service with `service`
+- Config fields use snake_case, such as `config_version`, `body_parser_limit`, `path_rewrite`, and `retry_on`
+- Older config files are migrated in memory to V3 on load
 
 See [Configuration Guide](docs/configuration.md) for the current schema.
 

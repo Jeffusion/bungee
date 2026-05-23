@@ -23,10 +23,19 @@
 
 ```json
 {
+  "config_version": 3,
+  "services": [
+    {
+      "name": "openai-api",
+      "endpoints": [
+        { "target": "https://api.openai.com", "weight": 100, "priority": 1 }
+      ]
+    }
+  ],
   "routes": [
     {
       "path": "/v1/openai-compat",
-      "pathRewrite": { "^/v1/openai-compat": "/v1" },
+      "path_rewrite": { "^/v1/openai-compat": "/v1" },
       "plugins": [
         {
           "name": "openai-messages-to-chat",
@@ -37,9 +46,7 @@
           }
         }
       ],
-      "upstreams": [
-        { "target": "https://api.openai.com", "weight": 100, "priority": 1 }
-      ]
+      "service": "openai-api"
     }
   ]
 }

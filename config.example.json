@@ -1,6 +1,7 @@
 {
-  "configVersion": 2,
-  "bodyParserLimit": "50mb",
+  "config_version": 3,
+  "log_level": "info",
+  "body_parser_limit": "50mb",
   "auth": {
     "enabled": true,
     "tokens": [
@@ -8,14 +9,17 @@
       "{{ env.BACKUP_TOKEN }}"
     ]
   },
-  "routes": [
+  "logging": {
+    "body": {
+      "enabled": true,
+      "max_size": 5120,
+      "retention_days": 1
+    }
+  },
+  "services": [
     {
-      "path": "/public",
-      "auth": {
-        "enabled": false,
-        "tokens": []
-      },
-      "upstreams": [
+      "name": "public-service",
+      "endpoints": [
         {
           "target": "http://public-service.example.com",
           "priority": 1
@@ -23,15 +27,8 @@
       ]
     },
     {
-      "path": "/admin",
-      "auth": {
-        "enabled": true,
-        "tokens": [
-          "{{ env.ADMIN_TOKEN }}",
-          "{{ env.SUPER_ADMIN_TOKEN }}"
-        ]
-      },
-      "upstreams": [
+      "name": "admin-service",
+      "endpoints": [
         {
           "target": "http://admin-service.example.com",
           "priority": 1
@@ -39,14 +36,8 @@
       ]
     },
     {
-      "path": "/api/ai",
-      "plugins": [
-        {
-          "name": "ai-transformer",
-          "options": { "from": "anthropic", "to": "openai" }
-        }
-      ],
-      "upstreams": [
+      "name": "ai-providers",
+      "endpoints": [
         {
           "target": "https://api.openai.com",
           "priority": 1,
@@ -66,8 +57,8 @@
       ]
     },
     {
-      "path": "/api/simple",
-      "upstreams": [
+      "name": "simple-service",
+      "endpoints": [
         {
           "target": "http://single-service.example.com",
           "priority": 1,
@@ -86,6 +77,106 @@
           }
         }
       ]
+    },
+    {
+      "name": "load-balanced-api",
+      "endpoints": [
+        { "target": "http://service-a.example.com", "weight": 80, "priority": 1 },
+        {
+          "target": "http://service-b-canary.example.com",
+          "weight": 20,
+          "priority": 1,
+          "headers": {
+            "add": {
+              "x-version": "v2-canary",
+              "x-canary-id": "{{uuid()}}"
+            },
+            "replace": {
+              "authorization": "{{parseJWT(last(split(headers.authorization, ' '))).sub ? 'Bearer canary-' + last(split(headers.authorization, ' ')) : 'Bearer canary-default'}}"
+            }
+          },
+          "body": {
+            "replace": {
+              "environment": "canary",
+              "session_id": "{{body.session_id || uuid()}}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "critical-service",
+      "endpoints": [
+        { "target": "http://primary-critical-service.com", "priority": 1 },
+        { "target": "http://backup-critical-service.com", "weight": 100, "priority": 1 },
+        { "target": "http://fallback-critical-service.com", "weight": 50, "priority": 2 }
+      ],
+      "health_check": {
+        "enabled": true,
+        "interval_ms": 10000,
+        "timeout_ms": 3000,
+        "path": "/health",
+        "method": "GET",
+        "expected_status": [200],
+        "unhealthy_threshold": 3,
+        "healthy_threshold": 2,
+        "content_type": "application/json"
+      },
+      "failover": {
+        "enabled": true,
+        "retry_on": ">=500,!503",
+        "passive_health": {
+          "consecutive_failures": 3,
+          "healthy_successes": 2,
+          "auto_disable_threshold": 10,
+          "auto_enable_on_active_health_check": true
+        },
+        "recovery": {
+          "probe_interval_ms": 5000,
+          "probe_timeout_ms": 3000
+        },
+        "slow_start": {
+          "enabled": true,
+          "duration_ms": 60000,
+          "initial_weight_factor": 0.25
+        }
+      }
+    }
+  ],
+  "routes": [
+    {
+      "path": "/public",
+      "auth": {
+        "enabled": false,
+        "tokens": []
+      },
+      "service": "public-service"
+    },
+    {
+      "path": "/admin",
+      "auth": {
+        "enabled": true,
+        "tokens": [
+          "{{ env.ADMIN_TOKEN }}",
+          "{{ env.SUPER_ADMIN_TOKEN }}"
+        ]
+      },
+      "service": "admin-service"
+    },
+    {
+      "path": "/api/ai",
+      "path_rewrite": { "^/api/ai": "/v1" },
+      "plugins": [
+        {
+          "name": "ai-transformer",
+          "options": { "from": "anthropic", "to": "openai" }
+        }
+      ],
+      "service": "ai-providers"
+    },
+    {
+      "path": "/api/simple",
+      "service": "simple-service"
     },
     {
       "path": "/api/load-balanced-with-override",
@@ -112,64 +203,18 @@
           "client_ip": "{{trim(first(split(headers['x-forwarded-for'], ',')))}}"
         }
       },
-      "upstreams": [
-        { "target": "http://service-a.example.com", "weight": 80, "priority": 1 },
-        {
-          "target": "http://service-b-canary.example.com",
-          "weight": 20,
-          "priority": 1,
-          "headers": {
-            "add": {
-              "x-version": "v2-canary",
-              "x-canary-id": "{{uuid()}}"
-            },
-            "replace": {
-              "authorization": "{{parseJWT(last(split(headers.authorization, ' '))).sub ? 'Bearer canary-' + last(split(headers.authorization, ' ')) : 'Bearer canary-default'}}"
-            }
-          },
-          "body": {
-            "replace": {
-              "environment": "canary",
-              "session_id": "{{body.session_id || uuid()}}"
-            }
-          }
-        }
-      ]
+      "service": "load-balanced-api"
     },
     {
       "path": "/api/critical",
-      "stickySession": {
+      "sticky_session": {
         "enabled": true,
-        "keyExpression": "{{ headers['x-session-id'] || body.conversation_id || body.session_id }}"
+        "key_expression": "{{ headers['x-session-id'] || body.conversation_id || body.session_id }}"
       },
-      "upstreams": [
-        { "target": "http://primary-critical-service.com", "priority": 1 },
-        { "target": "http://backup-critical-service.com", "weight": 100, "priority": 1 },
-        { "target": "http://fallback-critical-service.com", "weight": 50, "priority": 2 }
-      ],
+      "service": "critical-service",
       "timeouts": {
-        "requestMs": 30000,
-        "connectMs": 5000
-      },
-      "failover": {
-        "enabled": true,
-        "retryOn": ">=500,!503",
-        "passiveHealth": {
-          "consecutiveFailures": 3,
-          "healthySuccesses": 2,
-          "autoDisableThreshold": 10,
-          "autoEnableOnActiveHealthCheck": true
-        },
-        "recovery": {
-          "probeIntervalMs": 5000,
-          "probeTimeoutMs": 3000
-        },
-        "healthCheck": {
-          "enabled": true,
-          "intervalMs": 10000,
-          "timeoutMs": 3000,
-          "path": "/health"
-        }
+        "request_ms": 30000,
+        "connect_ms": 5000
       }
     }
   ]

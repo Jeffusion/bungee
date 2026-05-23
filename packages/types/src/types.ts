@@ -82,85 +82,150 @@ export interface AuthConfig {
   tokens: string[];
 }
 
-export interface Upstream extends ModificationRules {
-  id?: string; // 可选的唯一标识符，如果未提供则使用索引
+export interface Endpoint extends ModificationRules {
+  id?: string;
   target: string;
-  weight?: number; // 权重，默认为 100
-  priority?: number; // 数字越小优先级越高，默认为 1
-  plugins?: Array<PluginConfig | string>; // Upstream 级别的 plugins（覆盖路由和全局配置）
-  disabled?: boolean; // 是否禁用该上游，默认为 false（未禁用）
-  description?: string; // 上游服务器的描述信息
-  condition?: string; // 条件表达式，使用 {{ }} 包裹，例如: "{{ body.model === 'gpt-4' }}"
+  weight?: number;
+  priority?: number;
+  plugins?: Array<PluginConfig | string>;
+  is_disabled?: boolean;
+  description?: string;
+  condition?: string;
 }
 
 export interface StickySessionConfig {
   enabled: boolean;
-  keyExpression?: string;
+  key_expression?: string;
 }
 
 export interface RouteTimeoutsConfig {
-  connectMs?: number;
-  requestMs?: number;
+  connect_ms?: number;
+  request_ms?: number;
 }
 
 export interface FailoverPassiveHealthConfig {
-  consecutiveFailures?: number;
-  healthySuccesses?: number;
-  autoDisableThreshold?: number;
-  autoEnableOnActiveHealthCheck?: boolean;
+  consecutive_failures?: number;
+  healthy_successes?: number;
+  auto_disable_threshold?: number;
+  auto_enable_on_active_health_check?: boolean;
 }
 
 export interface FailoverRecoveryConfig {
-  probeIntervalMs?: number;
-  probeTimeoutMs?: number;
+  probe_interval_ms?: number;
+  probe_timeout_ms?: number;
 }
 
 export interface FailoverSlowStartConfig {
   enabled: boolean;
-  durationMs?: number;
-  initialWeightFactor?: number;
+  duration_ms?: number;
+  initial_weight_factor?: number;
 }
 
 export interface FailoverHealthCheckConfig {
   enabled: boolean;
-  intervalMs?: number;
-  timeoutMs?: number;
+  interval_ms?: number;
+  timeout_ms?: number;
   path?: string;
   method?: string;
-  expectedStatus?: number[];
-  unhealthyThreshold?: number;
-  healthyThreshold?: number;
+  expected_status?: number[];
+  unhealthy_threshold?: number;
+  healthy_threshold?: number;
   body?: string;
-  contentType?: string;
+  content_type?: string;
   headers?: Record<string, string>;
   query?: Record<string, string>;
 }
 
+export interface Service {
+  name: string;
+  endpoints: Endpoint[];
+  health_check?: FailoverHealthCheckConfig;
+  failover?: FailoverConfig;
+  sticky_session?: StickySessionConfig;
+}
+
 export interface FailoverConfig {
   enabled: boolean;
-  retryOn?: number | string | (number | string)[];
-  passiveHealth?: FailoverPassiveHealthConfig;
+  retry_on?: number | string | (number | string)[];
+  passive_health?: FailoverPassiveHealthConfig;
   recovery?: FailoverRecoveryConfig;
-  slowStart?: FailoverSlowStartConfig;
-  healthCheck?: FailoverHealthCheckConfig;
+  slow_start?: FailoverSlowStartConfig;
+  health_check?: FailoverHealthCheckConfig;
+}
+
+export interface RateLimitConfig {
+  enabled: boolean;
+  requests_per_second?: number;
+  burst?: number;
+  key_expression?: string;
+}
+
+export interface CorsConfig {
+  enabled: boolean;
+  allowed_origins?: string[];
+  allowed_methods?: string[];
+  allowed_headers?: string[];
+  expose_headers?: string[];
+  allow_credentials?: boolean;
+  max_age?: number;
+}
+
+export interface DirectResponseConfig {
+  enabled: boolean;
+  status: number;
+  body?: string;
+  content_type?: string;
+  headers?: Record<string, string>;
+}
+
+export interface RedirectConfig {
+  enabled: boolean;
+  url: string;
+  status?: 301 | 302 | 307 | 308;
+  preserve_path?: boolean;
+}
+
+export interface ResponseRuleConfig {
+  enabled: boolean;
+  path: string;
+  match_type?: 'exact' | 'prefix' | 'regex';
+  type: 'direct_response' | 'redirect';
+  status?: number;
+  body?: string;
+  content_type?: string;
+  headers?: Record<string, string>;
+  url?: string;
+  preserve_path?: boolean;
+}
+
+export interface RetryConfig {
+  enabled: boolean;
+  max_retries?: number;
+  retry_on?: number[];
+  per_retry_timeout_ms?: number;
 }
 
 export interface RouteConfig extends ModificationRules {
   path: string;
-  pathRewrite?: Record<string, string>;
-  auth?: AuthConfig; // 路由级认证配置（可覆盖全局配置）
-  plugins?: Array<PluginConfig | string>; // 路由级别的 plugins（支持字符串引用内置 plugin）
-  stickySession?: StickySessionConfig;
-  upstreams: Upstream[];
+  service?: string;
+  endpoints?: Endpoint[];
+  path_rewrite?: Record<string, string>;
+  auth?: AuthConfig;
+  plugins?: Array<PluginConfig | string>;
   timeouts?: RouteTimeoutsConfig;
-  failover?: FailoverConfig;
+  rate_limit?: RateLimitConfig;
+  cors?: CorsConfig;
+  response_rules?: ResponseRuleConfig[];
+  direct_response?: DirectResponseConfig;
+  redirect?: RedirectConfig;
+  retry?: RetryConfig;
 }
 
 export interface LoggingConfig {
   body?: {
     enabled: boolean;
-    maxSize: number;      // 最大大小（字节）
-    retentionDays: number; // 保留天数
+    max_size: number;      // 最大大小（字节）
+    retention_days: number; // 保留天数
   };
 }
 
@@ -203,11 +268,12 @@ export interface PluginConfig {
 }
 
 export interface AppConfig {
-  configVersion?: number;
-  logLevel?: string;
-  bodyParserLimit?: string;
-  auth?: AuthConfig; // 全局认证配置（适用于所有 routes，可被路由级配置覆盖）
-  logging?: LoggingConfig; // 日志配置
-  plugins?: Array<PluginConfig | string>; // 全局 plugins 配置（支持字符串引用内置 plugin）
+  config_version?: number;
+  log_level?: string;
+  body_parser_limit?: string;
+  auth?: AuthConfig;
+  logging?: LoggingConfig;
+  plugins?: Array<PluginConfig | string>;
+  services?: Service[];
   routes: RouteConfig[];
 }

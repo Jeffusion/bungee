@@ -38,7 +38,7 @@ Major endpoint groups:
 
 - Auth: `/api/auth/*`
 - Config: `/api/config`, `/api/config/validate`
-- Routes/upstreams: `/api/routes`, `/api/routes/:route/upstreams/:index/(enable|disable)`
+- Routes/endpoints: `/api/routes`, `/api/routes/:route/upstreams/:index/(enable|disable)`
 - Stats: `/api/stats*`
 - System: `/api/system`, `/api/system/reload`, `/api/system/restart`
 - Plugins: `/api/plugins*`
