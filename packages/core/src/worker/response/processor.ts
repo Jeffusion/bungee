@@ -239,7 +239,7 @@ function createSSEStageTapStream<T>(
             chunks: chunkCount,
             bytes: options?.includeBytes ? byteCount : undefined,
             doneSignals: doneCount,
-            durationMs: Date.now() - startAt
+            duration_ms: Date.now() - startAt
           }
         },
         'SSE stream stage completed'
@@ -563,14 +563,14 @@ export async function prepareResponse(
   streamCompletionState?: StreamCompletionState
 ): Promise<PrepareResponseResult> {
   const headers = new Headers(res.headers);
-  const contentType = headers.get('content-type') || '';
+  const content_type = headers.get('content-type') || '';
 
   // Since we are buffering the body, we MUST remove chunked encoding headers.
   headers.delete('transfer-encoding');
   headers.delete('content-encoding');
 
   // ===== Streaming Response (SSE) =====
-  if (isStreamingRequest && contentType.includes('text/event-stream') && res.body) {
+  if (isStreamingRequest && content_type.includes('text/event-stream') && res.body) {
     logger.info({ request: requestLog }, '--- Applying SSE Stream Transformation ---');
     headers.delete('content-length');
 
@@ -664,7 +664,7 @@ export async function prepareResponse(
           // 如果不是 JSON，直接记录原始字符串
           reqLogger.setResponseBody(rawBodyText);
         }
-      } else if (contentType.includes('application/json')) {
+      } else if (content_type.includes('application/json')) {
         // 成功响应：仅记录 JSON 类型
         try {
           const parsedResponseBody = JSON.parse(rawBodyText);
@@ -680,7 +680,7 @@ export async function prepareResponse(
   }
 
   // Apply body modification rules (if configured and JSON response)
-  if (rules.body && contentType.includes('application/json')) {
+  if (rules.body && content_type.includes('application/json')) {
     try {
       // Only parse and modify if there is a body.
       if (rawBodyText) {

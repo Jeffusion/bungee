@@ -5,10 +5,10 @@
 
 import { logger } from '../../logger';
 import { forEach, isEmpty } from 'lodash-es';
-import type { AppConfig, RouteConfig } from '@jeffusion/bungee-types';
+import type { AppConfig } from '@jeffusion/bungee-types';
 import type { RequestLogger } from '../../logger/request-logger';
 import { processDynamicValue } from '../../expression-engine';
-import type { RuntimeUpstream, RequestSnapshot } from '../types';
+import type { EffectiveRouteConfig, RuntimeUpstream, RequestSnapshot } from '../types';
 import { getScopedPluginRegistry } from '../../scoped-plugin-registry';
 import { buildRequestContextFromSnapshot } from './context-builder';
 import { deepMergeRules, applyBodyRules, applyQueryRules } from '../rules/modifier';
@@ -63,7 +63,7 @@ export interface ProxyRequestResult {
  */
 export async function proxyRequest(
   requestSnapshot: RequestSnapshot,
-  route: RouteConfig,
+  route: EffectiveRouteConfig,
   upstream: RuntimeUpstream,
   requestLog: any,
   config: AppConfig,
@@ -75,7 +75,7 @@ export async function proxyRequest(
 
   // Log snapshot usage for debugging
   const bodySize = requestSnapshot.body
-    ? (requestSnapshot.isJsonBody
+    ? (requestSnapshot.is_json_body
       ? JSON.stringify(requestSnapshot.body).length
       : requestSnapshot.body.byteLength)
     : 0;
@@ -87,7 +87,7 @@ export async function proxyRequest(
       snapshot: {
         method: requestSnapshot.method,
         hasBody: !!requestSnapshot.body,
-        bodyType: requestSnapshot.isJsonBody ? 'json' : 'binary',
+        bodyType: requestSnapshot.is_json_body ? 'json' : 'binary',
         bodySize,
         isRetry: upstream.status === 'UNHEALTHY'
       }
@@ -96,9 +96,9 @@ export async function proxyRequest(
   );
 
   // ===== 获取预编译的 Hooks（O(1) 查找）=====
-  const upstreamId = upstream.upstreamId; // Use the unique upstreamId
+  const upstream_id = upstream.upstream_id; // Use the unique upstream_id
   const scopedRegistry = getScopedPluginRegistry();
-  const precompiledHooks = scopedRegistry?.getPrecompiledHooks(routeId, upstreamId) ?? null;
+  const precompiledHooks = scopedRegistry?.getPrecompiledHooks(routeId, upstream_id) ?? null;
 
   // Extract request metadata for plugin hooks
   const clientIP = requestSnapshot.headers['x-forwarded-for'] ||
@@ -119,16 +119,16 @@ export async function proxyRequest(
     );
   }
 
-  // ===== 1. Set target URL and apply route-level pathRewrite =====
+  // ===== 1. Set target URL and apply route-level path_rewrite =====
   const targetUrl = new URL(upstream.target);
   const targetBasePath = targetUrl.pathname;
   const snapshotUrl = new URL(requestSnapshot.url);
   targetUrl.pathname = snapshotUrl.pathname;
   targetUrl.search = snapshotUrl.search;
 
-  if (route.pathRewrite) {
+  if (route.path_rewrite) {
     const originalPathname = targetUrl.pathname;
-    for (const [pattern, replacement] of Object.entries(route.pathRewrite)) {
+    for (const [pattern, replacement] of Object.entries(route.path_rewrite)) {
       try {
         const regex = new RegExp(pattern);
         if (regex.test(targetUrl.pathname)) {
@@ -139,20 +139,20 @@ export async function proxyRequest(
               path: { from: originalPathname, to: targetUrl.pathname },
               rule: { pattern, replacement }
             },
-            `Applied route pathRewrite`
+            `Applied route path_rewrite`
           );
           break;
         }
       } catch (error) {
-        logger.error({ request: requestLog, pattern, error }, 'Invalid regex in pathRewrite rule');
+        logger.error({ request: requestLog, pattern, error }, 'Invalid regex in path_rewrite rule');
       }
     }
   }
 
-  // 记录 pathRewrite 转换后的路径（不包含 base path）
+  // 记录 path_rewrite 转换后的路径（不包含 base path）
   if (reqLogger && targetUrl.pathname !== snapshotUrl.pathname) {
     reqLogger.setTransformedPath(targetUrl.pathname);
-    logger.debug({ request: requestLog, transformedPath: targetUrl.pathname }, 'Path after pathRewrite');
+    logger.debug({ request: requestLog, transformedPath: targetUrl.pathname }, 'Path after path_rewrite');
   }
 
   // ===== 2. Build initial context from snapshot =====
@@ -172,7 +172,7 @@ export async function proxyRequest(
       clientIP,
       requestId,
       routeId,
-      upstreamId,
+      upstreamId: upstream_id,
     };
     const pluginInitStartTime = performance.now();
     await precompiledHooks.hooks.onRequestInit.promise(ctx);
@@ -189,8 +189,41 @@ export async function proxyRequest(
 
   // ===== 4. Apply route and upstream modification rules =====
   // Layer 1 (Outer): Route and Upstream rules
-  const { path: routePath, upstreams, ...routeModificationRules } = route;
-  const { target, weight, priority, plugins: upstreamPlugins, ...upstreamModificationRules } = upstream;
+  const {
+    path: routePath,
+    endpoints,
+    service,
+    timeouts,
+    failover,
+    path_rewrite,
+    auth,
+    plugins,
+    rate_limit,
+    cors,
+    direct_response,
+    redirect,
+    retry,
+    ...routeModificationRules
+  } = route;
+  const {
+    target,
+    weight,
+    priority,
+    plugins: upstreamPlugins,
+    id,
+    is_disabled,
+    upstream_id: runtime_upstream_id,
+    status,
+    last_failure_time,
+    consecutive_failures,
+    consecutive_successes,
+    recovery_attempt_count,
+    health_check_successes,
+    health_check_failures,
+    slow_start_recovery_time,
+    slow_start_weight_factor,
+    ...upstreamModificationRules
+  } = upstream;
   const routeAndUpstreamRequestRules = deepMergeRules(routeModificationRules, upstreamModificationRules);
 
   let intermediateContext = { ...context };
@@ -276,7 +309,7 @@ export async function proxyRequest(
   let body: BodyInit | null = null;
 
   if (requestSnapshot.body) {
-    if (requestSnapshot.isJsonBody) {
+    if (requestSnapshot.is_json_body) {
       // JSON body - serialize finalBody (which may have been modified by plugins/rules)
       body = JSON.stringify(finalBody);
       if (!isEmpty(finalBody)) {
@@ -318,7 +351,7 @@ export async function proxyRequest(
       clientIP,
       requestId,
       routeId,
-      upstreamId,
+      upstreamId: upstream_id,
     };
 
     const beforeRequestStartTime = performance.now();
@@ -351,7 +384,7 @@ export async function proxyRequest(
   }
 
   // 7.1 Re-serialize body after plugins have modified it
-  if (requestSnapshot.body && requestSnapshot.isJsonBody) {
+  if (requestSnapshot.body && requestSnapshot.is_json_body) {
     body = JSON.stringify(finalBody);
     if (!isEmpty(finalBody)) {
       headers.set('Content-Length', String(Buffer.byteLength(body as string)));
@@ -370,7 +403,7 @@ export async function proxyRequest(
     reqLogger.setRequestHeaders(transformedHeaders);
 
     // Record transformed body (只记录 JSON 类型)
-    if (config.logging?.body?.enabled && requestSnapshot.isJsonBody && finalBody) {
+    if (config.logging?.body?.enabled && requestSnapshot.is_json_body && finalBody) {
       try {
         reqLogger.setRequestBody(finalBody);
       } catch (err) {
@@ -398,7 +431,7 @@ export async function proxyRequest(
       clientIP,
       requestId,
       routeId,
-      upstreamId,
+      upstreamId: upstream_id,
     };
 
     const interceptStartTime = performance.now();
@@ -435,10 +468,10 @@ export async function proxyRequest(
     const failoverEnabled = route.failover?.enabled === true;
     const isRecoveryAttempt = failoverEnabled &&
       (upstream.status === 'UNHEALTHY' || upstream.status === 'HALF_OPEN');
-    const recoveryTimeoutMs = route.failover?.recovery?.probeTimeoutMs || 3000;
-    const configuredRequestTimeoutMs = route.timeouts?.requestMs || 30000;
+    const recoveryTimeoutMs = route.failover?.recovery?.probe_timeout_ms || 3000;
+    const configuredRequestTimeoutMs = route.timeouts?.request_ms || 30000;
     const timeoutMs = isRecoveryAttempt ? recoveryTimeoutMs : configuredRequestTimeoutMs;
-    const connectTimeoutMs = route.timeouts?.connectMs || 5000;
+    const connectTimeoutMs = route.timeouts?.connect_ms || 5000;
 
     let fetchOptions: ExtendedRequestInit = {
       method: requestSnapshot.method,
@@ -590,7 +623,7 @@ export async function proxyRequest(
         clientIP,
         requestId,
         routeId,
-        upstreamId,
+        upstreamId: upstream_id,
       };
       const responseStartTime = performance.now();
       proxyRes = await precompiledHooks.hooks.onResponse.promise(proxyRes, ctx);
@@ -615,7 +648,7 @@ export async function proxyRequest(
       clientIP,
       requestId,
       routeId,
-      upstreamId,
+      upstreamId: upstream_id,
     };
 
     const streamCompletionState: StreamCompletionState | undefined =
@@ -664,7 +697,7 @@ export async function proxyRequest(
         clientIP,
         requestId,
         routeId,
-        upstreamId,
+        upstreamId: upstream_id,
       };
       const errorStartTime = performance.now();
       await precompiledHooks.hooks.onError.promise(ctx);

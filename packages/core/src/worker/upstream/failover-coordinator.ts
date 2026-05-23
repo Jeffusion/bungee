@@ -4,8 +4,7 @@
  */
 
 import { sortBy } from 'lodash-es';
-import type { RuntimeUpstream } from '../types';
-import type { RouteConfig } from '@jeffusion/bungee-types';
+import type { EffectiveRouteConfig, RuntimeUpstream } from '../types';
 import type { ExpressionContext } from '../../expression-engine';
 import { PriorityGroup } from './priority-group';
 import { filterByCondition } from './condition-filter';
@@ -56,7 +55,7 @@ export class FailoverCoordinator {
    */
   constructor(
     upstreams: RuntimeUpstream[],
-    route: RouteConfig,
+    route: EffectiveRouteConfig,
     recoveryIntervalMs: number,
     context?: ExpressionContext
   ) {
@@ -187,14 +186,14 @@ export class FailoverCoordinator {
    */
   private groupByPriority(
     upstreams: RuntimeUpstream[],
-    route: RouteConfig,
+    route: EffectiveRouteConfig,
     recoveryIntervalMs: number,
     context?: ExpressionContext
   ): Map<number, PriorityGroup> {
     const groups = new Map<number, PriorityGroup>();
 
     // Filter out disabled upstreams
-    const enabledUpstreams = upstreams.filter(u => !u.disabled);
+    const enabledUpstreams = upstreams.filter(u => !u.is_disabled);
 
     // Filter by condition expression (if context provided)
     let filteredUpstreams = enabledUpstreams;

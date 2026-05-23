@@ -64,11 +64,11 @@ export function canAttemptUpstream(
   }
 
   // UNHEALTHY upstreams: check if exponential backoff recovery interval has elapsed
-  if (upstream.status === 'UNHEALTHY' && upstream.lastFailureTime !== undefined) {
-    const elapsed = Date.now() - upstream.lastFailureTime;
+  if (upstream.status === 'UNHEALTHY' && upstream.last_failure_time !== undefined) {
+    const elapsed = Date.now() - upstream.last_failure_time;
     const jitteredInterval = calculateBackoffInterval(
       recoveryIntervalMs,
-      upstream.recoveryAttemptCount
+      upstream.recovery_attempt_count
     );
 
     if (elapsed >= jitteredInterval) {

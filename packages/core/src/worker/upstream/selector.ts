@@ -5,12 +5,12 @@
 
 import { forEach, sumBy, sortBy } from 'lodash-es';
 import crypto from 'crypto';
-import type { RuntimeUpstream, UpstreamSelector } from '../types';
-import type { RouteConfig } from '@jeffusion/bungee-types';
+import type { EffectiveRouteConfig, RuntimeUpstream, UpstreamSelector } from '../types';
 import type { ExpressionContext } from '../../expression-engine';
 import { processDynamicValue } from '../../expression-engine';
 import { getEffectiveWeight } from '../utils/slow-start';
 import { filterByCondition } from './condition-filter';
+import { runtimeState } from '../state/runtime-state';
 
 type RecordLike = Record<string, unknown>;
 
@@ -67,12 +67,13 @@ function getDefaultStickySessionKey(context: ExpressionContext): string | undefi
   return undefined;
 }
 
-function resolveStickySessionKey(route?: RouteConfig, context?: ExpressionContext): string | undefined {
-  if (!route?.stickySession?.enabled || !context) {
+function resolveStickySessionKey(route?: EffectiveRouteConfig, context?: ExpressionContext): string | undefined {
+  const stickySession = route ? runtimeState.get(route.service ?? route.path)?.sticky_session : undefined;
+  if (!stickySession?.enabled || !context) {
     return undefined;
   }
 
-  const expression = route.stickySession.keyExpression;
+  const expression = stickySession.key_expression;
   if (typeof expression === 'string' && expression.trim().length > 0) {
     try {
       const evaluated = processDynamicValue(expression, context);
@@ -97,7 +98,7 @@ function hashToUnitInterval(input: string): number {
 function selectStickyUpstream(
   upstreams: RuntimeUpstream[],
   stickyKey: string,
-  route?: RouteConfig
+  route?: EffectiveRouteConfig
 ): RuntimeUpstream | undefined {
   let selected: RuntimeUpstream | undefined;
   let selectedScore = Number.POSITIVE_INFINITY;
@@ -108,7 +109,7 @@ function selectStickyUpstream(
       continue;
     }
 
-    const uniqueId = upstream.upstreamId || upstream.target;
+    const uniqueId = upstream.upstream_id || upstream.target;
     const random = hashToUnitInterval(`${stickyKey}::${uniqueId}`);
     const score = -Math.log(random) / weight;
 
@@ -152,13 +153,13 @@ function selectStickyUpstream(
  */
 export function selectUpstream(
   upstreams: RuntimeUpstream[],
-  route?: RouteConfig,
+  route?: EffectiveRouteConfig,
   context?: ExpressionContext
 ): RuntimeUpstream | undefined {
   if (upstreams.length === 0) return undefined;
 
   // 过滤出未禁用的上游 (disabled !== true)
-  let filteredUpstreams = upstreams.filter(u => !u.disabled);
+  let filteredUpstreams = upstreams.filter(u => !u.is_disabled);
 
   if (filteredUpstreams.length === 0) {
     // 所有上游都被禁用，返回 undefined
@@ -177,7 +178,7 @@ export function selectUpstream(
 
   // 按优先级分组 (priority 值越小优先级越高)
   const priorityGroups = new Map<number, RuntimeUpstream[]>();
-  const stickySessionKey = resolveStickySessionKey(route, context);
+  const sticky_sessionKey = resolveStickySessionKey(route, context);
 
   forEach(filteredUpstreams, (upstream) => {
     const priority = upstream.priority || 1;
@@ -194,8 +195,8 @@ export function selectUpstream(
   for (const priority of sortedPriorities) {
     const priorityUpstreams = priorityGroups.get(priority)!;
 
-    if (stickySessionKey) {
-      const stickySelected = selectStickyUpstream(priorityUpstreams, stickySessionKey, route);
+    if (sticky_sessionKey) {
+      const stickySelected = selectStickyUpstream(priorityUpstreams, sticky_sessionKey, route);
       if (stickySelected) {
         return stickySelected;
       }

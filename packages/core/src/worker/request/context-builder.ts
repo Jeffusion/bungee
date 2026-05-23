@@ -29,7 +29,7 @@ export interface RequestContextResult {
  * to ensure proper isolation.
  *
  * @param req - Incoming HTTP request
- * @param rewrittenPath - Path after pathRewrite rules applied
+ * @param rewrittenPath - Path after path_rewrite rules applied
  * @param requestLog - Request log for debugging
  * @returns Request context result
  *
@@ -51,8 +51,8 @@ export async function buildRequestContext(
   let parsedBody: Record<string, any> = {};
 
   // Parse JSON body if present
-  const contentType = req.headers.get('content-type') || '';
-  if (req.body && contentType.includes('application/json')) {
+  const content_type = req.headers.get('content-type') || '';
+  if (req.body && content_type.includes('application/json')) {
     try {
       parsedBody = await req.clone().json();
     } catch (err) {
@@ -103,7 +103,7 @@ export async function buildRequestContext(
  * - Used exclusively in failover retry scenarios
  *
  * @param snapshot - Request snapshot created before plugin execution
- * @param rewrittenPath - Path after pathRewrite rules applied
+ * @param rewrittenPath - Path after path_rewrite rules applied
  * @param requestLog - Request log for debugging
  * @returns Request context result
  *
@@ -128,7 +128,7 @@ export function buildRequestContextFromSnapshot(
   const url = new URL(snapshot.url);
 
   // Deep clone the body to ensure isolation
-  const parsedBody = snapshot.isJsonBody && snapshot.body
+  const parsedBody = snapshot.is_json_body && snapshot.body
     ? structuredClone(snapshot.body)
     : {};
 

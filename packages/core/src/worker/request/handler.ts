@@ -6,9 +6,9 @@
 import { logger } from '../../logger';
 import { RequestLogger } from '../../logger/request-logger';
 import { find, map } from 'lodash-es';
-import type { AppConfig } from '@jeffusion/bungee-types';
-import type { ExpressionContext } from '../../expression-engine';
-import type { RuntimeUpstream } from '../types';
+import type { AppConfig, CorsConfig, Endpoint, ResponseRuleConfig, RouteConfig, Service } from '@jeffusion/bungee-types';
+import { processDynamicValue, type ExpressionContext } from '../../expression-engine';
+import type { EffectiveRouteConfig, RuntimeUpstream } from '../types';
 import { selectUpstream } from '../upstream/selector';
 import { FailoverCoordinator } from '../upstream/failover-coordinator';
 import { runtimeState } from '../state/runtime-state';
@@ -22,6 +22,8 @@ import { statsCollector } from '../../api/collectors/stats-collector';
 import { activateSlowStart, deactivateSlowStart } from '../utils/slow-start';
 import { createStatusCodeMatcher, type StatusCodeMatcher } from '../utils/status-code-matcher';
 
+const rateLimitBuckets = new Map<string, { count: number; resetTime: number }>();
+
 function isStreamingResponse(response: Response): boolean {
   return response.headers.get('content-type')?.includes('text/event-stream') ?? false;
 }
@@ -32,6 +34,173 @@ function cloneResponseWithBody(response: Response, body: ReadableStream<Uint8Arr
     statusText: response.statusText,
     headers: response.headers,
   });
+}
+
+function resolveRouteService(config: AppConfig, route: RouteConfig): Service | undefined {
+  return route.service ? config.services?.find((service) => service.name === route.service) : undefined;
+}
+
+function resolveRouteEndpoints(config: AppConfig, route: RouteConfig): Endpoint[] {
+  const service = resolveRouteService(config, route);
+  const serviceEndpoints = service?.endpoints ?? [];
+  const routeEndpoints = route.endpoints ?? [];
+
+  const merged = [...serviceEndpoints];
+  for (const endpoint of routeEndpoints) {
+    const existingIdx = merged.findIndex(candidate => candidate.target === endpoint.target);
+    if (existingIdx >= 0) {
+      merged[existingIdx] = { ...merged[existingIdx], ...endpoint };
+    } else {
+      merged.push(endpoint);
+    }
+  }
+  return merged;
+}
+
+function resolveEffectiveRoute(config: AppConfig, route: RouteConfig): EffectiveRouteConfig {
+  const service = resolveRouteService(config, route);
+  const endpoints = resolveRouteEndpoints(config, route);
+
+  return {
+    ...route,
+    endpoints,
+    failover: service?.failover,
+  };
+}
+
+function stripRouteWildcard(routePath: string): string {
+  return routePath.replace(/\/\*$/, '').replace(/\/:\w+/g, '');
+}
+
+function getRouteRelativePath(pathname: string, routePath: string): string {
+  const basePath = stripRouteWildcard(routePath);
+  if (!basePath || basePath === '/') return pathname;
+  if (!pathname.startsWith(basePath)) return pathname;
+  const relative = pathname.slice(basePath.length);
+  return relative.startsWith('/') ? relative : `/${relative}`;
+}
+
+function pathMatchesRule(pathname: string, routePath: string, rule: ResponseRuleConfig): boolean {
+  if (!rule.enabled || !rule.path) return false;
+
+  const matchType = rule.match_type ?? 'exact';
+  const normalizedRulePath = rule.path.startsWith('/') ? rule.path : `/${rule.path}`;
+  const relativePath = getRouteRelativePath(pathname, routePath);
+  const candidates = [pathname, relativePath];
+
+  if (matchType === 'regex') {
+    try {
+      const pattern = new RegExp(normalizedRulePath);
+      return candidates.some(candidate => pattern.test(candidate));
+    } catch {
+      return false;
+    }
+  }
+
+  if (matchType === 'prefix') {
+    return candidates.some(candidate => candidate.startsWith(normalizedRulePath));
+  }
+
+  return candidates.some(candidate => candidate === normalizedRulePath);
+}
+
+function findResponseRule(route: RouteConfig, pathname: string): ResponseRuleConfig | undefined {
+  return route.response_rules?.find(rule => pathMatchesRule(pathname, route.path, rule));
+}
+
+function createResponseRuleResponse(rule: ResponseRuleConfig, req: Request): Response {
+  if (rule.type === 'redirect') {
+    const responseStatus = rule.status ?? 302;
+    const redirectTarget = rule.url ?? '/';
+    const redirectUrl = rule.preserve_path ? redirectTarget + new URL(req.url).pathname : redirectTarget;
+    return new Response(null, { status: responseStatus, headers: { location: redirectUrl } });
+  }
+
+  const status = rule.status ?? 200;
+  const headers = { ...(rule.headers ?? {}) };
+  if (!Object.keys(headers).some(header => header.toLowerCase() === 'content-type')) {
+    headers['content-type'] = rule.content_type ?? 'text/plain';
+  }
+  return new Response(rule.body ?? '', {
+    status,
+    headers
+  });
+}
+
+function corsHeaders(cors: CorsConfig, request: Request): Record<string, string> {
+  const origin = request.headers.get('origin') || '';
+  const headers: Record<string, string> = {};
+  if (cors.allowed_origins?.includes('*') || cors.allowed_origins?.includes(origin)) {
+    headers['access-control-allow-origin'] = cors.allowed_origins?.includes('*') ? '*' : origin;
+    if (cors.allow_credentials) headers['access-control-allow-credentials'] = 'true';
+    if (cors.allowed_methods) headers['access-control-allow-methods'] = cors.allowed_methods.join(', ');
+    if (cors.allowed_headers) headers['access-control-allow-headers'] = cors.allowed_headers.join(', ');
+    if (cors.expose_headers) headers['access-control-expose-headers'] = cors.expose_headers.join(', ');
+    if (cors.max_age !== undefined) headers['access-control-max-age'] = String(cors.max_age);
+  }
+  return headers;
+}
+
+function applyCorsHeaders(response: Response, cors: CorsConfig | undefined, request: Request): Response {
+  if (!cors?.enabled) {
+    return response;
+  }
+
+  const headers = new Headers(response.headers);
+  for (const [key, value] of Object.entries(corsHeaders(cors, request))) {
+    headers.set(key, value);
+  }
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+function resolveRateLimitKey(route: RouteConfig, request: Request, context: ExpressionContext): string {
+  const expression = route.rate_limit?.key_expression;
+  if (expression && expression.trim().length > 0) {
+    try {
+      const evaluated = processDynamicValue(expression, context);
+      if (evaluated !== undefined && evaluated !== null) {
+        const key = String(evaluated).trim();
+        if (key.length > 0) {
+          return key;
+        }
+      }
+    } catch (error) {
+      logger.warn({ error: (error as Error).message, route: route.path }, 'Failed to evaluate rate_limit key_expression; falling back to client IP');
+    }
+  }
+
+  return request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || request.headers.get('x-real-ip') || 'unknown';
+}
+
+function checkRateLimit(route: RouteConfig, request: Request, context: ExpressionContext): boolean {
+  const rateLimit = route.rate_limit;
+  if (!rateLimit?.enabled) {
+    return true;
+  }
+
+  const requestsPerSecond = rateLimit.requests_per_second ?? 1;
+  const burst = rateLimit.burst ?? requestsPerSecond;
+  const key = `${route.path}:${resolveRateLimitKey(route, request, context)}`;
+  const now = Date.now();
+  const resetTime = now + 1000;
+  const bucket = rateLimitBuckets.get(key);
+
+  if (!bucket || bucket.resetTime <= now) {
+    rateLimitBuckets.set(key, { count: 1, resetTime });
+    return true;
+  }
+
+  if (bucket.count >= burst) {
+    return false;
+  }
+
+  bucket.count++;
+  return true;
 }
 
 /**
@@ -79,7 +248,7 @@ export async function handleRequest(
   config: AppConfig,
   upstreamSelector: (
     upstreams: RuntimeUpstream[],
-    route?: import('@jeffusion/bungee-types').RouteConfig,
+    route?: EffectiveRouteConfig,
     context?: ExpressionContext
   ) => RuntimeUpstream | undefined = selectUpstream
 ): Promise<Response> {
@@ -122,7 +291,7 @@ export async function handleRequest(
   let routePath: string | undefined;
   let routeId: string | undefined;
   let upstream: string | undefined;
-  let upstreamId: string | undefined;
+  let upstream_id: string | undefined;
   let deferFinallyToStream = false;
   let finalized = false;
   let streamResult: ProxyRequestResult | undefined;
@@ -145,7 +314,7 @@ export async function handleRequest(
     }
 
     const scopedRegistry = getScopedPluginRegistry();
-    const precompiledHooks = scopedRegistry?.getPrecompiledHooks(routeId, upstreamId) ?? null;
+    const precompiledHooks = scopedRegistry?.getPrecompiledHooks(routeId, upstream_id) ?? null;
     if (!precompiledHooks?.hooks.onFinally.hasCallbacks()) {
       return;
     }
@@ -157,7 +326,7 @@ export async function handleRequest(
         clientIP: req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown',
         requestId,
         routeId,
-        upstreamId,
+        upstreamId: upstream_id,
         success: finalSuccess,
         statusCode: responseStatus,
         latencyMs,
@@ -233,7 +402,7 @@ export async function handleRequest(
     reqLogger.addStepWithDuration('request_snapshot_created', performance.now() - snapshotStart, {
       method: requestSnapshot.method,
       hasBody: !!requestSnapshot.body,
-      bodyType: requestSnapshot.isJsonBody ? 'json' : 'binary'
+      bodyType: requestSnapshot.is_json_body ? 'json' : 'binary'
     });
 
     // 记录原始请求头和请求体（转换前）
@@ -243,13 +412,17 @@ export async function handleRequest(
     });
     reqLogger.setOriginalRequestHeaders(originalHeaders);
 
-    if (requestSnapshot.body && requestSnapshot.isJsonBody) {
+    if (requestSnapshot.body && requestSnapshot.is_json_body) {
       reqLogger.setOriginalRequestBody(requestSnapshot.body);
     }
 
     // 获取路由 ID（用于预编译 hooks 查找）
     // 统一使用 route.path 作为唯一标识
-      routeId = route.path;
+    routeId = route.path;
+    const currentRouteId = route.path;
+    const effectiveRoute = resolveEffectiveRoute(config, route);
+    const endpoints = effectiveRoute.endpoints;
+    const runtimeStateKey = route.service ?? route.path;
 
     // --- Authentication Check ---
     // 确定最终使用的 auth 配置：路由级 > 全局级
@@ -311,27 +484,91 @@ export async function handleRequest(
     // 构建表达式上下文（用于 upstream 条件过滤）
     const expressionContext: ExpressionContext = {
       headers: originalHeaders,
-      body: requestSnapshot.body && requestSnapshot.isJsonBody ? requestSnapshot.body : {},
+      body: requestSnapshot.body && requestSnapshot.is_json_body ? requestSnapshot.body : {},
       url: { pathname: url.pathname, search: url.search, host: url.hostname, protocol: url.protocol },
       method: req.method,
       env: process.env as Record<string, string>,
     };
 
-    const routeState = runtimeState.get(route.path);
+    const responseRule = findResponseRule(route, url.pathname);
+    if (responseRule) {
+      const response = createResponseRuleResponse(responseRule, req);
+      responseStatus = response.status;
+      success = response.status < 400;
+      return response;
+    }
+
+    if (route.direct_response?.enabled) {
+      const { status, body, content_type, headers } = route.direct_response;
+      responseStatus = status;
+      success = status < 400;
+      return new Response(body ?? '', {
+        status,
+        headers: { 'content-type': content_type ?? 'text/plain', ...headers }
+      });
+    }
+
+    if (route.redirect?.enabled) {
+      const { url: redirectTarget, status, preserve_path } = route.redirect;
+      const redirectUrl = preserve_path ? redirectTarget + new URL(req.url).pathname : redirectTarget;
+      responseStatus = status ?? 302;
+      success = responseStatus < 400;
+      return new Response(null, { status: responseStatus, headers: { location: redirectUrl } });
+    }
+
+    if (route.cors?.enabled && req.method.toUpperCase() === 'OPTIONS') {
+      responseStatus = 204;
+      return new Response(null, { status: 204, headers: corsHeaders(route.cors, req) });
+    }
+
+    if (!checkRateLimit(route, req, expressionContext)) {
+      success = false;
+      responseStatus = 429;
+      return new Response(JSON.stringify({ error: 'Too Many Requests' }), {
+        status: 429,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    const proxyWithRouteRetry = async (
+      selectedUpstream: RuntimeUpstream,
+      attemptLogger: RequestLogger
+    ): Promise<ProxyRequestResult> => {
+      let result = await proxyRequest(requestSnapshot, effectiveRoute, selectedUpstream, requestLog, config, currentRouteId, attemptLogger);
+      const retryConfig = route.retry;
+      const retryOn = retryConfig?.retry_on ?? [];
+
+      if (!retryConfig?.enabled || result.response.ok || !retryOn.includes(result.response.status)) {
+        return result;
+      }
+
+      for (let i = 0; i < (retryConfig.max_retries ?? 1); i++) {
+        ensureSnapshotCloned(requestSnapshot);
+        const retryResponse = await proxyRequest(requestSnapshot, effectiveRoute, selectedUpstream, requestLog, config, currentRouteId, attemptLogger);
+        result = retryResponse;
+        if (!retryOn.includes(retryResponse.response.status)) {
+          return retryResponse;
+        }
+      }
+
+      return result;
+    };
+
+    const routeState = runtimeState.get(runtimeStateKey);
     if (!routeState) {
-      const staticUpstreams = map(route.upstreams, (up, index) => {
+      const staticUpstreams = map(endpoints, (up, index) => {
         const configuredId = 'id' in up && typeof up.id === 'string' ? up.id : undefined;
         return {
           ...up,
-          upstreamId: configuredId || String(index), // Use config id or fallback to index
+          upstream_id: configuredId || String(index), // Use config id or fallback to index
           status: 'HEALTHY' as const,
-          lastFailureTime: undefined,
-          consecutiveFailures: 0,
-          consecutiveSuccesses: 0,
-          recoveryAttemptCount: 0,
+          last_failure_time: undefined,
+          consecutive_failures: 0,
+          consecutive_successes: 0,
+          recovery_attempt_count: 0,
         } as RuntimeUpstream;
       });
-      const selectedUpstream = upstreamSelector(staticUpstreams, route, expressionContext);
+      const selectedUpstream = upstreamSelector(staticUpstreams, effectiveRoute, expressionContext);
       if (!selectedUpstream) {
         logger.error({ request: requestLog }, 'No valid upstream found for route.');
         success = false;
@@ -348,13 +585,13 @@ export async function handleRequest(
 
       // 记录原始请求头和请求体（转换前）
       attemptLogger.setOriginalRequestHeaders(originalHeaders);
-      if (requestSnapshot.body && requestSnapshot.isJsonBody) {
+      if (requestSnapshot.body && requestSnapshot.is_json_body) {
         attemptLogger.setOriginalRequestBody(requestSnapshot.body);
       }
 
       reqLogger.addStep('upstream_selected', { target: upstream });
-      upstreamId = selectedUpstream.upstreamId;
-      const result = await proxyRequest(requestSnapshot, route, selectedUpstream, requestLog, config, routeId, attemptLogger);
+      upstream_id = selectedUpstream.upstream_id;
+      const result = await proxyWithRouteRetry(selectedUpstream, attemptLogger);
       streamResult = result;
       responseStatus = result.response.status;
       if (result.response.status >= 400) {
@@ -374,12 +611,12 @@ export async function handleRequest(
         logger.error({ error: logError }, 'Failed to write request log');
       }
 
-      return finalizeStreamingResponse(result.response, result);
+      return finalizeStreamingResponse(applyCorsHeaders(result.response, route.cors, req), result);
     }
 
     // 使用 FailoverCoordinator 管理故障转移流程
-    const baseRecoveryIntervalMs = route.failover?.recovery?.probeIntervalMs || 5000;
-    const retryableRules = route.failover?.retryOn;
+    const baseRecoveryIntervalMs = effectiveRoute.failover?.recovery?.probe_interval_ms || 5000;
+    const retryableRules = effectiveRoute.failover?.retry_on;
     let retryableStatusMatcher: StatusCodeMatcher | null = null;
     if (retryableRules !== undefined) {
       try {
@@ -398,7 +635,7 @@ export async function handleRequest(
     }
     const coordinator = new FailoverCoordinator(
       routeState.upstreams,
-      route,
+      effectiveRoute,
       baseRecoveryIntervalMs,
       expressionContext
     );
@@ -416,7 +653,7 @@ export async function handleRequest(
       const { upstream: selectedUpstream, shouldTransitionToHalfOpen } = selection;
       attemptCount++;
       upstream = selectedUpstream.target;
-      upstreamId = selectedUpstream.upstreamId;
+      upstream_id = selectedUpstream.upstream_id;
 
       // Lazy clone: deep clone headers and body when failover retry is needed
       if (attemptCount > 1) {
@@ -429,7 +666,7 @@ export async function handleRequest(
         logger.info({
           target: selectedUpstream.target,
           previousStatus: 'UNHEALTHY',
-          elapsed: selectedUpstream.lastFailureTime ? Date.now() - selectedUpstream.lastFailureTime : 0,
+          elapsed: selectedUpstream.last_failure_time ? Date.now() - selectedUpstream.last_failure_time : 0,
           recoveryInterval: baseRecoveryIntervalMs
         }, 'Upstream transitioned to HALF_OPEN for recovery attempt');
       }
@@ -463,12 +700,12 @@ export async function handleRequest(
 
       // 记录原始请求头和请求体（转换前）
       attemptLogger.setOriginalRequestHeaders(originalHeaders);
-      if (requestSnapshot.body && requestSnapshot.isJsonBody) {
+      if (requestSnapshot.body && requestSnapshot.is_json_body) {
         attemptLogger.setOriginalRequestBody(requestSnapshot.body);
       }
 
       try {
-        const result = await proxyRequest(requestSnapshot, route, selectedUpstream, requestLog, config, routeId, attemptLogger);
+        const result = await proxyWithRouteRetry(selectedUpstream, attemptLogger);
         streamResult = result;
         responseStatus = result.response.status;
 
@@ -485,69 +722,69 @@ export async function handleRequest(
           // 如果响应成功，处理恢复逻辑
           if (result.response.status < 400) {
             // 重置失败计数器，增加成功计数器
-            selectedUpstream.consecutiveFailures = 0;
+            selectedUpstream.consecutive_failures = 0;
 
             // 断路器状态转换逻辑
             if (selectedUpstream.status === 'HALF_OPEN') {
               // HALF_OPEN → HEALTHY: 测试请求成功，立即恢复
               selectedUpstream.status = 'HEALTHY';
-              selectedUpstream.lastFailureTime = undefined;
-              selectedUpstream.consecutiveSuccesses = 0; // 重置计数器
-              selectedUpstream.recoveryAttemptCount = 0; // 重置恢复尝试计数（指数退避）
+              selectedUpstream.last_failure_time = undefined;
+              selectedUpstream.consecutive_successes = 0; // 重置计数器
+              selectedUpstream.recovery_attempt_count = 0; // 重置恢复尝试计数（指数退避）
 
               // 激活慢启动
-              activateSlowStart(selectedUpstream, route);
+              activateSlowStart(selectedUpstream, effectiveRoute);
 
               logger.info({
                 target: selectedUpstream.target,
                 previousStatus: 'HALF_OPEN',
-                slowStartEnabled: route.failover?.slowStart?.enabled
+                slow_startEnabled: effectiveRoute.failover?.slow_start?.enabled
               }, 'Upstream recovered from HALF_OPEN to HEALTHY (circuit breaker closed)');
               reqLogger.addStep('circuit_breaker_closed', {
                 target: selectedUpstream.target
               });
             } else if (selectedUpstream.status === 'UNHEALTHY') {
               // UNHEALTHY → HEALTHY: 需要达到健康阈值
-              selectedUpstream.consecutiveSuccesses++;
+              selectedUpstream.consecutive_successes++;
 
-              const healthyThreshold = route.failover?.passiveHealth?.healthySuccesses || 2;
-              if (selectedUpstream.consecutiveSuccesses >= healthyThreshold) {
+              const healthy_threshold = effectiveRoute.failover?.passive_health?.healthy_successes || 2;
+              if (selectedUpstream.consecutive_successes >= healthy_threshold) {
                 selectedUpstream.status = 'HEALTHY';
-                selectedUpstream.lastFailureTime = undefined;
+                selectedUpstream.last_failure_time = undefined;
 
                 // 激活慢启动
-                activateSlowStart(selectedUpstream, route);
+                activateSlowStart(selectedUpstream, effectiveRoute);
 
                 logger.info({
                   target: selectedUpstream.target,
-                  consecutiveSuccesses: selectedUpstream.consecutiveSuccesses,
-                  healthyThreshold,
-                  slowStartEnabled: route.failover?.slowStart?.enabled
+                  consecutive_successes: selectedUpstream.consecutive_successes,
+                  healthy_threshold,
+                  slow_startEnabled: effectiveRoute.failover?.slow_start?.enabled
                 }, 'Upstream recovered and marked as HEALTHY');
                 reqLogger.addStep('upstream_recovered', {
                   target: selectedUpstream.target,
-                  consecutiveSuccesses: selectedUpstream.consecutiveSuccesses
+                  consecutive_successes: selectedUpstream.consecutive_successes
                 });
               } else {
                 logger.debug({
                   target: selectedUpstream.target,
-                  consecutiveSuccesses: selectedUpstream.consecutiveSuccesses,
-                  healthyThreshold
+                  consecutive_successes: selectedUpstream.consecutive_successes,
+                  healthy_threshold
                 }, 'Upstream success recorded, not yet marked HEALTHY');
               }
             } else {
               // 对于 HEALTHY 上游，保持成功计数更新
-              selectedUpstream.consecutiveSuccesses++;
+              selectedUpstream.consecutive_successes++;
             }
           } else {
             // 响应失败，重置成功计数器
-            selectedUpstream.consecutiveSuccesses = 0;
+            selectedUpstream.consecutive_successes = 0;
 
 // 如果是 HALF_OPEN 状态失败，需要转回 UNHEALTHY 并重置恢复时间
           if (selectedUpstream.status === 'HALF_OPEN') {
             selectedUpstream.status = 'UNHEALTHY';
-            selectedUpstream.lastFailureTime = Date.now();
-            selectedUpstream.recoveryAttemptCount++; // 增加恢复尝试计数（指数退避）
+            selectedUpstream.last_failure_time = Date.now();
+            selectedUpstream.recovery_attempt_count++; // 增加恢复尝试计数（指数退避）
 
               // 取消慢启动
               deactivateSlowStart(selectedUpstream);
@@ -590,7 +827,7 @@ export async function handleRequest(
           if (result.response.status >= 400) {
             success = false;
           }
-          return finalizeStreamingResponse(result.response, result);
+          return finalizeStreamingResponse(applyCorsHeaders(result.response, route.cors, req), result);
         }
 
         // 是可重试状态码且还有其他上游，记录此次尝试并进入重试逻辑
@@ -645,27 +882,27 @@ export async function handleRequest(
         }
 
         // 递增失败计数器，重置成功计数器
-        selectedUpstream.consecutiveFailures++;
-        selectedUpstream.consecutiveSuccesses = 0;
+        selectedUpstream.consecutive_failures++;
+        selectedUpstream.consecutive_successes = 0;
 
-        const autoDisableThreshold = route.failover?.passiveHealth?.autoDisableThreshold;
+        const auto_disable_threshold = effectiveRoute.failover?.passive_health?.auto_disable_threshold;
         if (
-          autoDisableThreshold &&
-          selectedUpstream.consecutiveFailures >= autoDisableThreshold &&
-          !selectedUpstream.disabled
+          auto_disable_threshold &&
+          selectedUpstream.consecutive_failures >= auto_disable_threshold &&
+          !selectedUpstream.is_disabled
         ) {
-          selectedUpstream.disabled = true;
+          selectedUpstream.is_disabled = true;
           logger.error(
             {
               target: selectedUpstream.target,
-              consecutiveFailures: selectedUpstream.consecutiveFailures,
-              autoDisableThreshold
+              consecutive_failures: selectedUpstream.consecutive_failures,
+              auto_disable_threshold
             },
             'Upstream automatically disabled after exceeding failure threshold'
           );
           reqLogger.addStep('upstream_auto_disabled', {
             target: selectedUpstream.target,
-            consecutiveFailures: selectedUpstream.consecutiveFailures
+            consecutive_failures: selectedUpstream.consecutive_failures
           });
         }
 
@@ -673,7 +910,7 @@ export async function handleRequest(
         if (selectedUpstream.status === 'HALF_OPEN') {
           // HALF_OPEN → UNHEALTHY: 测试请求失败，重置恢复时间
           selectedUpstream.status = 'UNHEALTHY';
-          selectedUpstream.lastFailureTime = Date.now();
+          selectedUpstream.last_failure_time = Date.now();
           logger.warn({
             target: selectedUpstream.target,
             error: (error as Error).message
@@ -683,27 +920,27 @@ export async function handleRequest(
           });
         } else {
           // HEALTHY/UNHEALTHY 状态的失败处理
-          const failureThreshold = route.failover?.passiveHealth?.consecutiveFailures || 3;
-          if (selectedUpstream.consecutiveFailures >= failureThreshold && selectedUpstream.status !== 'UNHEALTHY') {
+          const failureThreshold = effectiveRoute.failover?.passive_health?.consecutive_failures || 3;
+          if (selectedUpstream.consecutive_failures >= failureThreshold && selectedUpstream.status !== 'UNHEALTHY') {
             // HEALTHY → UNHEALTHY: 达到连续失败阈值
             selectedUpstream.status = 'UNHEALTHY';
-            selectedUpstream.lastFailureTime = Date.now();
+            selectedUpstream.last_failure_time = Date.now();
             logger.warn({
               target: selectedUpstream.target,
-              consecutiveFailures: selectedUpstream.consecutiveFailures,
+              consecutive_failures: selectedUpstream.consecutive_failures,
               failureThreshold
             }, 'Upstream marked as UNHEALTHY after consecutive failures (circuit breaker opened)');
             reqLogger.addStep('circuit_breaker_opened', {
               target: selectedUpstream.target,
-              consecutiveFailures: selectedUpstream.consecutiveFailures
+              consecutive_failures: selectedUpstream.consecutive_failures
             });
           } else if (selectedUpstream.status === 'UNHEALTHY') {
             // 已经是 UNHEALTHY 状态，更新失败时间
-            selectedUpstream.lastFailureTime = Date.now();
+            selectedUpstream.last_failure_time = Date.now();
           } else {
             logger.debug({
               target: selectedUpstream.target,
-              consecutiveFailures: selectedUpstream.consecutiveFailures,
+              consecutive_failures: selectedUpstream.consecutive_failures,
               failureThreshold
             }, 'Upstream failure recorded, not yet marked UNHEALTHY');
           }

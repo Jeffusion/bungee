@@ -3,10 +3,9 @@
  * Provides detailed statistics about upstream health and failover behavior
  */
 
-import type { RuntimeUpstream } from '../types';
 import { runtimeState } from '../state/runtime-state';
 import { getSlowStartProgress, isInSlowStart } from '../utils/slow-start';
-import type { RouteConfig } from '@jeffusion/bungee-types';
+import type { EffectiveRouteConfig } from '../types';
 
 /**
  * Upstream statistics
@@ -18,20 +17,20 @@ export interface UpstreamStats {
   priority: number;
 
   // Passive health check stats
-  consecutiveFailures: number;
-  consecutiveSuccesses: number;
-  lastFailureTime?: number;
-  recoveryAttemptCount: number;
+  consecutive_failures: number;
+  consecutive_successes: number;
+  last_failure_time?: number;
+  recovery_attempt_count: number;
 
   // Active health check stats
-  healthCheckSuccesses?: number;
-  healthCheckFailures?: number;
+  health_check_successes?: number;
+  health_check_failures?: number;
 
   // Slow start stats
-  inSlowStart: boolean;
-  slowStartProgress?: number; // 0-100
-  slowStartWeightFactor?: number;
-  effectiveWeight?: number;
+  in_slow_start: boolean;
+  slow_start_progress?: number; // 0-100
+  slow_start_weight_factor?: number;
+  effective_weight?: number;
 }
 
 /**
@@ -40,9 +39,9 @@ export interface UpstreamStats {
 export interface RouteStats {
   path: string;
   upstreams: UpstreamStats[];
-  healthyCount: number;
-  unhealthyCount: number;
-  halfOpenCount: number;
+  healthy_count: number;
+  unhealthy_count: number;
+  half_open_count: number;
 }
 
 /**
@@ -50,10 +49,10 @@ export interface RouteStats {
  */
 export interface GlobalStats {
   routes: RouteStats[];
-  totalUpstreams: number;
-  totalHealthy: number;
-  totalUnhealthy: number;
-  totalHalfOpen: number;
+  total_upstreams: number;
+  total_healthy: number;
+  total_unhealthy: number;
+  total_half_open: number;
 }
 
 /**
@@ -62,12 +61,12 @@ export interface GlobalStats {
  * @param config - Application configuration
  * @returns Global statistics
  */
-export function getGlobalStats(config: { routes: RouteConfig[] }): GlobalStats {
+export function getGlobalStats(config: { routes: EffectiveRouteConfig[] }): GlobalStats {
   const routes: RouteStats[] = [];
-  let totalUpstreams = 0;
-  let totalHealthy = 0;
-  let totalUnhealthy = 0;
-  let totalHalfOpen = 0;
+  let total_upstreams = 0;
+  let total_healthy = 0;
+  let total_unhealthy = 0;
+  let total_half_open = 0;
 
   for (const route of config.routes) {
     const routeState = runtimeState.get(route.path);
@@ -79,21 +78,21 @@ export function getGlobalStats(config: { routes: RouteConfig[] }): GlobalStats {
         status: up.status,
         weight: up.weight ?? 100,
         priority: up.priority ?? 1,
-        consecutiveFailures: up.consecutiveFailures,
-        consecutiveSuccesses: up.consecutiveSuccesses,
-        lastFailureTime: up.lastFailureTime,
-        recoveryAttemptCount: up.recoveryAttemptCount,
-        healthCheckSuccesses: up.healthCheckSuccesses,
-        healthCheckFailures: up.healthCheckFailures,
-        inSlowStart: isInSlowStart(up),
-        slowStartProgress: isInSlowStart(up) ? getSlowStartProgress(up, route) : undefined,
-        slowStartWeightFactor: up.slowStartWeightFactor,
+        consecutive_failures: up.consecutive_failures,
+        consecutive_successes: up.consecutive_successes,
+        last_failure_time: up.last_failure_time,
+        recovery_attempt_count: up.recovery_attempt_count,
+        health_check_successes: up.health_check_successes,
+        health_check_failures: up.health_check_failures,
+        in_slow_start: isInSlowStart(up),
+        slow_start_progress: isInSlowStart(up) ? getSlowStartProgress(up, route) : undefined,
+        slow_start_weight_factor: up.slow_start_weight_factor,
       };
 
-      totalUpstreams++;
-      if (up.status === 'HEALTHY') totalHealthy++;
-      else if (up.status === 'UNHEALTHY') totalUnhealthy++;
-      else if (up.status === 'HALF_OPEN') totalHalfOpen++;
+      total_upstreams++;
+      if (up.status === 'HEALTHY') total_healthy++;
+      else if (up.status === 'UNHEALTHY') total_unhealthy++;
+      else if (up.status === 'HALF_OPEN') total_half_open++;
 
       return stats;
     });
@@ -101,18 +100,18 @@ export function getGlobalStats(config: { routes: RouteConfig[] }): GlobalStats {
     routes.push({
       path: route.path,
       upstreams: upstreamStats,
-      healthyCount: upstreamStats.filter((u) => u.status === 'HEALTHY').length,
-      unhealthyCount: upstreamStats.filter((u) => u.status === 'UNHEALTHY').length,
-      halfOpenCount: upstreamStats.filter((u) => u.status === 'HALF_OPEN').length,
+      healthy_count: upstreamStats.filter((u) => u.status === 'HEALTHY').length,
+      unhealthy_count: upstreamStats.filter((u) => u.status === 'UNHEALTHY').length,
+      half_open_count: upstreamStats.filter((u) => u.status === 'HALF_OPEN').length,
     });
   }
 
   return {
     routes,
-    totalUpstreams,
-    totalHealthy,
-    totalUnhealthy,
-    totalHalfOpen,
+    total_upstreams,
+    total_healthy,
+    total_unhealthy,
+    total_half_open,
   };
 }
 
@@ -123,7 +122,7 @@ export function getGlobalStats(config: { routes: RouteConfig[] }): GlobalStats {
  * @param route - Route configuration
  * @returns Route statistics or null if not found
  */
-export function getRouteStats(routePath: string, route: RouteConfig): RouteStats | null {
+export function getRouteStats(routePath: string, route: EffectiveRouteConfig): RouteStats | null {
   const routeState = runtimeState.get(routePath);
   if (!routeState) return null;
 
@@ -132,23 +131,23 @@ export function getRouteStats(routePath: string, route: RouteConfig): RouteStats
     status: up.status,
     weight: up.weight ?? 100,
     priority: up.priority ?? 1,
-    consecutiveFailures: up.consecutiveFailures,
-    consecutiveSuccesses: up.consecutiveSuccesses,
-    lastFailureTime: up.lastFailureTime,
-    recoveryAttemptCount: up.recoveryAttemptCount,
-    healthCheckSuccesses: up.healthCheckSuccesses,
-    healthCheckFailures: up.healthCheckFailures,
-    inSlowStart: isInSlowStart(up),
-    slowStartProgress: isInSlowStart(up) ? getSlowStartProgress(up, route) : undefined,
-    slowStartWeightFactor: up.slowStartWeightFactor,
+    consecutive_failures: up.consecutive_failures,
+    consecutive_successes: up.consecutive_successes,
+    last_failure_time: up.last_failure_time,
+    recovery_attempt_count: up.recovery_attempt_count,
+    health_check_successes: up.health_check_successes,
+    health_check_failures: up.health_check_failures,
+    in_slow_start: isInSlowStart(up),
+    slow_start_progress: isInSlowStart(up) ? getSlowStartProgress(up, route) : undefined,
+    slow_start_weight_factor: up.slow_start_weight_factor,
   }));
 
   return {
     path: routePath,
     upstreams: upstreamStats,
-    healthyCount: upstreamStats.filter((u) => u.status === 'HEALTHY').length,
-    unhealthyCount: upstreamStats.filter((u) => u.status === 'UNHEALTHY').length,
-    halfOpenCount: upstreamStats.filter((u) => u.status === 'HALF_OPEN').length,
+    healthy_count: upstreamStats.filter((u) => u.status === 'HEALTHY').length,
+    unhealthy_count: upstreamStats.filter((u) => u.status === 'UNHEALTHY').length,
+    half_open_count: upstreamStats.filter((u) => u.status === 'HALF_OPEN').length,
   };
 }
 
@@ -163,7 +162,7 @@ export function getRouteStats(routePath: string, route: RouteConfig): RouteStats
 export function getUpstreamStats(
   routePath: string,
   upstreamTarget: string,
-  route: RouteConfig
+  route: EffectiveRouteConfig
 ): UpstreamStats | null {
   const routeState = runtimeState.get(routePath);
   if (!routeState) return null;
@@ -176,14 +175,14 @@ export function getUpstreamStats(
     status: upstream.status,
     weight: upstream.weight ?? 100,
     priority: upstream.priority ?? 1,
-    consecutiveFailures: upstream.consecutiveFailures,
-    consecutiveSuccesses: upstream.consecutiveSuccesses,
-    lastFailureTime: upstream.lastFailureTime,
-    recoveryAttemptCount: upstream.recoveryAttemptCount,
-    healthCheckSuccesses: upstream.healthCheckSuccesses,
-    healthCheckFailures: upstream.healthCheckFailures,
-    inSlowStart: isInSlowStart(upstream),
-    slowStartProgress: isInSlowStart(upstream) ? getSlowStartProgress(upstream, route) : undefined,
-    slowStartWeightFactor: upstream.slowStartWeightFactor,
+    consecutive_failures: upstream.consecutive_failures,
+    consecutive_successes: upstream.consecutive_successes,
+    last_failure_time: upstream.last_failure_time,
+    recovery_attempt_count: upstream.recovery_attempt_count,
+    health_check_successes: upstream.health_check_successes,
+    health_check_failures: upstream.health_check_failures,
+    in_slow_start: isInSlowStart(upstream),
+    slow_start_progress: isInSlowStart(upstream) ? getSlowStartProgress(upstream, route) : undefined,
+    slow_start_weight_factor: upstream.slow_start_weight_factor,
   };
 }
