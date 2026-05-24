@@ -239,7 +239,9 @@
       id: 'endpoints'    as SectionId,
       label: $_('serviceEditor.builder.endpoints'),
       icon: 'M13 10V3L4 14h7v7l9-11h-7z',
-      badge: String(service.endpoints.length),
+      // "EP·N" prefix prevents the label/badge pair from being read as
+      // "Endpoints #N" (e.g. "端点 3" → "EP·3"). See nx-sidenav-badge.
+      badge: service.endpoints.length ? `EP·${service.endpoints.length}` : '',
     },
     {
       id: 'availability' as SectionId,
@@ -251,7 +253,7 @@
       id: 'consumers'    as SectionId,
       label: $_('serviceEditor.builder.consumers'),
       icon: 'M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z',
-      badge: consumers.count > 0 ? String(consumers.count) : '',
+      badge: consumers.count > 0 ? `×${consumers.count}` : '',
     },
     {
       id: 'review'       as SectionId,
@@ -319,7 +321,7 @@
                     </svg>
                     <span class="flex-1 text-left truncate">{item.label}</span>
                     {#if item.badge}
-                      <span class="font-mono text-[10px] uppercase tracking-command px-1.5 py-0.5 border border-carbon-500 text-zinc-400">
+                      <span class={item.badge === '✓' ? 'nx-sidenav-badge-tick' : 'nx-sidenav-badge'}>
                         {item.badge}
                       </span>
                     {/if}

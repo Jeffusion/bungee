@@ -366,14 +366,16 @@
     "noPluginsAvailable": "当前无可用路由转换器插件",
     "optional": "可选",
     "basicSettings": "基本设置",
+    "builderTitle": "路由配置",
+    "builderNavTag": "导航",
     "builder": {
-      "match": "匹配 (Match)",
-      "target": "目标 (Target)",
-      "processing": "处理 (Processing)",
-      "policy": "访问与策略 (Access & Policy)",
-      "response": "响应规则 (Response Rules)",
-      "plugins": "插件 (Plugins)",
-      "review": "回顾 (Review)"
+      "match": "路径匹配",
+      "target": "目标配置",
+      "processing": "请求处理",
+      "policy": "访问策略",
+      "response": "响应规则",
+      "plugins": "路由插件",
+      "review": "配置回顾"
     },
     "review": {
       "headersModification": "请求头修改",
@@ -795,6 +797,7 @@
   },
   "shortcuts": {
     "title": "快捷键",
+    "tag": "键位",
     "save": "保存",
     "cancel": "取消",
     "switchSection": "切换区域"

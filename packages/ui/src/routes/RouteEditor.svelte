@@ -263,9 +263,18 @@
       id: 'target'     as RouteEditorSection,
       label: $_('routeEditor.builder.target'),
       icon: 'M13 10V3L4 14h7v7l9-11h-7z',
+      // Badge:
+      //  · direct_response / redirect → "—" (no upstream)
+      //  · service-backed             → service count, not service name
+      //  · custom endpoints           → "EP·N" so "Target" + "1" doesn't
+      //                                  read as "Target #1"
       badge: (route.direct_response?.enabled || route.redirect?.enabled)
         ? '—'
-        : (route.service || String(route.endpoints?.length ?? 0)),
+        : route.service
+          ? '1'
+          : route.endpoints?.length
+            ? `EP·${route.endpoints.length}`
+            : '',
     },
     {
       id: 'processing' as RouteEditorSection,
@@ -289,7 +298,8 @@
       id: 'plugins'    as RouteEditorSection,
       label: $_('routeEditor.builder.plugins'),
       icon: 'M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 011-1h1a2 2 0 100-4H7a1 1 0 01-1-1V7a1 1 0 011-1h3a1 1 0 001-1V4z',
-      badge: route.plugins?.length ? String(route.plugins.length) : '',
+      // "×N" so "Plugins" + "2" doesn't read as "Plugins #2"
+      badge: route.plugins?.length ? `×${route.plugins.length}` : '',
     },
     {
       id: 'review'     as RouteEditorSection,
@@ -338,7 +348,7 @@
       <!-- ===== Side nav =========================================== -->
       <aside class="w-full lg:w-56 flex-shrink-0" data-testid="builder-nav">
         <div class="lg:sticky lg:top-32 space-y-3">
-          <PanelCard title="BUILDER" tag="NAV" flush>
+          <PanelCard title={$_('routeEditor.builderTitle')} tag={$_('routeEditor.builderNavTag')} flush>
             <ul class="divide-y divide-carbon-600">
               {#each navItems as item}
                 <li>
@@ -357,7 +367,7 @@
                     </svg>
                     <span class="flex-1 text-left truncate">{item.label}</span>
                     {#if item.badge}
-                      <span class="font-mono text-[10px] uppercase tracking-command px-1.5 py-0.5 border border-carbon-500 text-zinc-400 truncate max-w-[8ch]">
+                      <span class={item.badge === '✓' ? 'nx-sidenav-badge-tick' : 'nx-sidenav-badge'}>
                         {item.badge}
                       </span>
                     {/if}
@@ -376,7 +386,7 @@
             </button>
           {/if}
 
-          <PanelCard title={$_('shortcuts.title')} tag="KEYS">
+          <PanelCard title={$_('shortcuts.title')} tag={$_('shortcuts.tag')}>
             <ul class="space-y-1.5 font-mono text-[11px]">
               <li class="flex items-center gap-1.5">
                 <kbd class="nx-kbd">{getModifierKey()}</kbd><span class="text-zinc-600">+</span><kbd class="nx-kbd">S</kbd>
