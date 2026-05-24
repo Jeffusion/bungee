@@ -3,6 +3,7 @@
   import { _ } from '../i18n';
   import { getCleanupConfig, triggerCleanup, type CleanupConfig, type CleanupResult } from '../api/logs';
   import { toast } from '../stores/toast';
+  import { IndustrialToggle, StatusBadge, SystemAlertBar } from './industrial';
 
   export let value: any = null;
   export let label: string = '';
@@ -36,6 +37,20 @@
   function handleInput() {
     dispatch('input');
   }
+
+  function handleBodyRecordingChange(event: CustomEvent<boolean>) {
+    value.body.enabled = event.detail;
+    handleInput();
+  }
+
+  $: cleanupActive = cleanupConfig ? cleanupConfig.isActive ?? cleanupConfig.is_active ?? false : false;
+  $: cleanupRetention = cleanupConfig ? cleanupConfig.retentionDays ?? cleanupConfig.retention_days ?? null : null;
+  $: cleanupInterval = cleanupConfig ? cleanupConfig.scheduleIntervalHours ?? cleanupConfig.schedule_interval_hours ?? null : null;
+  $: cleanupDeletedSqliteRecords = lastCleanupResult ? lastCleanupResult.deletedSqliteRecords ?? lastCleanupResult.deleted_sqlite_records ?? 0 : 0;
+  $: cleanupDeletedFileLogFiles = lastCleanupResult ? lastCleanupResult.deletedFileLogFiles ?? lastCleanupResult.deleted_file_log_files ?? 0 : 0;
+  $: cleanupDeletedBodyDirs = lastCleanupResult ? lastCleanupResult.deletedBodyDirs ?? lastCleanupResult.deleted_body_dirs ?? 0 : 0;
+  $: cleanupDeletedBodyFiles = lastCleanupResult ? lastCleanupResult.deletedBodyFiles ?? lastCleanupResult.deleted_body_files ?? 0 : 0;
+  $: cleanupDurationMs = lastCleanupResult ? lastCleanupResult.durationMs ?? lastCleanupResult.duration_ms ?? 0 : 0;
 
   async function loadCleanupConfig() {
     cleanupLoading = true;
@@ -78,28 +93,27 @@
   {/if}
 
   <!-- Body Recording -->
-  <div class="form-control">
-    <label class="label cursor-pointer justify-start gap-4">
-      <input
-        type="checkbox"
-        class="checkbox"
-        bind:checked={value.body.enabled}
-        on:change={handleInput}
-      />
-      <div class="flex-1">
-        <span class="label-text font-semibold">{$_('logging.bodyRecording')}</span>
-        <p class="text-xs text-zinc-500 mt-1">{$_('logging.bodyRecordingHelp')}</p>
+  <div class="flex flex-col gap-2 border border-carbon-600 bg-carbon-950/40 px-3 py-3 md:flex-row md:items-center md:justify-between">
+    <div class="min-w-0 space-y-1">
+      <div class="flex items-center gap-2">
+        <span class="font-mono text-[12px] font-bold uppercase tracking-command text-zinc-100">{$_('logging.bodyRecording')}</span>
+        <StatusBadge variant={value.body.enabled ? 'online' : 'muted'} dot>{value.body.enabled ? 'BODY ON' : 'BODY OFF'}</StatusBadge>
       </div>
-    </label>
+      <p class="font-mono text-[10px] uppercase tracking-command text-zinc-500">{$_('logging.bodyRecordingHelp')}</p>
+    </div>
+
+    <IndustrialToggle
+      bind:checked={value.body.enabled}
+      title={$_('logging.bodyRecording')}
+      on:change={handleBodyRecordingChange}
+    />
   </div>
 
   {#if value.body.enabled}
-    <div class="ml-8 space-y-4">
+    <div class="border-l-2 border-l-nexus-500/50 pl-3 space-y-4">
       <!-- Max Size -->
-      <div class="form-control">
-        <label class="label" for="logging-max-size">
-          <span class="label-text">{$_('logging.maxSize')}</span>
-        </label>
+      <label class="block space-y-1.5" for="logging-max-size">
+        <span class="nx-label">// {$_('logging.maxSize')}</span>
         <div class="flex gap-2 items-center">
           <input
             id="logging-max-size"
@@ -111,18 +125,14 @@
             max="102400"
             step="1024"
           />
-          <span class="text-sm text-zinc-500">KB</span>
+          <span class="font-mono text-[10px] uppercase tracking-command text-zinc-500">KB</span>
         </div>
-        <div class="label">
-          <span class="label-text-alt">{$_('logging.maxSizeHelp')}</span>
-        </div>
-      </div>
+        <span class="font-mono text-[10px] uppercase tracking-command text-zinc-500">{$_('logging.maxSizeHelp')}</span>
+      </label>
 
       <!-- Retention Days -->
-      <div class="form-control">
-        <label class="label" for="logging-retention-days">
-          <span class="label-text">{$_('logging.retentionDays')}</span>
-        </label>
+      <label class="block space-y-1.5" for="logging-retention-days">
+        <span class="nx-label">// {$_('logging.retentionDays')}</span>
         <div class="flex gap-2 items-center">
           <input
             id="logging-retention-days"
@@ -133,19 +143,24 @@
             min="1"
             max="30"
           />
-          <span class="text-sm text-zinc-500">{$_('logging.days')}</span>
+          <span class="font-mono text-[10px] uppercase tracking-command text-zinc-500">{$_('logging.days')}</span>
         </div>
-        <div class="label">
-          <span class="label-text-alt">{$_('logging.retentionDaysHelp')}</span>
-        </div>
-      </div>
+        <span class="font-mono text-[10px] uppercase tracking-command text-zinc-500">{$_('logging.retentionDaysHelp')}</span>
+      </label>
     </div>
   {/if}
 
   <div class="border-t border-carbon-600 my-2"></div>
 
   <!-- Cleanup Configuration -->
-  <h4 class="font-semibold">{$_('logging.cleanupConfig')}</h4>
+  <div class="flex items-center justify-between gap-3">
+    <h4 class="font-mono text-[12px] font-bold uppercase tracking-command text-zinc-100">{$_('logging.cleanupConfig')}</h4>
+    {#if cleanupConfig}
+      <StatusBadge variant={cleanupActive ? 'active' : 'muted'} dot>
+        {cleanupActive ? $_('logging.active') : $_('logging.inactive')}
+      </StatusBadge>
+    {/if}
+  </div>
 
   {#if cleanupLoading}
     <div class="flex items-center gap-2">
@@ -153,25 +168,25 @@
       <span class="text-sm">{$_('common.loading')}</span>
     </div>
   {:else if cleanupConfig}
-    <div class="bg-carbon-950/60 p-4 rounded-lg space-y-2">
-      <div class="flex justify-between text-sm">
+    <div class="border border-carbon-600 bg-carbon-950/60 p-4 space-y-2">
+      <div class="flex justify-between gap-3 font-mono text-[11px] uppercase tracking-command">
         <span class="text-zinc-500">{$_('logging.cleanupStatus')}</span>
-        <span class="font-semibold {cleanupConfig.is_active ? 'text-success' : 'text-error'}">
-          {cleanupConfig.is_active ? $_('logging.active') : $_('logging.inactive')}
+        <span class={cleanupActive ? 'text-emerald-300' : 'text-zinc-400'}>
+          {cleanupActive ? $_('logging.active') : $_('logging.inactive')}
         </span>
       </div>
-      <div class="flex justify-between text-sm">
+      <div class="flex justify-between gap-3 font-mono text-[11px] uppercase tracking-command">
         <span class="text-zinc-500">{$_('logging.cleanupRetention')}</span>
-        <span class="font-semibold">{cleanupConfig.retention_days} {$_('logging.days')}</span>
+        <span class="text-zinc-200">{cleanupRetention ?? '—'} {$_('logging.days')}</span>
       </div>
-      <div class="flex justify-between text-sm">
+      <div class="flex justify-between gap-3 font-mono text-[11px] uppercase tracking-command">
         <span class="text-zinc-500">{$_('logging.cleanupInterval')}</span>
-        <span class="font-semibold">{cleanupConfig.schedule_interval_hours} {$_('logging.hours')}</span>
+        <span class="text-zinc-200">{cleanupInterval ?? '—'} {$_('logging.hours')}</span>
       </div>
     </div>
 
     <button
-      class="btn btn-outline btn-sm w-full"
+      class="nx-btn-outline nx-btn-sm"
       on:click={handleManualCleanup}
       disabled={cleaningUp}
     >
@@ -186,20 +201,14 @@
     </button>
 
     {#if lastCleanupResult}
-      <div class="alert alert-success">
-        <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        <div class="text-sm">
-          <div class="font-semibold">{$_('logging.lastCleanup')}</div>
-          <div class="mt-1 space-y-1">
-            <div>{$_('logging.deletedSqliteRecords')}: {lastCleanupResult.deleted_sqlite_records}</div>
-            <div>{$_('logging.deletedFileLogFiles')}: {lastCleanupResult.deleted_file_log_files}</div>
-            <div>{$_('logging.deletedBodyFiles')}: {lastCleanupResult.deleted_body_dirs} {$_('logging.dirs')}, {lastCleanupResult.deleted_body_files} {$_('logging.files')}</div>
-            <div>{$_('logging.duration')}: {lastCleanupResult.duration_ms}ms</div>
+      <SystemAlertBar tone="success" title={$_('logging.lastCleanup')}>
+          <div class="mt-1 space-y-1 font-mono text-[10px] uppercase tracking-command text-zinc-500">
+            <div>{$_('logging.deletedSqliteRecords')}: {cleanupDeletedSqliteRecords}</div>
+            <div>{$_('logging.deletedFileLogFiles')}: {cleanupDeletedFileLogFiles}</div>
+            <div>{$_('logging.deletedBodyFiles')}: {cleanupDeletedBodyDirs} {$_('logging.dirs')}, {cleanupDeletedBodyFiles} {$_('logging.files')}</div>
+            <div>{$_('logging.duration')}: {cleanupDurationMs}ms</div>
           </div>
-        </div>
-      </div>
+      </SystemAlertBar>
     {/if}
   {/if}
 </div>

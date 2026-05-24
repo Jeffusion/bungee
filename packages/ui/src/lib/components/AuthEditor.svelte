@@ -2,6 +2,7 @@
   import type { AuthConfig } from '../types';
   import { _ } from '../i18n';
   import { ExpressionInput } from './smart-input';
+  import { IndustrialToggle, StatusBadge, SystemAlertBar } from './industrial';
 
   export let value: AuthConfig | undefined = undefined;
   export let label: string = 'Authentication';
@@ -9,88 +10,89 @@
 
   let enabled = false;
   let tokens: string[] = [];
-  let initialized = false;
+  let lastValue: AuthConfig | undefined = undefined;
 
-  // Reactive block for initialization and syncing
-  $: {
-    // Initialize from prop only once
-    if (!initialized && value) {
-      enabled = value.enabled || false;
-      tokens = value.tokens ? [...value.tokens] : [];
-      initialized = true;
-    }
+  function syncLocalState(nextValue: AuthConfig | undefined) {
+    enabled = nextValue?.enabled ?? false;
+    tokens = nextValue?.tokens ? [...nextValue.tokens] : [];
+    lastValue = nextValue;
+  }
 
-    // Update prop from local state reactively
-    if (enabled) {
-      const validTokens = tokens.filter(t => t.trim() !== '');
-      if (!value) {
-        value = { enabled: true, tokens: validTokens };
-      } else {
-        value.enabled = true;
-        value.tokens = validTokens;
-      }
-    } else {
-      if (value) {
-        value.enabled = false;
-        value.tokens = [];
-      }
-    }
+  function writeValue() {
+    const nextValue: AuthConfig = {
+      enabled,
+      tokens: enabled ? tokens.filter(t => t.trim() !== '') : tokens,
+    };
+    value = nextValue;
+    lastValue = value;
+  }
+
+  $: if (value !== lastValue) {
+    syncLocalState(value);
   }
 
   function addToken() {
     tokens = [...tokens, ''];
-    initialized = true; // Mark as initialized on user interaction
+    writeValue();
   }
 
   function removeToken(index: number) {
     tokens = tokens.filter((_, i) => i !== index);
+    writeValue();
+  }
+
+  function handleEnabledChange(event: CustomEvent<boolean>) {
+    enabled = event.detail;
+    if (enabled && tokens.length === 0) {
+      tokens = [''];
+    }
+    if (!enabled) {
+      tokens = [];
+    }
+    writeValue();
   }
 </script>
 
-<div class="form-control w-full">
-  <div class="label">
-    <span class="label-text font-semibold">{label}</span>
+<div class="w-full space-y-4">
+  <div class="flex flex-col gap-2 border border-carbon-600 bg-carbon-950/40 px-3 py-3 md:flex-row md:items-center md:justify-between">
+    <div class="min-w-0 space-y-1">
+      <div class="flex items-center gap-2">
+        <span class="font-mono text-[12px] font-bold uppercase tracking-command text-zinc-100">{label}</span>
+        <StatusBadge variant={enabled ? 'online' : 'muted'} dot>{enabled ? 'ACTIVE' : 'OPEN CHANNEL'}</StatusBadge>
+      </div>
     {#if showHelp}
-      <span class="label-text-alt text-xs">
+        <p class="font-mono text-[10px] uppercase tracking-command text-zinc-500">
         {$_('auth.helpText')}
-      </span>
+        </p>
     {/if}
+    </div>
+
+    <div class="flex items-center gap-3">
+      <span class="nx-label">// {$_('auth.enableAuth')}</span>
+      <IndustrialToggle
+        bind:checked={enabled}
+        title={$_('auth.enableAuth')}
+        on:change={handleEnabledChange}
+      />
+    </div>
   </div>
 
   <div class="space-y-4">
-    <!-- Enable/Disable Checkbox -->
-    <div class="form-control">
-      <label class="label cursor-pointer justify-start gap-4">
-        <input
-          type="checkbox"
-          class="checkbox"
-          bind:checked={enabled}
-          on:change={() => {
-            if (enabled && tokens.length === 0) {
-              tokens = [''];
-            }
-            initialized = true;
-          }}
-        />
-        <span class="label-text">{$_('auth.enableAuth')}</span>
-      </label>
-    </div>
-
     {#if enabled}
       <!-- Tokens List -->
-      <div class="collapse collapse-arrow bg-carbon-950/60 collapse-open">
+      <div class="border border-carbon-600 bg-carbon-950/60">
         <div class="px-3 py-2 font-mono text-[11px] uppercase tracking-command text-zinc-200 border-b border-carbon-600">
           {$_('auth.tokens')} ({tokens.length})
         </div>
         <div class="p-3 space-y-2">
-          <div class="text-xs text-base-content/60 bg-carbon-950/60 rounded p-3 flex gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-4 h-4 opacity-60">
+          <div class="border border-carbon-600 bg-carbon-900/70 p-3 flex gap-2 font-mono text-[10px] uppercase tracking-command text-zinc-500">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-4 h-4 text-nexus-400">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
             </svg>
             <div>
               <div>{$_('auth.expressionSupport')}</div>
               <div class="mt-1">
-                <code class="text-xs bg-carbon-700 px-1 rounded">{'{{ env.API_TOKEN }}'}</code>
+                <code class="border border-carbon-500 bg-carbon-800 px-1 text-[10px] text-nexus-300">{'{{ env.API_TOKEN }}'}</code>
               </div>
             </div>
           </div>
@@ -103,14 +105,18 @@
                   placeholder={$_('auth.tokenPlaceholder')}
                   bind:value={tokens[index]}
                   inputClass="font-mono text-xs"
+                  on:change={writeValue}
                 />
               </div>
               <button
                 type="button"
                 class="inline-flex items-center justify-center h-9 w-9 border-2 border-red-500 bg-red-500/10 text-red-300 hover:bg-red-500/20 transition-colors"
                 on:click={() => removeToken(index)}
+                title="Remove token"
               >
-                ✕
+                <svg viewBox="0 0 24 24" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2.4">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
               </button>
             </div>
           {/each}
@@ -126,14 +132,7 @@
       </div>
 
       <!-- Security Notice -->
-      <div class="alert alert-warning shadow-sm text-xs">
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-4 h-4">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-        </svg>
-        <div>
-          {$_('auth.securityNotice')}
-        </div>
-      </div>
+      <SystemAlertBar tone="warn" title={$_('auth.securityNotice')} />
     {/if}
   </div>
 </div>
