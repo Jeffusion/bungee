@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { isLoading } from 'svelte-i18n';
   import { _ } from '../lib/i18n';
   import { getConfig, updateConfig, validateConfig } from '../lib/api/config';
   import { reloadSystem, restartSystem } from '../lib/api/system';
@@ -9,8 +10,11 @@
   import LoggingEditor from '../lib/components/LoggingEditor.svelte';
   import ConfirmDialog from '../lib/components/ConfirmDialog.svelte';
   import {
+    KpiCard,
     PanelCard,
+    SectionDivider,
     SegmentedControl,
+    StatusBadge,
     SystemAlertBar,
     IconButton,
   } from '../lib/components/industrial';
@@ -32,6 +36,7 @@
       config = await getConfig();
       editingConfig = JSON.parse(JSON.stringify(config));
       jsonText = JSON.stringify(config, null, 2);
+      jsonError = null;
       error = null;
     } catch (e: any) {
       error = e.message;
@@ -96,6 +101,7 @@
         const imported = JSON.parse(text);
         editingConfig = imported;
         jsonText = JSON.stringify(imported, null, 2);
+        jsonError = null;
         toast.show($_('configuration.imported'), 'success');
       } catch (err: any) {
         toast.show($_('configuration.importFailed', { values: { error: err.message } }), 'error');
@@ -146,10 +152,30 @@
     loadConfig();
   });
 
-  $: editModeOptions = [
+  function configSnapshot(value: AppConfig | null): string {
+    return JSON.stringify(value ?? null);
+  }
+
+  $: editModeOptions = $isLoading ? [] : [
     { value: 'form', label: $_('configuration.formEditor') },
     { value: 'json', label: $_('configuration.jsonEditor') },
   ];
+
+  $: if (editMode === 'form' && editingConfig) {
+    jsonText = JSON.stringify(editingConfig, null, 2);
+    jsonError = null;
+  }
+
+  $: isDirty = !!config && !!editingConfig && configSnapshot(config) !== configSnapshot(editingConfig);
+  $: restartRequired = !!config && !!editingConfig && (
+    config.port !== editingConfig.port ||
+    config.workers !== editingConfig.workers ||
+    config.log_level !== editingConfig.log_level ||
+    config.body_parser_limit !== editingConfig.body_parser_limit
+  );
+  $: routeCount = editingConfig?.routes?.length ?? 0;
+  $: authEnabled = editingConfig?.auth?.enabled ?? false;
+  $: bodyLoggingEnabled = editingConfig?.logging?.body?.enabled ?? false;
 </script>
 
 <div class="px-6 py-5 space-y-5">
@@ -162,6 +188,14 @@
         <h1 class="nx-display text-xl text-zinc-50 tracking-[0.02em]">
           {$_('configuration.title')}
         </h1>
+        <div class="mt-1 flex flex-wrap items-center gap-2">
+          <StatusBadge variant={jsonError ? 'fault' : isDirty ? 'standby' : 'active'} dot>
+            {jsonError ? 'JSON ERROR' : isDirty ? 'DIRTY' : 'CLEAN'}
+          </StatusBadge>
+          {#if restartRequired}
+            <StatusBadge variant="standby" dot>RESTART REQUIRED</StatusBadge>
+          {/if}
+        </div>
       </div>
     </div>
     <div class="flex flex-wrap items-center gap-2">
@@ -175,27 +209,7 @@
           <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
         </svg>
       </IconButton>
-      <button class="nx-btn-ghost" on:click={handleReload} disabled={reloading || loading}>
-        {#if reloading}
-          <span class="inline-block h-3 w-3 border border-current border-t-transparent animate-spin"></span>
-        {:else}
-          <svg viewBox="0 0 24 24" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2.4">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-        {/if}
-        {$_('configuration.reload')}
-      </button>
-      <button class="nx-btn-warn" on:click={() => (showRestartModal = true)} disabled={restarting || loading}>
-        {#if restarting}
-          <span class="inline-block h-3 w-3 border border-current border-t-transparent animate-spin"></span>
-        {:else}
-          <svg viewBox="0 0 24 24" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2.4">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-        {/if}
-        {$_('configuration.restart')}
-      </button>
-      <button class="nx-btn-primary" on:click={handleSave} disabled={saving || loading || !!jsonError}>
+      <button class="nx-btn-primary" on:click={handleSave} disabled={saving || loading || !!jsonError || !isDirty}>
         {#if saving}
           <span class="inline-block h-3 w-3 border border-current border-t-transparent animate-spin"></span>
         {:else}
@@ -225,6 +239,65 @@
       <p class="font-mono text-xs uppercase tracking-command text-red-300">{error}</p>
     </PanelCard>
   {:else if editingConfig}
+    <!--
+      KPI strip — 6 cards laid out as 2/3/6 columns so every breakpoint
+      stays symmetrical (2×3, 3×2, 6×1) with no orphan tile and no
+      "right-side gap". Each card carries an explicit `unit` so the
+      right edge always has a label keeping the metric from drifting to
+      the left.
+    -->
+    <section class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+      <KpiCard
+        label="CONFIG"
+        value={jsonError ? 'ERROR' : isDirty ? 'DIRTY' : 'CLEAN'}
+        unit="STATE"
+        tone={jsonError ? 'danger' : isDirty ? 'warn' : 'ok'}
+        stripe={jsonError ? 'red' : isDirty ? 'amber' : 'emerald'}
+      >
+        <span slot="foot" class="font-mono text-[10px] uppercase tracking-command text-zinc-500">
+          V{editingConfig.config_version ?? '—'} · {jsonError ? 'PARSE ERROR' : 'VALID BUFFER'}
+        </span>
+      </KpiCard>
+      <KpiCard label="PORT" value={editingConfig.port ?? 8088} unit="TCP">
+        <span slot="foot" class="font-mono text-[10px] uppercase tracking-command text-zinc-500">
+          {#if jsonError}<span class="text-amber-400">STALE · </span>{/if}{editingConfig.workers ?? 2} WORKERS
+        </span>
+      </KpiCard>
+      <KpiCard label="AUTH" value={authEnabled ? 'ON' : 'OFF'} unit="GATE" tone={authEnabled ? 'accent' : 'auto'} stripe={authEnabled ? 'orange' : 'zinc'}>
+        <span slot="foot" class="font-mono text-[10px] uppercase tracking-command text-zinc-500">
+          {#if jsonError}<span class="text-amber-400">STALE · </span>{/if}{authEnabled ? 'PROTECTED' : 'OPEN'}
+        </span>
+      </KpiCard>
+      <KpiCard label="LOGGING" value={bodyLoggingEnabled ? 'BODY' : 'OFF'} unit="LOG" tone={bodyLoggingEnabled ? 'accent' : 'auto'} stripe={bodyLoggingEnabled ? 'orange' : 'zinc'}>
+        <span slot="foot" class="font-mono text-[10px] uppercase tracking-command text-zinc-500">
+          {#if jsonError}<span class="text-amber-400">STALE · </span>{/if}{editingConfig.logging?.body?.retention_days ?? '—'} DAY RETENTION
+        </span>
+      </KpiCard>
+      <!--
+        Replaces ROUTES / SERVICES — those have their own management
+        pages (/#/routes, /#/services); a "configuration center" should
+        surface server-runtime parameters instead. LOG LEVEL and BODY
+        LIMIT are the next two most-consulted runtime knobs and are not
+        otherwise visible without scrolling into the form.
+      -->
+      <KpiCard
+        label="LOG LEVEL"
+        value={(editingConfig.log_level ?? 'info').toUpperCase()}
+        unit="LVL"
+        tone={editingConfig.log_level === 'debug' ? 'warn' : editingConfig.log_level === 'error' ? 'danger' : 'auto'}
+        stripe={editingConfig.log_level === 'debug' ? 'amber' : editingConfig.log_level === 'error' ? 'red' : 'orange'}
+      >
+        <span slot="foot" class="font-mono text-[10px] uppercase tracking-command text-zinc-500">
+          {#if jsonError}<span class="text-amber-400">STALE · </span>{/if}{editingConfig.log_level === 'debug' ? 'VERBOSE OUTPUT' : 'STANDARD'}
+        </span>
+      </KpiCard>
+      <KpiCard label="BODY LIMIT" value={(editingConfig.body_parser_limit ?? '50mb').toUpperCase()} unit="REQ">
+        <span slot="foot" class="font-mono text-[10px] uppercase tracking-command text-zinc-500">
+          {#if jsonError}<span class="text-amber-400">STALE · </span>{/if}REQUEST SIZE CAP
+        </span>
+      </KpiCard>
+    </section>
+
     <!-- Editor mode selector -->
     <div class="flex items-center justify-between">
       <SegmentedControl options={editModeOptions} bind:value={editMode} ariaLabel="edit mode" />
@@ -274,7 +347,7 @@
       <SystemAlertBar
         tone="info"
         title={$_('routes.title')}
-        subtitle={`${$_('configuration.routesConfigured', { values: { count: editingConfig.routes.length } })} · ${$_('configuration.manageRoutes')}`}
+        subtitle={`${$_('configuration.routesConfigured', { values: { count: routeCount } })} · ${$_('configuration.manageRoutes')}`}
       >
         <a slot="action" href="/__ui/#/routes" class="nx-btn-outline">
           <svg viewBox="0 0 24 24" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2.4">
@@ -283,19 +356,19 @@
           {$_('routes.title')}
         </a>
       </SystemAlertBar>
-
-      <SystemAlertBar
-        tone="warn"
-        title={$_('configuration.requiresRestart')}
-        subtitle="Server / worker / log_level changes require a process restart."
-      />
     {:else}
       <!-- ===== JSON editor ============================== -->
       <PanelCard title={$_('configuration.jsonConfiguration')} tag={jsonError ? 'PARSE-ERR' : 'JSON'} stripe={jsonError ? 'red' : 'orange'}>
         {#if jsonError}
-          <div class="border-l-2 border-l-red-500 bg-red-500/5 px-3 py-2 mb-3">
-            <p class="font-mono text-[11px] uppercase tracking-command text-red-300">
-              {$_('configuration.jsonParseError', { values: { error: jsonError } })}
+          <div class="border-l-2 border-l-red-500 bg-red-500/5 px-3 py-2 mb-3 space-y-1">
+            <p class="font-mono text-[10px] uppercase tracking-command text-red-300">
+              {$_('configuration.jsonParseError', { values: { error: '' } }).replace(/[:：].*$/, '')}
+            </p>
+            <!-- Error body in mono but preserving original casing for readability;
+                 JSON parser messages are mixed-case and `tracking-command` makes them
+                 harder to read at 10–11px. -->
+            <p class="font-mono text-[12px] text-red-200 leading-snug break-all">
+              {jsonError}
             </p>
           </div>
         {/if}
@@ -313,6 +386,43 @@
         </p>
       </PanelCard>
     {/if}
+
+    <SectionDivider label="SYSTEM OPERATIONS" />
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">
+      <SystemAlertBar
+        tone={restartRequired ? 'warn' : 'info'}
+        title={$_('configuration.requiresRestart')}
+        subtitle={restartRequired ? 'PENDING FIELD CHANGE DETECTED' : 'PORT / WORKERS / LOG_LEVEL / BODY LIMIT'}
+      >
+        <button slot="action" class="nx-btn-warn" on:click={() => (showRestartModal = true)} disabled={restarting || loading}>
+          {#if restarting}
+            <span class="inline-block h-3 w-3 border border-current border-t-transparent animate-spin"></span>
+          {:else}
+            <svg viewBox="0 0 24 24" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2.4">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          {/if}
+          {$_('configuration.restart')}
+        </button>
+      </SystemAlertBar>
+
+      <SystemAlertBar
+        tone="info"
+        title={$_('configuration.reload')}
+        subtitle="RELOAD RUNTIME CONFIGURATION FROM DISK"
+      >
+        <button slot="action" class="nx-btn-outline" on:click={handleReload} disabled={reloading || loading}>
+          {#if reloading}
+            <span class="inline-block h-3 w-3 border border-current border-t-transparent animate-spin"></span>
+          {:else}
+            <svg viewBox="0 0 24 24" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2.4">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          {/if}
+          {$_('configuration.reload')}
+        </button>
+      </SystemAlertBar>
+    </div>
   {/if}
 
   <!-- ===== Restart confirm ============================== -->
@@ -322,7 +432,7 @@
     message={`${$_('configuration.restartMessage')} · ${$_('configuration.restartWarning')}`}
     confirmText={$_('configuration.restart')}
     cancelText={$_('common.cancel')}
-    confirmClass="btn-warn"
+    confirmClass="nx-btn-warn"
     on:confirm={handleRestart}
     on:cancel={() => (showRestartModal = false)}
   />
