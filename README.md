@@ -57,6 +57,36 @@ For technical deep dives, use the docs index in the next section.
 
 ---
 
+## 🖥️ Project Showcase
+
+Bungee ships with a built-in industrial dark dashboard for operating routes, services, request logs, plugins, and runtime configuration from one control surface.
+
+### Operations Dashboard
+
+![Bungee dashboard showing runtime KPIs, service health, and request trend charts](docs/showcase/dashboard.png)
+
+- Track request volume, success rate, latency, and upstream health in one view.
+- Monitor reusable services and endpoint pools with status-aware cards.
+- Inspect request, response-time, success-rate, and error trends from the dashboard.
+
+### Route Inventory
+
+![Bungee route inventory showing route-to-service mappings, filters, health, and feature badges](docs/showcase/routes.png)
+
+- Manage route-to-service bindings, direct responses, rewrites, and feature flags.
+- Filter routes by target type, feature set, and health status.
+- Keep reusable service pools visible while editing route behavior.
+
+### Configuration Center
+
+![Bungee configuration center showing system settings, auth, logging, and runtime operations](docs/showcase/configuration.png)
+
+- Edit system settings, global authentication, and body logging policies.
+- Switch between form-based controls and JSON configuration editing.
+- Reload configuration or restart the runtime directly from the dashboard.
+
+---
+
 ## 📚 Documentation
 
 Documentation index: [docs/README.md](docs/README.md)
