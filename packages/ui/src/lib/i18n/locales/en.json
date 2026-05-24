@@ -364,6 +364,8 @@
     "noPluginsAvailable": "No route transformer plugins available",
     "optional": "Optional",
     "basicSettings": "Basic Settings",
+    "builderTitle": "Builder",
+    "builderNavTag": "Nav",
     "builder": {
       "match": "Match",
       "target": "Target",
@@ -770,6 +772,13 @@
     "maxValue": "Max value",
     "unbalancedBraces": "Unbalanced expression braces",
     "incompleteProperty": "Incomplete property access"
+  },
+  "shortcuts": {
+    "title": "Shortcuts",
+    "tag": "Keys",
+    "save": "Save",
+    "cancel": "Cancel",
+    "switchSection": "Switch section"
   },
   "auth": {
     "globalAuth": "Global Authentication",
