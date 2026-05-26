@@ -3,7 +3,7 @@
   import { login } from '../lib/stores/auth';
   import { loginWithToken } from '../lib/api/auth';
   import { toast } from '../lib/stores/toast';
-  import { PanelCard } from '../lib/components/industrial';
+  import { LoadingIndicator, PanelCard } from '../lib/components/industrial';
 
   let tokenInput = '';
   let loading = false;
@@ -108,7 +108,7 @@
           disabled={loading}
         >
           {#if loading}
-            <span class="inline-block h-3 w-3 border border-current border-t-transparent animate-spin"></span>
+            <LoadingIndicator label="" size="xs" centered={false} />
             <span>{$_('login.loggingIn')}</span>
           {:else}
             <svg viewBox="0 0 24 24" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2.4">
