@@ -3,7 +3,7 @@
   import { _ } from '../lib/i18n';
   import { queryLogs, exportLogs, type LogEntry, type LogQueryParams } from '../lib/api/logs';
   import LogDetailModal from '../lib/components/LogDetailModal.svelte';
-  import { PanelCard } from '../lib/components/industrial';
+  import { LoadingIndicator, PanelCard } from '../lib/components/industrial';
 
   // ---- Industrial status colour helpers --------------------------------
   // The legacy getStatusColor / getRequestTypeColor functions return
@@ -696,21 +696,24 @@
             on:click={manualRefresh}
             disabled={loading}
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="h-4 w-4"
-              class:animate-spin={loading}
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-              />
-            </svg>
+            {#if loading}
+              <LoadingIndicator label="" size="xs" centered={false} />
+            {:else}
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                />
+              </svg>
+            {/if}
             <span>{$_('common.refresh')}</span>
           </button>
 
@@ -895,21 +898,24 @@
         <!-- 刷新菜单（合并刷新控制） -->
         <div class="dropdown dropdown-end">
           <div role="button" tabindex="0" class="nx-btn-ghost nx-btn-sm">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="h-4 w-4"
-              class:animate-spin={loading}
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-              />
-            </svg>
+            {#if loading}
+              <LoadingIndicator label="" size="xs" centered={false} />
+            {:else}
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                />
+              </svg>
+            {/if}
             {$_('common.refresh')}
           </div>
           <div role="menu" tabindex="0" class="dropdown-content border border-carbon-500 bg-carbon-900 shadow-industrial-lg p-4 w-72 z-[1]">
@@ -952,21 +958,24 @@
                 on:click={manualRefresh}
                 disabled={loading}
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  class="h-4 w-4"
-                  class:animate-spin={loading}
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                  />
-                </svg>
+                {#if loading}
+                  <LoadingIndicator label="" size="xs" centered={false} />
+                {:else}
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                    />
+                  </svg>
+                {/if}
                 {$_('common.refresh')}
               </button>
 
@@ -1186,21 +1195,24 @@
                 on:click={manualRefresh}
                 disabled={loading}
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  class="h-4 w-4"
-                  class:animate-spin={loading}
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                  />
-                </svg>
+                {#if loading}
+                  <LoadingIndicator label="" size="xs" centered={false} />
+                {:else}
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                    />
+                  </svg>
+                {/if}
                 {$_('common.refresh')}
               </button>
 
@@ -1396,9 +1408,9 @@
 
   <!-- 日志列表 -->
   {#if loading && logs.length === 0}
-    <div class="flex justify-center items-center h-64">
-      <span class="inline-block h-8 w-8 border-2 border-current border-t-transparent animate-spin"></span>
-    </div>
+    <PanelCard title={$_('logs.title')} tag="LOADING">
+      <LoadingIndicator label="LOADING LOG STREAM" height="md" />
+    </PanelCard>
   {:else if error}
     <PanelCard title={$_('common.error')} tag="ERR" stripe="red">
       <p class="font-mono text-[11px] uppercase tracking-command text-red-300">{error}</p>
