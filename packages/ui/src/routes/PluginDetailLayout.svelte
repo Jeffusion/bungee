@@ -8,7 +8,7 @@
   import { toast } from '../lib/stores/toast';
   import { getPluginText } from '../lib/utils/plugin-i18n';
   import PluginIcon from '../lib/components/PluginIcon.svelte';
-  import { PanelCard, StatusBadge } from '../lib/components/industrial';
+  import { LoadingIndicator, PanelCard, StatusBadge } from '../lib/components/industrial';
 
   export let params: { name: string; path?: string } = { name: '' };
 
@@ -62,12 +62,7 @@
 <div class="px-6 py-5 space-y-4">
   {#if loading}
     <PanelCard title="LOADING PLUGIN" tag="WAIT">
-      <div class="flex justify-center items-center h-32">
-        <div class="relative h-10 w-10">
-          <div class="absolute inset-0 border border-nexus-500/30"></div>
-          <div class="absolute inset-0 border-t-2 border-nexus-500 animate-spin"></div>
-        </div>
-      </div>
+      <LoadingIndicator label="LOADING PLUGIN" height="sm" />
     </PanelCard>
   {:else if !plugin}
     <PanelCard title={$_('plugins.notFound')} tag="404" stripe="red">

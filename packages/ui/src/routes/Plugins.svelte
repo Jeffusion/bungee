@@ -12,6 +12,7 @@
     IndustrialToggle,
     SystemAlertBar,
     SegmentedControl,
+    LoadingIndicator,
   } from '../lib/components/industrial';
 
   let processing = false;
@@ -219,15 +220,7 @@
   <!-- ===== Plugin list ============================================ -->
   {#if $pluginsLoading}
     <PanelCard title={$_('plugins.title')} tag="LOADING">
-      <div class="flex justify-center items-center h-40">
-        <div class="flex flex-col items-center gap-3">
-          <div class="relative h-10 w-10">
-            <div class="absolute inset-0 border border-nexus-500/30"></div>
-            <div class="absolute inset-0 border-t-2 border-nexus-500 animate-spin"></div>
-          </div>
-          <span class="nx-label">LOADING PLUGINS</span>
-        </div>
-      </div>
+      <LoadingIndicator label="LOADING PLUGINS" />
     </PanelCard>
   {:else if $pluginList.length === 0}
     <PanelCard title={$_('plugins.noPlugins')} tag="EMPTY" stripe="zinc">

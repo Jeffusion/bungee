@@ -17,6 +17,7 @@
     StatusBadge,
     SystemAlertBar,
     IconButton,
+    LoadingIndicator,
   } from '../lib/components/industrial';
 
   let config: AppConfig | null = null;
@@ -211,7 +212,7 @@
       </IconButton>
       <button class="nx-btn-primary" on:click={handleSave} disabled={saving || loading || !!jsonError || !isDirty}>
         {#if saving}
-          <span class="inline-block h-3 w-3 border border-current border-t-transparent animate-spin"></span>
+          <LoadingIndicator label="" size="xs" centered={false} />
         {:else}
           <svg viewBox="0 0 24 24" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2.4">
             <path stroke-linecap="round" stroke-linejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
@@ -224,15 +225,7 @@
 
   {#if loading}
     <PanelCard title={$_('configuration.title')} tag="LOADING">
-      <div class="flex justify-center items-center h-40">
-        <div class="flex flex-col items-center gap-3">
-          <div class="relative h-10 w-10">
-            <div class="absolute inset-0 border border-nexus-500/30"></div>
-            <div class="absolute inset-0 border-t-2 border-nexus-500 animate-spin"></div>
-          </div>
-          <span class="nx-label">LOADING CONFIG</span>
-        </div>
-      </div>
+      <LoadingIndicator label="LOADING CONFIG" />
     </PanelCard>
   {:else if error}
     <PanelCard title={$_('common.error')} tag="ERR" stripe="red">
@@ -396,7 +389,7 @@
       >
         <button slot="action" class="nx-btn-warn" on:click={() => (showRestartModal = true)} disabled={restarting || loading}>
           {#if restarting}
-            <span class="inline-block h-3 w-3 border border-current border-t-transparent animate-spin"></span>
+            <LoadingIndicator label="" size="xs" centered={false} />
           {:else}
             <svg viewBox="0 0 24 24" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2.4">
               <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -413,7 +406,7 @@
       >
         <button slot="action" class="nx-btn-outline" on:click={handleReload} disabled={reloading || loading}>
           {#if reloading}
-            <span class="inline-block h-3 w-3 border border-current border-t-transparent animate-spin"></span>
+            <LoadingIndicator label="" size="xs" centered={false} />
           {:else}
             <svg viewBox="0 0 24 24" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2.4">
               <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
