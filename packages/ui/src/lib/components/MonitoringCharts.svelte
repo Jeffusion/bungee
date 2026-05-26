@@ -6,7 +6,7 @@
   import LineChart from '../components/LineChart.svelte';
   import PieChart from '../components/PieChart.svelte';
   import StackedBarChart from '../components/StackedBarChart.svelte';
-  import { PanelCard, SectionDivider, StatusBadge } from '../components/industrial';
+  import { LoadingIndicator, PanelCard, SectionDivider, StatusBadge } from '../components/industrial';
 
   export let selectedRange: TimeRange = '1h';
   export let onDataLoaded: (history: StatsHistoryV2 | null) => void = () => {};
@@ -127,15 +127,7 @@
 
   {#if loading && !history}
     <PanelCard title="TELEMETRY" tag="LOADING">
-      <div class="flex justify-center items-center h-56">
-        <div class="flex flex-col items-center gap-3">
-          <div class="relative h-10 w-10">
-            <div class="absolute inset-0 border border-nexus-500/30"></div>
-            <div class="absolute inset-0 border-t-2 border-nexus-500 animate-spin"></div>
-          </div>
-          <span class="nx-label">LOADING</span>
-        </div>
-      </div>
+      <LoadingIndicator height="lg" />
     </PanelCard>
   {:else if error}
     <PanelCard title={$_('common.error')} tag="ERR" stripe="red">
