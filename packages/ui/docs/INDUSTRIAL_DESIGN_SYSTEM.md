@@ -165,6 +165,7 @@ top-of-file comment. Read the source — it's the spec.
 | `SystemAlertBar` | Full-width attention strip with action                    | Bottom of a page; maintenance notices               |
 | `IconButton`     | Square hardware-key button for icon-only actions          | Toolbars; header controls                           |
 | `IndustrialToggle` | Flat hard-edged ON/OFF switch with embedded OFF/ON text | Anywhere you'd reach for daisyUI `toggle`. Replaces it everywhere on dark surfaces. |
+| `LoadingIndicator` | Industrial async activity indicator with module/compact hierarchy | Page/panel loading, inline status, and button busy states. Replaces circular spinners and daisyUI loaders. |
 
 **Domain support components (also industrialized):**
 
