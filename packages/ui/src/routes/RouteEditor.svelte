@@ -20,7 +20,7 @@
   import { _ } from '../lib/i18n';
   import { v4 as uuidv4 } from 'uuid';
   import { getModifierKey, isModifierPressed } from '../lib/utils/platform';
-  import { PanelCard, StatusBadge, StatusDot } from '../lib/components/industrial';
+  import { LoadingIndicator, PanelCard, StatusBadge, StatusDot } from '../lib/components/industrial';
 
   export let params: { path?: string } = {};
 
@@ -334,15 +334,7 @@
   </div>
 
   {#if loading}
-    <div class="flex-1 flex justify-center items-center">
-      <div class="flex flex-col items-center gap-3">
-        <div class="relative h-10 w-10">
-          <div class="absolute inset-0 border border-nexus-500/30"></div>
-          <div class="absolute inset-0 border-t-2 border-nexus-500 animate-spin"></div>
-        </div>
-        <span class="nx-label">LOADING ROUTE</span>
-      </div>
-    </div>
+    <LoadingIndicator label="LOADING ROUTE" class="flex-1" height="none" />
   {:else}
     <div class="max-w-7xl mx-auto w-full flex flex-col lg:flex-row gap-4 p-4 sm:p-6 pb-32">
       <!-- ===== Side nav =========================================== -->
@@ -641,7 +633,7 @@
           </button>
           <button class="nx-btn-primary" disabled={!isValid || saving} on:click={handleSave}>
             {#if saving}
-              <span class="inline-block h-3 w-3 border border-current border-t-transparent animate-spin"></span>
+              <LoadingIndicator label="" size="xs" centered={false} />
             {:else}
               <svg viewBox="0 0 24 24" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2.4">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
