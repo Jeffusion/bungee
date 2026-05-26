@@ -1,3 +1,24 @@
+# [4.1.0](https://github.com/jeffusion/bungee/compare/v4.0.0...v4.1.0) (2026-05-26)
+
+
+### Features
+
+* **core/api:** expose Service endpoints in REST API and support new config model ([cf77d18](https://github.com/jeffusion/bungee/commit/cf77d1876fef23afa0571c6228544c843cfc0922))
+* **core:** implement inline endpoints to service migration and v2-v3 migrations ([64dc901](https://github.com/jeffusion/bungee/commit/64dc901c05eec094eb32f7f317d16f852cf19d0c))
+* **ui/i18n:** add Service, Endpoint, and design system translation keys ([52c0944](https://github.com/jeffusion/bungee/commit/52c0944f9636998fc160ca118b9aa44b0aca2972))
+* **ui:** add industrial design system primitive component library ([cc00f9a](https://github.com/jeffusion/bungee/commit/cc00f9a91c0b7f67d04a762dd371796aa3e4e34f))
+* **ui:** add industrial loading indicator ([2f30130](https://github.com/jeffusion/bungee/commit/2f30130b57424c9d0d07ece8bf964e09f0a8a314))
+* **ui:** add new route/service editor components and sections ([e60629b](https://github.com/jeffusion/bungee/commit/e60629b63e30619c8372a8499d6ae211eb9c8273))
+* **ui:** add service API helpers and route-service view model utilities ([0076023](https://github.com/jeffusion/bungee/commit/0076023ce71a2018b3a1de85b9cd590ec515ea8d))
+* **ui:** add Service management pages and update Dashboard and Configuration ([1507b2b](https://github.com/jeffusion/bungee/commit/1507b2beca2d6c498cf3ac2dee2bfd5d076d64b2))
+* **ui:** enhance configuration status and operations layout ([767d9e7](https://github.com/jeffusion/bungee/commit/767d9e71d1a89bfb2e6fe7943f37d0253dc99f10))
+* **ui:** introduce industrial design system, theme tokens, and base styles ([c93b274](https://github.com/jeffusion/bungee/commit/c93b2748be8fbda8a698791895cd2979dfb03c0b))
+* **ui:** refactor RoutesIndex and RouteEditor for Service model support ([bc2f999](https://github.com/jeffusion/bungee/commit/bc2f999a27597ffca62e9bf852c5c3a260c5181a))
+* **ui:** update App.svelte root layout for v3 navigation and theme ([0ec3781](https://github.com/jeffusion/bungee/commit/0ec37814eb872068a1bbc7df64b25ef97f081500))
+* **ui:** update DesignSystem page with industrial theme primitives ([62a14dd](https://github.com/jeffusion/bungee/commit/62a14dd9fe0e16ed4a8bd8279588d375d70fadd9))
+* **ui:** update Login, Logs, Plugins, and NotFound pages for v3 theme ([f173eae](https://github.com/jeffusion/bungee/commit/f173eaebd9ec85bd5551068d8ed1c1613fb926b4))
+* **ui:** update types and validators for V3 Service and snake_case model ([9d10ca9](https://github.com/jeffusion/bungee/commit/9d10ca92f3d0effa695d04ba473b8d029585d0f3))
+
 # [4.0.0](https://github.com/jeffusion/bungee/compare/v3.3.1...v4.0.0) (2026-05-05)
 
 
