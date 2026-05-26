@@ -12,6 +12,7 @@
     SystemAlertBar,
     IconButton,
     IndustrialToggle,
+    LoadingIndicator,
   } from '../lib/components/industrial';
   import FeatureBadge from '../lib/components/FeatureBadge.svelte';
   import HealthSummary from '../lib/components/HealthSummary.svelte';
@@ -315,6 +316,40 @@
         </div>
       </div>
       <p class="mt-4 font-mono text-[10px] uppercase tracking-command text-zinc-500">// auto-tones: ≥90% red · ≥70% amber · &lt; 70% white</p>
+    </PanelCard>
+
+    <PanelCard title="Data Loading" tag="WAIT">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div class="border border-carbon-600 bg-carbon-950/60">
+          <LoadingIndicator label="LOADING ROUTE INVENTORY" size="lg" height="sm" />
+          <div class="border-t border-carbon-600 px-3 py-2">
+            <span class="nx-label-sm">// PAGE / EMPTY STATE</span>
+          </div>
+        </div>
+        <div class="border border-carbon-600 bg-carbon-950/60">
+          <LoadingIndicator label="SYNCING PANEL" size="md" height="sm" />
+          <div class="border-t border-carbon-600 px-3 py-2">
+            <span class="nx-label-sm">// PANEL WAIT</span>
+          </div>
+        </div>
+        <div class="flex flex-col justify-center gap-3 border border-carbon-600 bg-carbon-950/60 p-4 text-nexus-300">
+          <LoadingIndicator label="SYNCING" size="sm" centered={false} />
+          <LoadingIndicator label="FETCHING LOG BODY" size="xs" centered={false} />
+          <span class="nx-label-sm text-zinc-500">// INLINE STATUS</span>
+        </div>
+        <div class="flex flex-col justify-center gap-3 border border-carbon-600 bg-carbon-950/60 p-4">
+          <button class="nx-btn-primary nx-btn-sm" disabled>
+            <LoadingIndicator label="" size="xs" centered={false} />
+            APPLYING
+          </button>
+          <button class="nx-btn-outline nx-btn-sm" disabled>
+            <LoadingIndicator label="" size="xs" centered={false} />
+            RELOADING
+          </button>
+          <span class="nx-label-sm">// BUTTON BUSY</span>
+        </div>
+      </div>
+      <p class="mt-4 font-mono text-[10px] uppercase tracking-command text-zinc-500">// one loading language: breathing dots for buttons | scaled hardware equalizer for status, panels, pages</p>
     </PanelCard>
   </section>
 

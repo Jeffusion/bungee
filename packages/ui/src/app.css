@@ -235,6 +235,320 @@
   }
 
   /* ---------------------------------------------------------------
+   * Loading indicator — one equalizer language scaled from
+   * inline status to full-page loading, plus tiny button dots.
+   *
+   * Motifs:
+   *   nx-load-xs   — 3 breathing 2×2 px dots (button busy)
+   *   nx-load-sm   — compact 4-bar hardware EQ
+   *   nx-load-md   — panel-scale 8-bar hardware EQ
+   *   nx-load-lg   — page-scale 12-bar hardware EQ
+   *
+   * The Svelte component `<LoadingIndicator>` is the public API;
+   * these classes back it and can also be used ad-hoc.
+   * --------------------------------------------------------------- */
+  .nx-load {
+    @apply relative inline-block;
+  }
+
+  /* ---- xs : 3 breathing dots ---------------------------------- */
+  .nx-load-xs {
+    --nx-load-xs-active: #f97316;
+    --nx-load-xs-idle: rgba(249, 115, 22, 0.2);
+    width: 12px;
+    height: 2px;
+    background: transparent;
+  }
+  .nx-load-xs::before {
+    content: '';
+    display: block;
+    width: 2px;
+    height: 2px;
+    background-color: var(--nx-load-xs-active);
+    animation: nx-breathe-xs 1.2s infinite;
+  }
+
+  @keyframes nx-breathe-xs {
+    0%, 100% {
+      background-color: var(--nx-load-xs-active);
+      box-shadow:
+        5px 0 0 var(--nx-load-xs-idle),
+        10px 0 0 var(--nx-load-xs-idle);
+    }
+    33.33% {
+      background-color: var(--nx-load-xs-idle);
+      box-shadow:
+        5px 0 0 var(--nx-load-xs-active),
+        10px 0 0 var(--nx-load-xs-idle);
+    }
+    66.66% {
+      background-color: var(--nx-load-xs-idle);
+      box-shadow:
+        5px 0 0 var(--nx-load-xs-idle),
+        10px 0 0 var(--nx-load-xs-active);
+    }
+  }
+
+  .nx-btn-primary .nx-load-xs {
+    --nx-load-xs-active: #0a0b0e;
+    --nx-load-xs-idle: rgba(10, 11, 14, 0.28);
+  }
+
+  .nx-btn-outline .nx-load-xs,
+  .nx-btn-ghost .nx-load-xs {
+    --nx-load-xs-active: #f4f4f5;
+    --nx-load-xs-idle: rgba(244, 244, 245, 0.28);
+  }
+
+  /* ---- sm : 4 vertical bars bouncing like a hardware equalizer ---- */
+  .nx-load-sm {
+    width: 32px;
+    height: 16px;
+    background-image:
+      linear-gradient(#2a2f3a, #2a2f3a),
+      linear-gradient(#2a2f3a, #2a2f3a),
+      linear-gradient(#2a2f3a, #2a2f3a),
+      linear-gradient(#2a2f3a, #2a2f3a);
+    background-repeat: no-repeat;
+    background-size: 4px 100%;
+    background-position:
+      2px bottom,
+      10px bottom,
+      18px bottom,
+      26px bottom;
+  }
+  .nx-load-sm::before {
+    content: '';
+    display: block;
+    width: 100%;
+    height: 100%;
+    background-image:
+      linear-gradient(#f97316, #f97316),
+      linear-gradient(#f97316, #f97316),
+      linear-gradient(#f97316, #f97316),
+      linear-gradient(#f97316, #f97316);
+    background-repeat: no-repeat;
+    background-position:
+      2px bottom,
+      10px bottom,
+      18px bottom,
+      26px bottom;
+    animation: nx-eq-sm 1s ease-in-out infinite;
+  }
+
+  @keyframes nx-eq-sm {
+    0%, 100% {
+      background-size:
+        4px 40%,
+        4px 70%,
+        4px 100%,
+        4px 50%;
+    }
+    25% {
+      background-size:
+        4px 80%,
+        4px 40%,
+        4px 60%,
+        4px 90%;
+    }
+    50% {
+      background-size:
+        4px 50%,
+        4px 90%,
+        4px 30%,
+        4px 60%;
+    }
+    75% {
+      background-size:
+        4px 90%,
+        4px 50%,
+        4px 80%,
+        4px 40%;
+    }
+  }
+
+  /* ---- md : panel-scale hardware equalizer ---------------------- */
+  .nx-load-md {
+    width: 72px;
+    height: 24px;
+    background-image:
+      linear-gradient(#2a2f3a, #2a2f3a),
+      linear-gradient(#2a2f3a, #2a2f3a),
+      linear-gradient(#2a2f3a, #2a2f3a),
+      linear-gradient(#2a2f3a, #2a2f3a),
+      linear-gradient(#2a2f3a, #2a2f3a),
+      linear-gradient(#2a2f3a, #2a2f3a),
+      linear-gradient(#2a2f3a, #2a2f3a),
+      linear-gradient(#2a2f3a, #2a2f3a);
+    background-repeat: no-repeat;
+    background-size: 5px 100%;
+    background-position:
+      2px bottom,
+      11px bottom,
+      20px bottom,
+      29px bottom,
+      38px bottom,
+      47px bottom,
+      56px bottom,
+      65px bottom;
+  }
+  .nx-load-md::before {
+    content: '';
+    display: block;
+    width: 100%;
+    height: 100%;
+    background-image:
+      linear-gradient(#f97316, #f97316),
+      linear-gradient(#f97316, #f97316),
+      linear-gradient(#f97316, #f97316),
+      linear-gradient(#f97316, #f97316),
+      linear-gradient(#f97316, #f97316),
+      linear-gradient(#f97316, #f97316),
+      linear-gradient(#f97316, #f97316),
+      linear-gradient(#f97316, #f97316);
+    background-repeat: no-repeat;
+    background-position:
+      2px bottom,
+      11px bottom,
+      20px bottom,
+      29px bottom,
+      38px bottom,
+      47px bottom,
+      56px bottom,
+      65px bottom;
+    animation: nx-eq-md 1.15s ease-in-out infinite;
+  }
+
+  @keyframes nx-eq-md {
+    0%, 100% {
+      background-size: 5px 45%, 5px 75%, 5px 100%, 5px 60%, 5px 85%, 5px 35%, 5px 70%, 5px 50%;
+    }
+    25% {
+      background-size: 5px 80%, 5px 40%, 5px 65%, 5px 95%, 5px 45%, 5px 70%, 5px 100%, 5px 55%;
+    }
+    50% {
+      background-size: 5px 55%, 5px 95%, 5px 35%, 5px 70%, 5px 100%, 5px 50%, 5px 80%, 5px 42%;
+    }
+    75% {
+      background-size: 5px 95%, 5px 55%, 5px 85%, 5px 40%, 5px 65%, 5px 90%, 5px 52%, 5px 75%;
+    }
+  }
+
+  /* ---- lg : page-scale hardware equalizer ----------------------- */
+  .nx-load-lg {
+    width: 138px;
+    height: 40px;
+    background-image:
+      linear-gradient(#2a2f3a, #2a2f3a),
+      linear-gradient(#2a2f3a, #2a2f3a),
+      linear-gradient(#2a2f3a, #2a2f3a),
+      linear-gradient(#2a2f3a, #2a2f3a),
+      linear-gradient(#2a2f3a, #2a2f3a),
+      linear-gradient(#2a2f3a, #2a2f3a),
+      linear-gradient(#2a2f3a, #2a2f3a),
+      linear-gradient(#2a2f3a, #2a2f3a),
+      linear-gradient(#2a2f3a, #2a2f3a),
+      linear-gradient(#2a2f3a, #2a2f3a),
+      linear-gradient(#2a2f3a, #2a2f3a),
+      linear-gradient(#2a2f3a, #2a2f3a);
+    background-repeat: no-repeat;
+    background-size: 6px 100%;
+    background-position:
+      0 bottom,
+      12px bottom,
+      24px bottom,
+      36px bottom,
+      48px bottom,
+      60px bottom,
+      72px bottom,
+      84px bottom,
+      96px bottom,
+      108px bottom,
+      120px bottom,
+      132px bottom;
+  }
+  .nx-load-lg::before {
+    content: '';
+    display: block;
+    width: 100%;
+    height: 100%;
+    background-image:
+      linear-gradient(#f97316, #f97316),
+      linear-gradient(#f97316, #f97316),
+      linear-gradient(#f97316, #f97316),
+      linear-gradient(#f97316, #f97316),
+      linear-gradient(#f97316, #f97316),
+      linear-gradient(#f97316, #f97316),
+      linear-gradient(#f97316, #f97316),
+      linear-gradient(#f97316, #f97316),
+      linear-gradient(#f97316, #f97316),
+      linear-gradient(#f97316, #f97316),
+      linear-gradient(#f97316, #f97316),
+      linear-gradient(#f97316, #f97316);
+    background-repeat: no-repeat;
+    background-position:
+      0 bottom,
+      12px bottom,
+      24px bottom,
+      36px bottom,
+      48px bottom,
+      60px bottom,
+      72px bottom,
+      84px bottom,
+      96px bottom,
+      108px bottom,
+      120px bottom,
+      132px bottom;
+    animation: nx-eq-lg 1.25s ease-in-out infinite;
+  }
+
+  @keyframes nx-eq-lg {
+    0%, 100% {
+      background-size: 6px 44%, 6px 70%, 6px 96%, 6px 58%, 6px 82%, 6px 100%, 6px 48%, 6px 76%, 6px 62%, 6px 88%, 6px 52%, 6px 72%;
+    }
+    25% {
+      background-size: 6px 78%, 6px 42%, 6px 66%, 6px 94%, 6px 54%, 6px 72%, 6px 100%, 6px 50%, 6px 86%, 6px 64%, 6px 92%, 6px 46%;
+    }
+    50% {
+      background-size: 6px 56%, 6px 92%, 6px 38%, 6px 74%, 6px 100%, 6px 52%, 6px 68%, 6px 96%, 6px 46%, 6px 80%, 6px 60%, 6px 88%;
+    }
+    75% {
+      background-size: 6px 100%, 6px 60%, 6px 84%, 6px 44%, 6px 70%, 6px 90%, 6px 54%, 6px 78%, 6px 96%, 6px 50%, 6px 74%, 6px 64%;
+    }
+  }
+
+  /* ---- Reduced motion ----------------------------------------- */
+  @media (prefers-reduced-motion: reduce) {
+    .nx-load-xs::before {
+      animation: none;
+      background-color: var(--nx-load-xs-active);
+      box-shadow:
+        5px 0 0 var(--nx-load-xs-active),
+        10px 0 0 var(--nx-load-xs-active);
+      opacity: 0.6;
+    }
+    .nx-load-sm::before {
+      animation: none;
+      background-size:
+        4px 40%,
+        4px 70%,
+        4px 100%,
+        4px 50%;
+      opacity: 0.6;
+    }
+    .nx-load-md::before {
+      animation: none;
+      background-size: 5px 45%, 5px 75%, 5px 100%, 5px 60%, 5px 85%, 5px 35%, 5px 70%, 5px 50%;
+      opacity: 0.6;
+    }
+    .nx-load-lg::before {
+      animation: none;
+      background-size: 6px 44%, 6px 70%, 6px 96%, 6px 58%, 6px 82%, 6px 100%, 6px 48%, 6px 76%, 6px 62%, 6px 88%, 6px 52%, 6px 72%;
+      opacity: 0.6;
+    }
+  }
+
+  /* ---------------------------------------------------------------
    * Side-nav badge — small data chip that sits on the right side of
    * a builder nav row. Earlier we styled this inline with just a
    * carbon-500 border, which made numeric values like "1" appear to
