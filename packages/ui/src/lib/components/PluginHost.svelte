@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, afterUpdate } from 'svelte';
+  import { LoadingIndicator } from './industrial';
 
   export let pluginName: string;
   export let path: string;
@@ -73,8 +74,8 @@
 
 <div class="flex-1 w-full h-[calc(100vh-64px)] relative bg-base-100">
   {#if loading}
-    <div class="absolute inset-0 flex items-center justify-center bg-base-100 z-10">
-      <span class="loading loading-spinner loading-lg"></span>
+    <div class="absolute inset-0 flex items-center justify-center bg-carbon-950/95 z-10">
+      <LoadingIndicator label="LOADING PLUGIN UI" size="lg" height="none" />
     </div>
   {/if}
 

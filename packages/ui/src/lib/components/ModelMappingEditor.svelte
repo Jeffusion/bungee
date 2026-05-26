@@ -12,6 +12,7 @@
     type RowOptionSet,
     type RowProviderFilter
   } from './model-mapping/filtering';
+  import { LoadingIndicator } from './industrial';
 
   type ModelMapping = { source: string; target: string };
 
@@ -263,11 +264,7 @@
     </button>
 
     {#if loading}
-      <span
-        class="loading loading-spinner loading-xs text-base-content/50"
-        aria-label="loading model catalog"
-        title="loading"
-      ></span>
+      <LoadingIndicator label="" size="xs" centered={false} />
     {/if}
   </div>
 </div>

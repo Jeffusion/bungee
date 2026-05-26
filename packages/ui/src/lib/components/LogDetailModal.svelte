@@ -5,6 +5,7 @@
   import type { LogEntry } from '../api/logs';
   import { loadBodyById, loadHeaderById } from '../api/logs';
   import { getConfig } from '../api/config';
+  import { LoadingIndicator } from './industrial';
 
   export let log: LogEntry;
   export let onClose: () => void;
@@ -731,8 +732,8 @@
                     <div>
                       <div class="text-sm font-semibold mb-2">{$_('logs.detail.requestHeaders')}</div>
                       {#if loadingOriginalRequestHeaders}
-                        <div class="flex items-center gap-2">
-                          <span class="loading loading-spinner loading-sm"></span>
+                        <div class="flex items-center gap-2 text-sm text-zinc-300">
+                          <LoadingIndicator label="" size="sm" centered={false} />
                           <span class="text-sm">{$_('common.loading')}</span>
                         </div>
                       {:else if originalRequestHeadersError}
@@ -769,8 +770,8 @@
                     <div>
                       <div class="text-sm font-semibold mb-2">{$_('logs.detail.requestBody')}</div>
                       {#if loadingOriginalRequestBody}
-                        <div class="flex items-center gap-2">
-                          <span class="loading loading-spinner loading-sm"></span>
+                        <div class="flex items-center gap-2 text-sm text-zinc-300">
+                          <LoadingIndicator label="" size="sm" centered={false} />
                           <span class="text-sm">{$_('common.loading')}</span>
                         </div>
                       {:else if originalRequestBodyError}
@@ -810,8 +811,8 @@
                     <div>
                       <div class="text-sm font-semibold mb-2">{$_('logs.detail.requestHeaders')}</div>
                       {#if loadingRequestHeaders}
-                        <div class="flex items-center gap-2">
-                          <span class="loading loading-spinner loading-sm"></span>
+                        <div class="flex items-center gap-2 text-sm text-zinc-300">
+                          <LoadingIndicator label="" size="sm" centered={false} />
                           <span class="text-sm">{$_('common.loading')}</span>
                         </div>
                       {:else if requestHeadersError}
@@ -848,8 +849,8 @@
                     <div>
                       <div class="text-sm font-semibold mb-2">{$_('logs.detail.requestBody')}</div>
                       {#if loadingRequestBody}
-                        <div class="flex items-center gap-2">
-                          <span class="loading loading-spinner loading-sm"></span>
+                        <div class="flex items-center gap-2 text-sm text-zinc-300">
+                          <LoadingIndicator label="" size="sm" centered={false} />
                           <span class="text-sm">{$_('common.loading')}</span>
                         </div>
                       {:else if requestBodyError}
@@ -889,8 +890,8 @@
                     <div>
                       <div class="text-sm font-semibold mb-2">{$_('logs.detail.responseHeaders')}</div>
                       {#if loadingResponseHeaders}
-                        <div class="flex items-center gap-2">
-                          <span class="loading loading-spinner loading-sm"></span>
+                        <div class="flex items-center gap-2 text-sm text-zinc-300">
+                          <LoadingIndicator label="" size="sm" centered={false} />
                           <span class="text-sm">{$_('common.loading')}</span>
                         </div>
                       {:else if responseHeadersError}
@@ -927,8 +928,8 @@
                     <div>
                       <div class="text-sm font-semibold mb-2">{$_('logs.detail.responseBody')}</div>
                       {#if loadingResponseBody}
-                        <div class="flex items-center gap-2">
-                          <span class="loading loading-spinner loading-sm"></span>
+                        <div class="flex items-center gap-2 text-sm text-zinc-300">
+                          <LoadingIndicator label="" size="sm" centered={false} />
                           <span class="text-sm">{$_('common.loading')}</span>
                         </div>
                       {:else if responseBodyError}

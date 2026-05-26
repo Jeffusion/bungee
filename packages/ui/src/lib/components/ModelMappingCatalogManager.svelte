@@ -3,6 +3,7 @@
   import { PluginsAPI, type ModelMappingCatalogStatus } from '../api/plugins';
   import { _ } from '../i18n';
   import { toast } from '../stores/toast';
+  import { LoadingIndicator } from './industrial';
 
   let loading = true;
   let refreshing = false;
@@ -120,16 +121,14 @@
 
     <button class="nx-btn-primary nx-btn-sm" on:click={refreshCatalog} disabled={refreshing || loading}>
       {#if refreshing}
-        <span class="inline-block h-2.5 w-2.5 border border-current border-t-transparent animate-spin"></span>
+        <LoadingIndicator label="" size="xs" centered={false} />
       {/if}
       {$_('plugins.modelMappingCatalog.refreshAction')}
     </button>
   </div>
 
   {#if loading}
-    <div class="flex justify-center items-center h-48">
-      <span class="inline-block h-8 w-8 border-2 border-current border-t-transparent animate-spin"></span>
-    </div>
+    <LoadingIndicator label={$_('common.loading')} height="md" />
   {:else if status}
     <!-- Summary Stats -->
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
