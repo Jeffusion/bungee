@@ -8,6 +8,7 @@
   import { toast } from '../../stores/toast';
   import ConfirmDialog from '../ConfirmDialog.svelte';
   import UpstreamsSection from './UpstreamsSection.svelte';
+  import { LoadingIndicator } from '../industrial';
 
   export let route: Route;
   export let errors: ValidationError[] = [];
@@ -449,7 +450,7 @@
               disabled={savingService || !saveServiceName.trim() || (route.endpoints?.length ?? 0) === 0}
             >
               {#if savingService}
-                <span class="loading loading-spinner loading-xs"></span>
+                <LoadingIndicator label="" size="xs" centered={false} />
               {/if}
               {$_('routeEditor.saveAsServiceButton')}
             </button>

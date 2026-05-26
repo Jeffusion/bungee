@@ -3,6 +3,7 @@
   import { push } from 'svelte-spa-router';
   import { _ } from '../i18n';
   import UpstreamsModal from './UpstreamsModal.svelte';
+  import { LoadingIndicator } from './industrial';
 
   export let route: Route;
   export let services: Service[] = [];
@@ -99,7 +100,7 @@
             <li>
               <button on:click={onDuplicate} disabled={isDuplicating}>
                 {#if isDuplicating}
-                  <span class="loading loading-spinner loading-xs"></span>
+                  <LoadingIndicator label="" size="xs" centered={false} />
                   <span>{$_('routeCard.duplicating')}</span>
                 {:else}
                   <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -112,7 +113,7 @@
             <li>
               <button class="text-error" on:click={onDelete} disabled={isDeleting}>
                 {#if isDeleting}
-                  <span class="loading loading-spinner loading-xs"></span>
+                  <LoadingIndicator label="" size="xs" centered={false} />
                   <span>{$_('routeCard.deleting')}</span>
                 {:else}
                   <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

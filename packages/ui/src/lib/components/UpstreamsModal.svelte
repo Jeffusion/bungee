@@ -5,6 +5,7 @@
   import { RoutesAPI } from '../api/routes';
   import { toast } from '../stores/toast';
   import { _ } from '../i18n';
+  import { LoadingIndicator } from './industrial';
 
   export let open = false;
   export let route: Route;
@@ -391,7 +392,7 @@
     <!-- 保存状态提示 -->
     {#if saving}
       <div class="border-l-2 border-l-nexus-500 bg-nexus-500/5 px-3 py-2 mt-2 flex items-center gap-2 font-mono text-[11px] uppercase tracking-command text-nexus-200">
-        <span class="inline-block h-3 w-3 border border-current border-t-transparent animate-spin"></span>
+        <LoadingIndicator label="" size="xs" centered={false} />
         <span>{$_('upstreamsModal.saving')}</span>
       </div>
     {/if}
@@ -403,7 +404,7 @@
         disabled={saving}
       >
         {#if saving}
-          <span class="inline-block h-3 w-3 border border-current border-t-transparent animate-spin"></span>
+          <LoadingIndicator label="" size="xs" centered={false} />
         {/if}
         {$_('upstreamsModal.close')}
       </button>
