@@ -21,7 +21,7 @@
   import PluginsPage from './routes/Plugins.svelte';
   import PluginDetailLayout from './routes/PluginDetailLayout.svelte';
   import DesignSystem from './routes/DesignSystem.svelte';
-  import { HudClock, StatusBadge } from './lib/components/industrial';
+  import { HudClock, LoadingIndicator, StatusBadge } from './lib/components/industrial';
 
   let secureChannel = false;
 
@@ -109,13 +109,7 @@
 {#if $isLoading}
   <!-- i18n bootstrap -->
   <div class="min-h-screen flex items-center justify-center bg-carbon-950">
-    <div class="flex flex-col items-center gap-4">
-      <div class="relative h-12 w-12">
-        <div class="absolute inset-0 border border-nexus-500/30"></div>
-        <div class="absolute inset-0 border-t-2 border-nexus-500 animate-spin"></div>
-      </div>
-      <p class="nx-label">INITIALIZING</p>
-    </div>
+    <LoadingIndicator label="INITIALIZING" size="lg" height="none" />
   </div>
 {:else}
   <div class="min-h-screen bg-carbon-950 text-zinc-200 flex flex-col">
