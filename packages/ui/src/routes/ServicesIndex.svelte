@@ -18,6 +18,7 @@
     StatusDot,
     StatusBadge,
     IconButton,
+    LoadingIndicator,
   } from '../lib/components/industrial';
 
   // ----- state ---------------------------------------------------------
@@ -302,15 +303,7 @@
   <!-- ===== Content ================================================ -->
   {#if loading}
     <PanelCard title={$_('services.title')} tag="LOADING">
-      <div class="flex justify-center items-center h-40">
-        <div class="flex flex-col items-center gap-3">
-          <div class="relative h-10 w-10">
-            <div class="absolute inset-0 border border-nexus-500/30"></div>
-            <div class="absolute inset-0 border-t-2 border-nexus-500 animate-spin"></div>
-          </div>
-          <span class="nx-label">LOADING SERVICE INVENTORY</span>
-        </div>
-      </div>
+      <LoadingIndicator label="LOADING SERVICE INVENTORY" />
     </PanelCard>
   {:else if error}
     <PanelCard title={$_('common.error')} tag="ERR" stripe="red">
@@ -607,7 +600,7 @@
               data-testid="confirm-delete-btn"
             >
               {#if deletingNames.has(serviceToDelete.name)}
-                <span class="inline-block h-3 w-3 border border-current border-t-transparent animate-spin"></span>
+                <LoadingIndicator label="" size="xs" centered={false} />
               {/if}
               {$_('common.delete')}
             </button>
